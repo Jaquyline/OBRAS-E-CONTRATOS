@@ -1,24 +1,18 @@
 // storage-shim.js
 //
-// O painel foi originalmente construído como um artifact do Claude, que
-// disponibiliza uma API `window.storage` (get/set/delete/list) para
-// persistência entre sessões. Fora do Claude essa API não existe — este
-// arquivo recria a mesma "forma" (mesmos métodos, mesma assinatura, mesmo
-// formato de retorno) usando o localStorage do navegador por baixo dos
-// panos, para que o componente do painel (DashboardConstrutora.jsx) não
-// precise de nenhuma alteração.
+// Substitui o `window.storage` original (da versão em artifact do Claude)
+// por um armazenamento de verdade, guardado na nuvem via Supabase — usando
+// a mesma tabela genérica de chave/valor (`kv_store`) que já foi criada no
+// projeto "OBRAS & CONTRATOS" do Supabase.
 //
-// Importante: como usa localStorage, os dados ficam guardados só neste
-// navegador, neste computador. Trocar de navegador, usar aba anônima, ou
-// limpar os dados do site apaga o que foi salvo. Para uso por uma única
-// pessoa, num navegador principal, isso é suficiente — não é um banco de
-// dados compartilhado entre pessoas ou dispositivos.
-
-const PREFIXO = "dashboard-obras-contratos";
-
-function chaveCompleta(key, shared) {
-  return `${PREFIXO}:${shared ? "shared" : "user"}:${key}`;
-}
+// Mantém exatamente a mesma "forma" da API original (get/set/delete/list,
+// mesmo formato de retorno), então o componente do painel
+// (DashboardConstrutora.jsx) não precisa de NENHUMA alteração.
+//
+// Diferença em relação à versão anterior (localStorage): agora os dados
+// ficam na nuvem, protegidos por login — acessíveis de qualquer computador
+// em que você fizer login, não só deste navegador.
+import { supabase } from "./lib/supabaseClient.js";
 
 function instalarStorageShim() {
   if (typeof window === "undefined") return;
@@ -26,9 +20,17 @@ function instalarStorageShim() {
   window.storage = {
     async get(key, shared = false) {
       try {
-        const raw = window.localStorage.getItem(chaveCompleta(key, shared));
-        if (raw === null) return null;
-        return { key, value: raw, shared };
+        const { data, error } = await supabase
+          .from("kv_store")
+          .select("value")
+          .eq("key", key)
+          .maybeSingle();
+        if (error) {
+          console.error("storage.get falhou:", error);
+          return null;
+        }
+        if (!data) return null;
+        return { key, value: data.value, shared };
       } catch (err) {
         console.error("storage.get falhou:", err);
         return null;
@@ -37,7 +39,13 @@ function instalarStorageShim() {
 
     async set(key, value, shared = false) {
       try {
-        window.localStorage.setItem(chaveCompleta(key, shared), value);
+        const { error } = await supabase
+          .from("kv_store")
+          .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: "key" });
+        if (error) {
+          console.error("storage.set falhou:", error);
+          return null;
+        }
         return { key, value, shared };
       } catch (err) {
         console.error("storage.set falhou:", err);
@@ -47,7 +55,11 @@ function instalarStorageShim() {
 
     async delete(key, shared = false) {
       try {
-        window.localStorage.removeItem(chaveCompleta(key, shared));
+        const { error } = await supabase.from("kv_store").delete().eq("key", key);
+        if (error) {
+          console.error("storage.delete falhou:", error);
+          return null;
+        }
         return { key, deleted: true, shared };
       } catch (err) {
         console.error("storage.delete falhou:", err);
@@ -57,18 +69,12 @@ function instalarStorageShim() {
 
     async list(prefix = "", shared = false) {
       try {
-        const prefixoCompleto = chaveCompleta(prefix, shared);
-        const marcador = `${PREFIXO}:${shared ? "shared" : "user"}:`;
-        const keys = [];
-        for (let i = 0; i < window.localStorage.length; i++) {
-          const k = window.localStorage.key(i);
-          if (k && k.startsWith(prefixoCompleto)) {
-            keys.push(k.slice(marcador.length));
-          }
-        }
-        return { keys, prefix, shared };
+        let query = supabase.from("kv_store").select("key");
+        if (prefix) query = query.like("key", `${prefix}%`);
+        const { data, error } = await query;
+        if (error) return null;
+        return { keys: (data || []).map((r) => r.key), prefix, shared };
       } catch (err) {
-        console.error("storage.list falhou:", err);
         return null;
       }
     },
