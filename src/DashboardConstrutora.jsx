@@ -2665,8 +2665,8 @@ export default function DashboardConstrutora() {
     const file = e.target.files[0];
     e.target.value = "";
     if (!file) return;
-    if (file.size > 3 * 1024 * 1024) {
-      setUploadErrorDocumento("Arquivo muito grande — máximo recomendado de 3 MB por documento.");
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadErrorDocumento("Arquivo muito grande — máximo recomendado de 10 MB por documento.");
       return;
     }
     setUploadErrorDocumento(null);
@@ -2833,8 +2833,8 @@ export default function DashboardConstrutora() {
   // (útil para diferenciar, por exemplo, o RG de cada sócio).
   async function handleAnexarDocumentoCategoria(categoria, file) {
     if (!file) return;
-    if (file.size > 3 * 1024 * 1024) {
-      setUploadErrorDocumento("Arquivo muito grande — máximo recomendado de 3 MB por documento.");
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadErrorDocumento("Arquivo muito grande — máximo recomendado de 10 MB por documento.");
       return;
     }
     setUploadErrorDocumento(null);
@@ -2911,8 +2911,8 @@ export default function DashboardConstrutora() {
     const file = e.target.files[0];
     e.target.value = "";
     if (!file) return;
-    if (file.size > 3 * 1024 * 1024) {
-      setPdfImportErrorFornecedor("Arquivo muito grande — máximo recomendado de 3 MB.");
+    if (file.size > 10 * 1024 * 1024) {
+      setPdfImportErrorFornecedor("Arquivo muito grande — máximo recomendado de 10 MB.");
       return;
     }
     setPdfImportErrorFornecedor(null);
@@ -3055,8 +3055,8 @@ export default function DashboardConstrutora() {
     const file = e.target.files[0];
     e.target.value = "";
     if (!file) return;
-    if (file.size > 3 * 1024 * 1024) {
-      setPdfImportErrorServico("Arquivo muito grande — máximo recomendado de 3 MB.");
+    if (file.size > 10 * 1024 * 1024) {
+      setPdfImportErrorServico("Arquivo muito grande — máximo recomendado de 10 MB.");
       return;
     }
     setPdfImportErrorServico(null);
