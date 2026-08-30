@@ -342,6 +342,47 @@ function marcarDuplicadosExtrato(lancamentosNovos, extratoExistente) {
   });
 }
 
+// Sugere, para cada lançamento de crédito (entrada) na prévia de importação,
+// uma parcela pendente em "Valores a receber" com o MESMO valor exato — só
+// sugere quando há uma única parcela pendente com aquele valor (sem
+// ambiguidade); se houver mais de uma parcela pendente com o mesmo valor, ou
+// nenhuma, deixa em branco para o usuário escolher manualmente. Evita
+// sugerir a mesma parcela duas vezes dentro do mesmo lote de importação.
+// Só ajuda a pré-selecionar — o usuário sempre pode trocar ou limpar antes
+// de confirmar.
+function sugerirParcelasReceber(lancamentosNovos, valoresReceberAtuais) {
+  const usadasNoLote = new Set();
+  return lancamentosNovos.map((l) => {
+    if (Number(l.valor) <= 0) return l;
+    const candidatas = valoresReceberAtuais.filter(
+      (v) => v.status !== "pago" && Number(v.valor).toFixed(2) === Number(l.valor).toFixed(2) && !usadasNoLote.has(v.id)
+    );
+    if (candidatas.length !== 1) return l;
+    usadasNoLote.add(candidatas[0].id);
+    return { ...l, parcelaReceberId: candidatas[0].id };
+  });
+}
+
+// Mesma lógica de sugerirParcelasReceber, só que para o lado das saídas:
+// sugere, para cada lançamento de débito na prévia de importação, uma
+// parcela pendente em "Contas a pagar" com o mesmo valor exato — só quando
+// há uma única candidata sem ambiguidade.
+function sugerirContasPagar(lancamentosNovos, contasPagarAtuais) {
+  const usadasNoLote = new Set();
+  return lancamentosNovos.map((l) => {
+    if (Number(l.valor) >= 0) return l;
+    const candidatas = contasPagarAtuais.filter(
+      (c) =>
+        c.status !== "pago" &&
+        Number(c.valor).toFixed(2) === Number(Math.abs(l.valor)).toFixed(2) &&
+        !usadasNoLote.has(c.id)
+    );
+    if (candidatas.length !== 1) return l;
+    usadasNoLote.add(candidatas[0].id);
+    return { ...l, contaPagarId: candidatas[0].id };
+  });
+}
+
 // Extração heurística de número, data de emissão e validade a partir do
 // texto de um PDF de documento da empresa — funciona melhor como ponto de
 // partida; confira e complete os campos antes de salvar.
@@ -465,8 +506,9 @@ function gerarParcelasDespesaAvulsa(despesa) {
 }
 
 // Gera as parcelas de valores a receber a partir de um contrato de compra e
-// venda. Mesma regra de datas de gerarParcelas: 1ª parcela 1 mês após a
-// assinatura, demais mensais a partir daí. Se o contrato tiver
+// venda. Se o contrato tiver "datasParcelas" (array de datas dd/mm/aaaa
+// definidas à mão), usa essas datas; senão, mesma regra de sempre: 1ª
+// parcela 1 mês após a assinatura, demais mensais a partir daí. Se tiver
 // "valoresParcelas" (array de números definidos à mão), usa esses valores em
 // vez de dividir o total igualmente. Independente do campo "% pago" do
 // contrato — as duas coisas não se atualizam uma à outra automaticamente,
@@ -477,11 +519,19 @@ function gerarParcelasReceber(contrato) {
     Array.isArray(contrato.valoresParcelas) && contrato.valoresParcelas.length > 0
       ? contrato.valoresParcelas
       : null;
-  const n = personalizadas ? personalizadas.length : Math.max(1, Number(contrato.numeroParcelas) || 1);
+  const datasPersonalizadas =
+    Array.isArray(contrato.datasParcelas) && contrato.datasParcelas.length > 0
+      ? contrato.datasParcelas
+      : null;
+  const n = personalizadas
+    ? personalizadas.length
+    : datasPersonalizadas
+    ? datasPersonalizadas.length
+    : Math.max(1, Number(contrato.numeroParcelas) || 1);
   const valorParcelaPadrao = Math.round(contrato.valor / n);
   const parcelas = [];
   for (let i = 0; i < n; i++) {
-    const vencimento = addMonths(assinatura, i + 1);
+    const vencimento = datasPersonalizadas && datasPersonalizadas[i] ? datasPersonalizadas[i] : formatDateBR(addMonths(assinatura, i + 1));
     const valor = personalizadas
       ? Number(personalizadas[i]) || 0
       : i === n - 1
@@ -494,7 +544,7 @@ function gerarParcelasReceber(contrato) {
       comprador: contrato.comprador,
       parcela: `${i + 1}/${n}`,
       valor,
-      vencimento: formatDateBR(vencimento),
+      vencimento,
       status: "pendente",
     });
   }
@@ -519,6 +569,7 @@ const obrasIniciais = [
 ];
 
 const NOMES_OBRAS = obrasIniciais.map((o) => o.nome);
+const NOMES_SOCIOS = ["Gabriel Oltramari Neto", "João Gabriel Herdt"];
 
 // Modelo de orçamento de obra por etapa/item — mesma estrutura da planilha
 // "Orçamento de obra" enviada: Quantidade, Valor Unitário e Gasto Real são
@@ -708,7 +759,7 @@ function gastoRealEfetivo(item, contasPagarLista) {
     (c) => c.custoItemId === item.id && statusPagarDisplay(c) === "pago"
   );
   if (vinculadas.length > 0) {
-    return vinculadas.reduce((s, c) => s + c.valor, 0);
+    return vinculadas.reduce((s, c) => s + valorAtualizadoItem(c), 0);
   }
   return item.gastoReal;
 }
@@ -933,20 +984,29 @@ const statusPagamentoConfig = {
 const statusPagarConfig = {
   pago: { label: "Pago", color: "#4F7A5B", bg: "#E8EEE8" },
   pendente: { label: "Pendente", color: "#3D6E8C", bg: "#E4EBEF" },
+  vencendo: { label: "Vencendo", color: "#B4590C", bg: "#FBEBDB" },
   vencido: { label: "Vencido", color: "#B23A2E", bg: "#F8E3E0" },
 };
 
-// pago é guardado; vencido é calculado comparando o vencimento com hoje
+// pago é guardado; vencido/vencendo é calculado comparando o vencimento com
+// hoje — "vencendo" é o que vence nos próximos 30 dias, mesma janela usada
+// para documentos da empresa e contratos de fornecedores/serviços.
 function statusPagarDisplay(c) {
   if (c.status === "pago") return "pago";
   const venc = parseDateBR(c.vencimento);
-  if (venc && venc < new Date(new Date().toDateString())) return "vencido";
+  if (!venc) return "pendente";
+  const hoje = new Date(new Date().toDateString());
+  if (venc < hoje) return "vencido";
+  const em30 = new Date(hoje);
+  em30.setDate(em30.getDate() + 30);
+  if (venc <= em30) return "vencendo";
   return "pendente";
 }
 
 const statusReceberConfig = {
   pago: { label: "Recebido", color: "#4F7A5B", bg: "#E8EEE8" },
   pendente: { label: "Pendente", color: "#3D6E8C", bg: "#E4EBEF" },
+  vencendo: { label: "Vencendo", color: "#B4590C", bg: "#FBEBDB" },
   vencido: { label: "Vencido", color: "#B23A2E", bg: "#F8E3E0" },
 };
 
@@ -954,8 +1014,20 @@ const statusReceberConfig = {
 function statusReceberDisplay(v) {
   if (v.status === "pago") return "pago";
   const venc = parseDateBR(v.vencimento);
-  if (venc && venc < new Date(new Date().toDateString())) return "vencido";
+  if (!venc) return "pendente";
+  const hoje = new Date(new Date().toDateString());
+  if (venc < hoje) return "vencido";
+  const em30 = new Date(hoje);
+  em30.setDate(em30.getDate() + 30);
+  if (venc <= em30) return "vencendo";
   return "pendente";
+}
+
+// Valor atualizado = valor original + juros + multa (ambos opcionais,
+// preenchidos manualmente quando o pagamento/recebimento sai do previsto).
+// Usado tanto em Contas a pagar quanto em Valores a receber.
+function valorAtualizadoItem(item) {
+  return Number(item.valor || 0) + Number(item.juros || 0) + Number(item.multa || 0);
 }
 
 function tipoExtratoConfig(valor) {
@@ -2006,6 +2078,7 @@ export default function DashboardConstrutora() {
   });
   const [personalizarParcelasCV, setPersonalizarParcelasCV] = useState(false);
   const [valoresParcelasCV, setValoresParcelasCV] = useState([]);
+  const [datasParcelasCV, setDatasParcelasCV] = useState([]);
 
   const [unidadesObra, setUnidadesObra] = useState([]);
   const [loadingUnidades, setLoadingUnidades] = useState(true);
@@ -2029,6 +2102,20 @@ export default function DashboardConstrutora() {
   const [saveErrorNotas, setSaveErrorNotas] = useState(null);
   const [showFormNota, setShowFormNota] = useState(false);
   const [pdfImportingNota, setPdfImportingNota] = useState(false);
+  const [emprestimosBancarios, setEmprestimosBancarios] = useState([]);
+  const [loadingEmprestimosBancarios, setLoadingEmprestimosBancarios] = useState(true);
+  const [saveErrorEmprestimosBancarios, setSaveErrorEmprestimosBancarios] = useState(null);
+  const [showFormEmprestimoBancario, setShowFormEmprestimoBancario] = useState(false);
+  const [filtroObraEmprestimosBancarios, setFiltroObraEmprestimosBancarios] = useState("");
+  const [formEmprestimoBancario, setFormEmprestimoBancario] = useState({
+    banco: "",
+    obra: NOMES_OBRAS[0],
+    valorContratado: "",
+    valorAPagar: "",
+    numeroParcelas: "1",
+    dataContratacao: "",
+    observacoes: "",
+  });
   const [pdfImportErrorNota, setPdfImportErrorNota] = useState(null);
   const [pdfImportedFieldsNota, setPdfImportedFieldsNota] = useState([]);
   const [duplicataNota, setDuplicataNota] = useState(null);
@@ -2113,6 +2200,7 @@ export default function DashboardConstrutora() {
   const STORAGE_KEY_FORNECEDORES = "contratos-fornecedores";
   const STORAGE_KEY_SERVICOS = "contratos-servicos";
   const STORAGE_KEY_UNIDADES = "unidades-obra";
+  const STORAGE_KEY_EMPRESTIMOS_BANCARIOS = "emprestimos-bancarios";
   const chaveArquivoDocumento = (id) => `documento-arquivo-${id}`;
   const chaveArquivoContratoFornecedor = (id) => `contrato-fornecedor-arquivo-${id}`;
   const chaveArquivoContratoServico = (id) => `contrato-servico-arquivo-${id}`;
@@ -2248,6 +2336,26 @@ export default function DashboardConstrutora() {
     let cancelled = false;
     async function load() {
       try {
+        const result = await window.storage.get(STORAGE_KEY_EMPRESTIMOS_BANCARIOS, false);
+        if (!cancelled) {
+          setEmprestimosBancarios(result ? JSON.parse(result.value) : []);
+        }
+      } catch (err) {
+        if (!cancelled) setEmprestimosBancarios([]);
+      } finally {
+        if (!cancelled) setLoadingEmprestimosBancarios(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
         const [notasResult, pagarResult] = await Promise.all([
           window.storage.get(STORAGE_KEY_NOTAS, false),
           window.storage.get(STORAGE_KEY_PAGAR, false),
@@ -2356,6 +2464,16 @@ export default function DashboardConstrutora() {
     }
   }
 
+  // Mesmo esquema de handleUpdateContaPagarCampo, para o lado de Valores a
+  // receber.
+  function handleUpdateParcelaReceberCampo(id, campo, valor) {
+    setValoresReceber((prev) => prev.map((v) => (v.id === id ? { ...v, [campo]: valor } : v)));
+  }
+
+  function handlePersistValoresReceberBlur() {
+    persistContratosEReceber(contratosCV, valoresReceber);
+  }
+
   function handleUpdateCustoItemCampo(id, campo, valor) {
     setCustosItens((prev) => prev.map((it) => (it.id === id ? { ...it, [campo]: valor } : it)));
   }
@@ -2390,6 +2508,7 @@ export default function DashboardConstrutora() {
       statusPagamento: form.statusPagamento,
       numeroParcelas: Number(form.numeroParcelas) || 1,
       ...(usarPersonalizadas ? { valoresParcelas: valoresParcelasCV.map((v) => Number(v) || 0) } : {}),
+      ...(usarPersonalizadas ? { datasParcelas: datasParcelasCV } : {}),
     };
     const novasParcelas = gerarParcelasReceber(novo);
     persistContratosEReceber([...contratosCV, novo], [...valoresReceber, ...novasParcelas]);
@@ -2404,12 +2523,14 @@ export default function DashboardConstrutora() {
     });
     setPersonalizarParcelasCV(false);
     setValoresParcelasCV([]);
+    setDatasParcelasCV([]);
     setShowForm(false);
   }
 
-  // Gera (ou regenera) a lista de valores editáveis de cada parcela, uma
-  // divisão igual do valor do contrato como ponto de partida — o usuário
-  // pode ajustar cada valor individualmente antes de salvar.
+  // Gera (ou regenera) a lista de valores e datas editáveis de cada parcela
+  // — divisão igual do valor do contrato e vencimentos mensais a partir da
+  // assinatura como ponto de partida; o usuário pode ajustar cada um
+  // individualmente antes de salvar.
   function handleAtivarPersonalizarParcelasCV() {
     const n = Math.max(1, Number(form.numeroParcelas) || 1);
     const valorTotal = Number(form.valor) || 0;
@@ -2417,12 +2538,19 @@ export default function DashboardConstrutora() {
     const valores = Array.from({ length: n }, (_, i) =>
       i === n - 1 ? valorTotal - valorParcela * (n - 1) : valorParcela
     );
+    const assinatura = parseDateBR(form.dataAssinatura) || new Date();
+    const datas = Array.from({ length: n }, (_, i) => formatDateBR(addMonths(assinatura, i + 1)));
     setValoresParcelasCV(valores);
+    setDatasParcelasCV(datas);
     setPersonalizarParcelasCV(true);
   }
 
   function handleAtualizarValorParcelaCV(indice, valor) {
     setValoresParcelasCV((prev) => prev.map((v, i) => (i === indice ? valor : v)));
+  }
+
+  function handleAtualizarDataParcelaCV(indice, data) {
+    setDatasParcelasCV((prev) => prev.map((d, i) => (i === indice ? data : d)));
   }
 
   function handleDeleteContrato(id) {
@@ -2527,6 +2655,69 @@ export default function DashboardConstrutora() {
     }
   }
 
+  // Mesmo esquema de persistNotasEPagar, para os empréstimos bancários — o
+  // valor a pagar é dividido em parcelas e lançado em Contas a pagar (que já
+  // alimenta o Fluxo de caixa sozinho, sem precisar de nenhuma mudança lá).
+  async function persistEmprestimosBancariosEPagar(nextEmprestimos, nextContas) {
+    setEmprestimosBancarios(nextEmprestimos);
+    setContasPagar(nextContas);
+    try {
+      const [r1, r2] = await Promise.all([
+        window.storage.set(STORAGE_KEY_EMPRESTIMOS_BANCARIOS, JSON.stringify(nextEmprestimos), false),
+        window.storage.set(STORAGE_KEY_PAGAR, JSON.stringify(nextContas), false),
+      ]);
+      if (!r1 || !r2) setSaveErrorEmprestimosBancarios("Não foi possível salvar. Tente novamente.");
+      else setSaveErrorEmprestimosBancarios(null);
+    } catch (err) {
+      setSaveErrorEmprestimosBancarios("Não foi possível salvar. Tente novamente.");
+    }
+  }
+
+  function handleAddEmprestimoBancario(e) {
+    e.preventDefault();
+    if (!formEmprestimoBancario.banco || !formEmprestimoBancario.valorAPagar) return;
+    const novo = {
+      id: Date.now(),
+      banco: formEmprestimoBancario.banco,
+      obra: formEmprestimoBancario.obra || NOMES_OBRAS[0],
+      valorContratado: Number(formEmprestimoBancario.valorContratado) || 0,
+      valorAPagar: Number(formEmprestimoBancario.valorAPagar) || 0,
+      numeroParcelas: Number(formEmprestimoBancario.numeroParcelas) || 1,
+      dataContratacao: formEmprestimoBancario.dataContratacao || new Date().toLocaleDateString("pt-BR"),
+      observacoes: formEmprestimoBancario.observacoes,
+    };
+    // Reaproveita gerarParcelasDespesaAvulsa (mesma função usada nas despesas
+    // avulsas de Contas a pagar): a data digitada é a da 1ª parcela — não
+    // soma mais 1 mês por cima — e as demais seguem mensalmente a partir
+    // dela.
+    const novasParcelas = gerarParcelasDespesaAvulsa({
+      id: novo.id,
+      dataVencimento: novo.dataContratacao,
+      numeroParcelas: novo.numeroParcelas,
+      valorTotal: novo.valorAPagar,
+      fornecedor: novo.banco,
+      obra: novo.obra,
+    });
+    persistEmprestimosBancariosEPagar([...emprestimosBancarios, novo], [...contasPagar, ...novasParcelas]);
+    setFormEmprestimoBancario({
+      banco: "",
+      obra: NOMES_OBRAS[0],
+      valorContratado: "",
+      valorAPagar: "",
+      numeroParcelas: "1",
+      dataContratacao: "",
+      observacoes: "",
+    });
+    setShowFormEmprestimoBancario(false);
+  }
+
+  function handleDeleteEmprestimoBancario(id) {
+    persistEmprestimosBancariosEPagar(
+      emprestimosBancarios.filter((e) => e.id !== id),
+      contasPagar.filter((c) => c.notaId !== id)
+    );
+  }
+
   function handleAddNota(e) {
     e.preventDefault();
     if (!formNota.fornecedor || !formNota.valorTotal) return;
@@ -2556,6 +2747,17 @@ export default function DashboardConstrutora() {
       notasCompra,
       contasPagar.map((c) => (c.id === id ? { ...c, status: c.status === "pago" ? "pendente" : "pago" } : c))
     );
+  }
+
+  // Edição de juros/multa de uma conta a pagar — atualiza local a cada
+  // tecla e só grava quando o campo perde o foco, evitando salvar a cada
+  // dígito digitado.
+  function handleUpdateContaPagarCampo(id, campo, valor) {
+    setContasPagar((prev) => prev.map((c) => (c.id === id ? { ...c, [campo]: valor } : c)));
+  }
+
+  function handlePersistContasPagarBlur() {
+    persistNotasEPagar(notasCompra, contasPagar);
   }
 
   function handleDeleteContaPagar(id) {
@@ -2681,6 +2883,30 @@ export default function DashboardConstrutora() {
     persistContratosEReceber(contratosCV, novoValoresReceber);
   }
 
+  // Mesma lógica de handleVincularParcelaReceber, para o lado de Contas a
+  // pagar: vincular um lançamento de saída do extrato a uma conta a pagar
+  // marca ela como paga automaticamente (e desmarca a anterior, se trocar).
+  function handleVincularContaPagar(lancamentoId, contaId) {
+    const lancamentoAtual = extrato.find((l) => l.id === lancamentoId);
+    const contaAnteriorId = lancamentoAtual ? lancamentoAtual.contaPagarId : "";
+
+    const novoExtrato = extrato.map((l) =>
+      l.id === lancamentoId ? { ...l, contaPagarId: contaId } : l
+    );
+    const novasContasPagar = contasPagar.map((c) => {
+      if (contaAnteriorId && c.id === contaAnteriorId && c.id !== contaId) {
+        return { ...c, status: "pendente" };
+      }
+      if (contaId && c.id === contaId) {
+        return { ...c, status: "pago" };
+      }
+      return c;
+    });
+
+    persistExtrato(novoExtrato);
+    persistNotasEPagar(notasCompra, novasContasPagar);
+  }
+
   // Opções de parcelas selecionáveis para vincular a um lançamento: a
   // parcela já vinculada a ele (se houver) mais as pendentes/vencidas que
   // nenhum outro lançamento já vinculou.
@@ -2690,6 +2916,50 @@ export default function DashboardConstrutora() {
     );
     return valoresReceber.filter(
       (v) => v.id === parcelaAtualId || (!vinculadasPorOutros.has(v.id) && v.status !== "pago")
+    );
+  }
+
+  // Mesma lógica de opcoesParcelaReceberPara, para o lado de Contas a pagar.
+  function opcoesContaPagarPara(lancamentoId, contaAtualId) {
+    const vinculadasPorOutros = new Set(
+      extrato.filter((le) => le.id !== lancamentoId && le.contaPagarId).map((le) => le.contaPagarId)
+    );
+    return contasPagar.filter(
+      (c) => c.id === contaAtualId || (!vinculadasPorOutros.has(c.id) && c.status !== "pago")
+    );
+  }
+
+  // Opções de parcelas selecionáveis para vincular a um lançamento da
+  // PRÉVIA de importação: a parcela já selecionada nele (se houver) mais as
+  // pendentes/vencidas que nenhum lançamento já salvo, nem outra linha desta
+  // mesma prévia, já tenha selecionado.
+  function opcoesParcelaReceberParaPreview(lancamentoPreviewId, parcelaAtualId) {
+    const vinculadasSalvas = new Set(extrato.filter((le) => le.parcelaReceberId).map((le) => le.parcelaReceberId));
+    const vinculadasNaPreviaPorOutros = new Set(
+      extratoPreview
+        .filter((le) => le.id !== lancamentoPreviewId && le.parcelaReceberId)
+        .map((le) => le.parcelaReceberId)
+    );
+    return valoresReceber.filter(
+      (v) =>
+        v.id === parcelaAtualId ||
+        (!vinculadasSalvas.has(v.id) && !vinculadasNaPreviaPorOutros.has(v.id) && v.status !== "pago")
+    );
+  }
+
+  // Mesma lógica de opcoesParcelaReceberParaPreview, para o lado de Contas a
+  // pagar.
+  function opcoesContaPagarParaPreview(lancamentoPreviewId, contaAtualId) {
+    const vinculadasSalvas = new Set(extrato.filter((le) => le.contaPagarId).map((le) => le.contaPagarId));
+    const vinculadasNaPreviaPorOutros = new Set(
+      extratoPreview
+        .filter((le) => le.id !== lancamentoPreviewId && le.contaPagarId)
+        .map((le) => le.contaPagarId)
+    );
+    return contasPagar.filter(
+      (c) =>
+        c.id === contaAtualId ||
+        (!vinculadasSalvas.has(c.id) && !vinculadasNaPreviaPorOutros.has(c.id) && c.status !== "pago")
     );
   }
 
@@ -2710,7 +2980,9 @@ export default function DashboardConstrutora() {
           "Não consegui reconhecer lançamentos neste PDF. O formato deste extrato pode ser diferente do esperado — tente adicionar manualmente."
         );
       } else {
-        setExtratoPreview(marcarDuplicadosExtrato(lancamentos, extrato));
+        const comDuplicados = marcarDuplicadosExtrato(lancamentos, extrato);
+        const comParcelaReceber = sugerirParcelasReceber(comDuplicados, valoresReceber);
+        setExtratoPreview(sugerirContasPagar(comParcelaReceber, contasPagar));
       }
     } catch (err) {
       setPdfImportErrorExtrato("Não foi possível ler esse PDF.");
@@ -2748,9 +3020,20 @@ export default function DashboardConstrutora() {
       descricao: l.descricao,
       valor: Number(l.valor),
       socio: (l.socio || "").trim(),
-      parcelaReceberId: "",
+      parcelaReceberId: l.parcelaReceberId || "",
+      contaPagarId: l.contaPagarId || "",
     }));
+    const idsParcelasVinculadas = new Set(confirmados.filter((c) => c.parcelaReceberId).map((c) => c.parcelaReceberId));
+    const novoValoresReceber = idsParcelasVinculadas.size
+      ? valoresReceber.map((v) => (idsParcelasVinculadas.has(v.id) ? { ...v, status: "pago" } : v))
+      : valoresReceber;
+    const idsContasVinculadas = new Set(confirmados.filter((c) => c.contaPagarId).map((c) => c.contaPagarId));
+    const novasContasPagar = idsContasVinculadas.size
+      ? contasPagar.map((c) => (idsContasVinculadas.has(c.id) ? { ...c, status: "pago" } : c))
+      : contasPagar;
     persistExtrato([...extrato, ...confirmados]);
+    persistContratosEReceber(contratosCV, novoValoresReceber);
+    persistNotasEPagar(notasCompra, novasContasPagar);
     setExtratoPreview([]);
   }
 
@@ -3418,6 +3701,9 @@ export default function DashboardConstrutora() {
   const contratosFornecedoresFiltrados = filtroObraFornecedores
     ? contratosFornecedores.filter((c) => c.obra === filtroObraFornecedores)
     : contratosFornecedores;
+  const emprestimosBancariosFiltrados = filtroObraEmprestimosBancarios
+    ? emprestimosBancarios.filter((e) => e.obra === filtroObraEmprestimosBancarios)
+    : emprestimosBancarios;
   const totalContratadoFornecedores = contratosFornecedoresFiltrados.reduce((s, c) => s + c.valor, 0);
   const contratosFornecedoresVencendo = contratosFornecedoresFiltrados.filter(
     (c) => statusContratoFornecedorDisplay(c) === "vencendo"
@@ -3473,7 +3759,7 @@ export default function DashboardConstrutora() {
     .reduce((s, c) => s + c.valor, 0);
   const totalPago = contasPagarFiltradas
     .filter((c) => statusPagarDisplay(c) === "pago")
-    .reduce((s, c) => s + c.valor, 0);
+    .reduce((s, c) => s + valorAtualizadoItem(c), 0);
   const parcelasVencidas = contasPagarFiltradas.filter((c) => statusPagarDisplay(c) === "vencido").length;
 
   const saldoExtrato = extrato.reduce((s, l) => s + l.valor, 0);
@@ -3530,7 +3816,7 @@ export default function DashboardConstrutora() {
     .reduce((s, v) => s + v.valor, 0);
   const totalRecebidoParcelas = valoresReceber
     .filter((v) => statusReceberDisplay(v) === "pago")
-    .reduce((s, v) => s + v.valor, 0);
+    .reduce((s, v) => s + valorAtualizadoItem(v), 0);
   const parcelasReceberVencidas = valoresReceber.filter((v) => statusReceberDisplay(v) === "vencido").length;
 
   // Agrupa as parcelas por unidade + cliente: total da venda, valor já
@@ -3686,6 +3972,7 @@ export default function DashboardConstrutora() {
             { id: "pagar", label: "Contas a pagar" },
             { id: "extrato", label: "Extrato bancário" },
             { id: "socios", label: "Empréstimos de sócios" },
+            { id: "emprestimosbancarios", label: "Empréstimos bancários" },
             { id: "documentos", label: "Documentos da empresa" },
             { id: "fornecedores", label: "Contratos de fornecedores" },
             { id: "servicos", label: "Contratos de prestação de serviços" },
@@ -3928,6 +4215,70 @@ export default function DashboardConstrutora() {
                           style={{ color: "#8A8D93", fontFamily: "'IBM Plex Mono', monospace" }}
                         >
                           {formatBRLShort(c.valor)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </section>
+
+        {/* Avisos de vencimento — valores a receber */}
+        <section
+          className="mt-5 rounded-md p-5 border"
+          style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+        >
+          <h2
+            className="text-sm uppercase tracking-[0.12em] font-semibold mb-4"
+            style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+          >
+            Valores a receber — avisos de vencimento
+          </h2>
+          {loadingCV ? (
+            <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+              Carregando…
+            </div>
+          ) : (() => {
+            const avisosReceber = valoresReceber
+              .filter((v) => statusReceberDisplay(v) === "vencido" || statusReceberDisplay(v) === "vencendo")
+              .slice()
+              .sort((a, b) => (parseDateBR(a.vencimento) || 0) - (parseDateBR(b.vencimento) || 0));
+            return avisosReceber.length === 0 ? (
+              <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                Nenhum valor a receber vencendo ou vencido nos próximos 30 dias.
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {avisosReceber.map((v) => {
+                  const cfg = statusReceberConfig[statusReceberDisplay(v)];
+                  return (
+                    <div
+                      key={v.id}
+                      className="flex items-center justify-between rounded-sm px-3 py-2.5"
+                      style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                    >
+                      <div className="min-w-0 pr-2">
+                        <div className="text-sm font-medium truncate" style={{ color: "#22252A" }}>
+                          {v.comprador} · {v.unidade} · {v.parcela}
+                        </div>
+                        <div className="text-xs" style={{ color: "#8A8D93" }}>
+                          vence {v.vencimento}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span
+                          className="text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full"
+                          style={{ color: cfg.color, background: cfg.bg }}
+                        >
+                          {cfg.label}
+                        </span>
+                        <span
+                          className="text-[11px]"
+                          style={{ color: "#8A8D93", fontFamily: "'IBM Plex Mono', monospace" }}
+                        >
+                          {formatBRLShort(v.valor)}
                         </span>
                       </div>
                     </div>
@@ -4651,12 +5002,35 @@ export default function DashboardConstrutora() {
                             className="grid grid-cols-2 sm:grid-cols-[1fr_0.6fr_1fr_0.8fr_1fr_1fr_1.1fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
-                            <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{u.unidade}</span>
-                            <span className="text-xs" style={{ color: "#6B6F76" }}>{u.andar || "—"}</span>
-                            <span className="text-xs" style={{ color: "#6B6F76" }}>{u.tipo || "—"}</span>
-                            <span className="text-xs" style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}>
-                              {u.metragem ? `${u.metragem} m²` : "—"}
-                            </span>
+                            <input
+                              value={u.unidade}
+                              onChange={(e) => handleUpdateUnidadeCampo(u.id, "unidade", e.target.value)}
+                              onBlur={handlePersistUnidadesBlur}
+                              className="text-sm font-semibold px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                            />
+                            <input
+                              value={u.andar}
+                              onChange={(e) => handleUpdateUnidadeCampo(u.id, "andar", e.target.value)}
+                              onBlur={handlePersistUnidadesBlur}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                            />
+                            <input
+                              value={u.tipo}
+                              onChange={(e) => handleUpdateUnidadeCampo(u.id, "tipo", e.target.value)}
+                              onBlur={handlePersistUnidadesBlur}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                            />
+                            <input
+                              type="number"
+                              value={u.metragem}
+                              onChange={(e) => handleUpdateUnidadeCampo(u.id, "metragem", Number(e.target.value) || 0)}
+                              onBlur={handlePersistUnidadesBlur}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+                            />
                             <input
                               type="number"
                               value={u.valorVenda}
@@ -4895,25 +5269,37 @@ export default function DashboardConstrutora() {
                       background: "#FFFFFF",
                     }}
                   >
-                    {personalizarParcelasCV ? "Usar divisão igual" : "Personalizar valores das parcelas"}
+                    {personalizarParcelasCV ? "Usar divisão igual" : "Personalizar valores e datas das parcelas"}
                   </button>
 
                   {personalizarParcelasCV && (
                     <div
-                      className="sm:col-span-3 grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 rounded-sm"
+                      className="sm:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-sm"
                       style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                     >
                       {valoresParcelasCV.map((v, i) => (
-                        <label key={i} className="text-xs flex flex-col gap-1" style={{ color: "#8A8D93" }}>
-                          Parcela {i + 1}
-                          <input
-                            type="number"
-                            value={v}
-                            onChange={(e) => handleAtualizarValorParcelaCV(i, e.target.value)}
-                            className="text-sm px-2 py-1.5 rounded-sm outline-none"
-                            style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
-                          />
-                        </label>
+                        <div key={i} className="grid grid-cols-2 gap-2">
+                          <label className="text-xs flex flex-col gap-1" style={{ color: "#8A8D93" }}>
+                            Parcela {i + 1} — valor
+                            <input
+                              type="number"
+                              value={v}
+                              onChange={(e) => handleAtualizarValorParcelaCV(i, e.target.value)}
+                              className="text-sm px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                            />
+                          </label>
+                          <label className="text-xs flex flex-col gap-1" style={{ color: "#8A8D93" }}>
+                            Data a receber
+                            <input
+                              type="date"
+                              value={dataBRparaISO(datasParcelasCV[i] || "")}
+                              onChange={(e) => handleAtualizarDataParcelaCV(i, dataISOparaBR(e.target.value))}
+                              className="text-sm px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                            />
+                          </label>
+                        </div>
                       ))}
                       <div className="col-span-full text-xs" style={{ color: "#8A8D93" }}>
                         Soma das parcelas: {formatBRLShort(valoresParcelasCV.reduce((s, v) => s + (Number(v) || 0), 0))}
@@ -5073,11 +5459,14 @@ export default function DashboardConstrutora() {
                   </div>
                 ) : (
                   <>
-                    <div className="hidden sm:grid grid-cols-[1.2fr_1fr_0.7fr_1fr_1fr_0.9fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <div className="hidden sm:grid grid-cols-[1fr_0.8fr_0.5fr_0.7fr_0.5fr_0.5fr_0.75fr_0.8fr_0.75fr_auto] gap-2 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                       <span>Cliente</span>
                       <span>Unidade</span>
                       <span>Parcela</span>
                       <span>Valor</span>
+                      <span>Juros</span>
+                      <span>Multa</span>
+                      <span>Atualizado</span>
                       <span>Data a receber</span>
                       <span>Status</span>
                       <span></span>
@@ -5089,7 +5478,7 @@ export default function DashboardConstrutora() {
                         return (
                           <div
                             key={v.id}
-                            className="grid grid-cols-2 sm:grid-cols-[1.2fr_1fr_0.7fr_1fr_1fr_0.9fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            className="grid grid-cols-2 sm:grid-cols-[1fr_0.8fr_0.5fr_0.7fr_0.5fr_0.5fr_0.75fr_0.8fr_0.75fr_auto] gap-2 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
                             <span className="text-sm font-semibold truncate" style={{ color: "#22252A" }}>
@@ -5107,6 +5496,33 @@ export default function DashboardConstrutora() {
                               style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
                             >
                               {formatBRLShort(v.valor)}
+                            </span>
+                            <input
+                              type="number"
+                              placeholder="0"
+                              value={v.juros || ""}
+                              onChange={(e) => handleUpdateParcelaReceberCampo(v.id, "juros", Number(e.target.value) || 0)}
+                              onBlur={handlePersistValoresReceberBlur}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              title="Juros recebidos além do valor original (opcional)"
+                            />
+                            <input
+                              type="number"
+                              placeholder="0"
+                              value={v.multa || ""}
+                              onChange={(e) => handleUpdateParcelaReceberCampo(v.id, "multa", Number(e.target.value) || 0)}
+                              onBlur={handlePersistValoresReceberBlur}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              title="Multa recebida além do valor original (opcional)"
+                            />
+                            <span
+                              className="text-xs font-semibold"
+                              style={{ color: "#4F7A5B", fontFamily: "'IBM Plex Mono', monospace" }}
+                              title="Valor original + juros + multa"
+                            >
+                              {formatBRLShort(valorAtualizadoItem(v))}
                             </span>
                             <span
                               className="text-sm"
@@ -5140,7 +5556,8 @@ export default function DashboardConstrutora() {
               As parcelas são geradas automaticamente a partir do número de parcelas de cada contrato de
               compra e venda. Marcar uma parcela como recebida aqui não altera o campo "% pago" do contrato
               — são dois controles independentes, assim como notas de compra não recalculam contas a pagar
-              já geradas.
+              já geradas. Preencha juros/multa quando o valor recebido for diferente do previsto — o "Total
+              recebido" já soma o valor atualizado das parcelas pagas.
             </p>
           </>
         )}
@@ -5558,11 +5975,14 @@ export default function DashboardConstrutora() {
                 </div>
               ) : (
                 <>
-                  <div className="hidden sm:grid grid-cols-[1.1fr_0.8fr_0.6fr_0.9fr_0.9fr_0.8fr_1.3fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[0.9fr_0.7fr_0.5fr_0.65fr_0.45fr_0.45fr_0.7fr_0.75fr_0.7fr_1.1fr_auto] gap-2 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Fornecedor</span>
                     <span>Obra</span>
                     <span>Parcela</span>
                     <span>Valor</span>
+                    <span>Juros</span>
+                    <span>Multa</span>
+                    <span>Atualizado</span>
                     <span>Vencimento</span>
                     <span>Status</span>
                     <span>Item de custo</span>
@@ -5580,7 +6000,7 @@ export default function DashboardConstrutora() {
                         return (
                           <div
                             key={c.id}
-                            className="grid grid-cols-2 sm:grid-cols-[1.1fr_0.8fr_0.6fr_0.9fr_0.9fr_0.8fr_1.3fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            className="grid grid-cols-2 sm:grid-cols-[0.9fr_0.7fr_0.5fr_0.65fr_0.45fr_0.45fr_0.7fr_0.75fr_0.7fr_1.1fr_auto] gap-2 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
                             <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{c.fornecedor}</span>
@@ -5596,6 +6016,33 @@ export default function DashboardConstrutora() {
                               style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
                             >
                               {formatBRLShort(c.valor)}
+                            </span>
+                            <input
+                              type="number"
+                              placeholder="0"
+                              value={c.juros || ""}
+                              onChange={(e) => handleUpdateContaPagarCampo(c.id, "juros", Number(e.target.value) || 0)}
+                              onBlur={handlePersistContasPagarBlur}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              title="Juros pagos além do valor original (opcional)"
+                            />
+                            <input
+                              type="number"
+                              placeholder="0"
+                              value={c.multa || ""}
+                              onChange={(e) => handleUpdateContaPagarCampo(c.id, "multa", Number(e.target.value) || 0)}
+                              onBlur={handlePersistContasPagarBlur}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              title="Multa paga além do valor original (opcional)"
+                            />
+                            <span
+                              className="text-xs font-semibold"
+                              style={{ color: "#B23A2E", fontFamily: "'IBM Plex Mono', monospace" }}
+                              title="Valor original + juros + multa"
+                            >
+                              {formatBRLShort(valorAtualizadoItem(c))}
                             </span>
                             <span
                               className="text-xs"
@@ -5651,7 +6098,9 @@ export default function DashboardConstrutora() {
             <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
               Parcelas geradas automaticamente a partir das notas de compras cadastradas. Vincule uma
               parcela paga a um item do orçamento (coluna "Item de custo") para que o valor componha o
-              Gasto Real dele automaticamente em Custos das obras.
+              Gasto Real dele automaticamente em Custos das obras. Preencha juros/multa quando o valor pago
+              for diferente do previsto — o "Total pago" e o "Gasto Real" já somam o valor atualizado das
+              parcelas pagas.
             </p>
           </>
         )}
@@ -5769,23 +6218,26 @@ export default function DashboardConstrutora() {
                       </button>
                     </div>
                   </div>
-                  <div className="hidden sm:grid grid-cols-[0.8fr_1.2fr_0.7fr_0.6fr_0.9fr_0.9fr_auto] gap-2 px-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[0.7fr_1.1fr_0.6fr_0.5fr_0.8fr_0.7fr_1fr_auto] gap-2 px-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Data</span>
                     <span>Descrição</span>
                     <span>Valor</span>
                     <span>Tipo</span>
                     <span>Status</span>
                     <span>Sócio</span>
+                    <span>Vincular a</span>
                     <span></span>
                   </div>
                   <div className="space-y-2">
                     {extratoPreview.map((l) => {
                       const cfg = tipoExtratoConfig(l.valor);
                       const pulandoDuplicado = l.jaLancado && !l.incluirMesmoAssim;
+                      const opcoesParcelaPreview = opcoesParcelaReceberParaPreview(l.id, l.parcelaReceberId);
+                      const opcoesContaPreview = opcoesContaPagarParaPreview(l.id, l.contaPagarId);
                       return (
                         <div
                           key={l.id}
-                          className="grid grid-cols-2 sm:grid-cols-[0.8fr_1.2fr_0.7fr_0.6fr_0.9fr_0.9fr_auto] gap-2 items-center rounded-sm px-2 py-2"
+                          className="grid grid-cols-2 sm:grid-cols-[0.7fr_1.1fr_0.6fr_0.5fr_0.8fr_0.7fr_1fr_auto] gap-2 items-center rounded-sm px-2 py-2"
                           style={{
                             border: pulandoDuplicado ? "1px solid #E4C9A8" : "1px solid #E4E0D6",
                             background: pulandoDuplicado ? "#FBF6ED" : "transparent",
@@ -5847,13 +6299,56 @@ export default function DashboardConstrutora() {
                               </button>
                             )}
                           </div>
-                          <input
-                            placeholder="Sócio (opcional)"
+                          <select
                             value={l.socio || ""}
                             onChange={(e) => handleUpdatePreviewRow(l.id, "socio", e.target.value)}
                             className="text-xs px-2 py-1.5 rounded-sm outline-none"
                             style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
-                          />
+                            title="Preencha se este lançamento for um aporte ou devolução de sócio"
+                          >
+                            <option value="">Sócio — nenhum</option>
+                            {NOMES_SOCIOS.map((nome) => (
+                              <option key={nome} value={nome}>{nome}</option>
+                            ))}
+                          </select>
+                          <div className="flex flex-col gap-1">
+                            {l.valor >= 0 ? (
+                              <select
+                                value={l.parcelaReceberId || ""}
+                                onChange={(e) => handleUpdatePreviewRow(l.id, "parcelaReceberId", e.target.value)}
+                                className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                                style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                title="Ao confirmar a importação, essa parcela é marcada como recebida automaticamente"
+                              >
+                                <option value="">Parcela a receber — nenhuma</option>
+                                {opcoesParcelaPreview.map((v) => (
+                                  <option key={v.id} value={v.id}>
+                                    {v.unidade} · {v.comprador} · {v.parcela} · {formatBRLShort(v.valor)}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <select
+                                value={l.contaPagarId || ""}
+                                onChange={(e) => handleUpdatePreviewRow(l.id, "contaPagarId", e.target.value)}
+                                className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                                style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                title="Ao confirmar a importação, essa conta é marcada como paga automaticamente"
+                              >
+                                <option value="">Conta a pagar — nenhuma</option>
+                                {opcoesContaPreview.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.fornecedor} · {c.parcela} · {formatBRLShort(c.valor)}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            {(l.parcelaReceberId || l.contaPagarId) && (
+                              <span className="text-[9.5px] font-semibold" style={{ color: "#4F7A5B" }}>
+                                Sugerido pelo valor — confira antes de confirmar
+                              </span>
+                            )}
+                          </div>
                           <button
                             onClick={() => handleRemovePreviewRow(l.id)}
                             className="text-xs w-fit"
@@ -5948,7 +6443,7 @@ export default function DashboardConstrutora() {
                     <span>Valor</span>
                     <span>Tipo</span>
                     <span>Sócio</span>
-                    <span>Parcela a receber</span>
+                    <span>Vincular a</span>
                     <span></span>
                   </div>
 
@@ -5959,6 +6454,7 @@ export default function DashboardConstrutora() {
                       .map((l) => {
                         const cfg = tipoExtratoConfig(l.valor);
                         const opcoesParcela = opcoesParcelaReceberPara(l.id, l.parcelaReceberId);
+                        const opcoesConta = opcoesContaPagarPara(l.id, l.contaPagarId);
                         return (
                           <div
                             key={l.id}
@@ -5985,29 +6481,50 @@ export default function DashboardConstrutora() {
                             >
                               {cfg.label}
                             </span>
-                            <input
-                              placeholder="Sócio (opcional)"
+                            <select
                               value={l.socio || ""}
                               onChange={(e) => handleUpdateExtratoSocio(l.id, e.target.value)}
                               onBlur={handlePersistExtratoSocio}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
                               style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
                               title="Preencha se este lançamento for um aporte ou devolução de sócio — ele passa a contar em Empréstimos de sócios"
-                            />
-                            <select
-                              value={l.parcelaReceberId || ""}
-                              onChange={(e) => handleVincularParcelaReceber(l.id, e.target.value)}
-                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
-                              title="Vincule a uma parcela de Valores a receber para marcá-la como recebida automaticamente"
                             >
-                              <option value="">— nenhuma —</option>
-                              {opcoesParcela.map((v) => (
-                                <option key={v.id} value={v.id}>
-                                  {v.unidade} · {v.comprador} · {v.parcela} · {formatBRLShort(v.valor)}
-                                </option>
+                              <option value="">Sócio — nenhum</option>
+                              {NOMES_SOCIOS.map((nome) => (
+                                <option key={nome} value={nome}>{nome}</option>
                               ))}
                             </select>
+                            {l.valor >= 0 ? (
+                              <select
+                                value={l.parcelaReceberId || ""}
+                                onChange={(e) => handleVincularParcelaReceber(l.id, e.target.value)}
+                                className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                                style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                title="Vincule a uma parcela de Valores a receber para marcá-la como recebida automaticamente"
+                              >
+                                <option value="">Parcela a receber — nenhuma</option>
+                                {opcoesParcela.map((v) => (
+                                  <option key={v.id} value={v.id}>
+                                    {v.unidade} · {v.comprador} · {v.parcela} · {formatBRLShort(v.valor)}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <select
+                                value={l.contaPagarId || ""}
+                                onChange={(e) => handleVincularContaPagar(l.id, e.target.value)}
+                                className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                                style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                title="Vincule a uma conta a pagar para marcá-la como paga automaticamente"
+                              >
+                                <option value="">Conta a pagar — nenhuma</option>
+                                {opcoesConta.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.fornecedor} · {c.parcela} · {formatBRLShort(c.valor)}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
                             <button
                               onClick={() => handleDeleteLancamento(l.id)}
                               className="text-xs w-fit"
@@ -6162,14 +6679,18 @@ export default function DashboardConstrutora() {
                   className="mb-5 p-4 rounded-sm grid grid-cols-1 sm:grid-cols-3 gap-3"
                   style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                 >
-                  <input
+                  <select
                     required
-                    placeholder="Nome do sócio"
                     value={formSocio.socio}
                     onChange={(e) => setFormSocio({ ...formSocio, socio: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
                     style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
-                  />
+                  >
+                    <option value="">Selecione o sócio</option>
+                    {NOMES_SOCIOS.map((nome) => (
+                      <option key={nome} value={nome}>{nome}</option>
+                    ))}
+                  </select>
                   <select
                     value={formSocio.tipo}
                     onChange={(e) => setFormSocio({ ...formSocio, tipo: e.target.value })}
@@ -6317,6 +6838,250 @@ export default function DashboardConstrutora() {
               Aportes entram como entrada e devoluções como saída no fluxo de caixa da Visão geral, no mês
               da data informada. Lançamentos com origem "Extrato bancário" vêm de itens marcados com um
               sócio na aba Extrato — para removê-los, apague a marcação lá (evita contar o valor em dobro).
+            </p>
+          </>
+        )}
+
+        {activeTab === "emprestimosbancarios" && (
+          <>
+            <div className="flex flex-wrap gap-3 mb-4">
+              <KpiCard
+                eyebrow="Total contratado"
+                value={formatBRLShort(emprestimosBancariosFiltrados.reduce((s, e) => s + e.valorContratado, 0))}
+                sub={formatBRL(emprestimosBancariosFiltrados.reduce((s, e) => s + e.valorContratado, 0))}
+              />
+              <KpiCard
+                eyebrow="Total a pagar"
+                value={formatBRLShort(emprestimosBancariosFiltrados.reduce((s, e) => s + e.valorAPagar, 0))}
+                sub={formatBRL(emprestimosBancariosFiltrados.reduce((s, e) => s + e.valorAPagar, 0))}
+              />
+              <KpiCard eyebrow="Empréstimos" value={`${emprestimosBancariosFiltrados.length}`} sub="cadastrados" />
+            </div>
+
+            <div className="mb-4 flex items-center gap-2 flex-wrap">
+              <label
+                className="text-xs font-semibold uppercase tracking-wide"
+                style={{ color: "#8A8D93", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Filtrar por obra:
+              </label>
+              <select
+                value={filtroObraEmprestimosBancarios}
+                onChange={(e) => setFiltroObraEmprestimosBancarios(e.target.value)}
+                className="text-sm px-3 py-1.5 rounded-sm outline-none"
+                style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
+              >
+                <option value="">Todas as obras</option>
+                {NOMES_OBRAS.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </div>
+
+            <section
+              className="rounded-md p-5 border"
+              style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+            >
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2
+                  className="text-sm uppercase tracking-[0.12em] font-semibold"
+                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Empréstimos bancários
+                </h2>
+                <button
+                  onClick={() => setShowFormEmprestimoBancario((s) => !s)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                  style={{
+                    fontFamily: "'Oswald', sans-serif",
+                    letterSpacing: "0.03em",
+                    color: "#F5F3EC",
+                    background: "#3D6E8C",
+                  }}
+                >
+                  {showFormEmprestimoBancario ? "CANCELAR" : "+ NOVO EMPRÉSTIMO"}
+                </button>
+              </div>
+
+              {saveErrorEmprestimosBancarios && (
+                <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                  {saveErrorEmprestimosBancarios}
+                </div>
+              )}
+
+              {showFormEmprestimoBancario && (
+                <form
+                  onSubmit={handleAddEmprestimoBancario}
+                  className="mb-5 p-4 rounded-sm grid grid-cols-1 sm:grid-cols-3 gap-3"
+                  style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                >
+                  <input
+                    required
+                    placeholder="Banco / instituição"
+                    value={formEmprestimoBancario.banco}
+                    onChange={(e) => setFormEmprestimoBancario({ ...formEmprestimoBancario, banco: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <select
+                    value={formEmprestimoBancario.obra}
+                    onChange={(e) => setFormEmprestimoBancario({ ...formEmprestimoBancario, obra: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  >
+                    {NOMES_OBRAS.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    placeholder="Valor contratado (R$)"
+                    value={formEmprestimoBancario.valorContratado}
+                    onChange={(e) => setFormEmprestimoBancario({ ...formEmprestimoBancario, valorContratado: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    title="O valor liberado/emprestado pelo banco"
+                  />
+                  <input
+                    required
+                    type="number"
+                    placeholder="Valor a pagar (R$)"
+                    value={formEmprestimoBancario.valorAPagar}
+                    onChange={(e) => setFormEmprestimoBancario({ ...formEmprestimoBancario, valorAPagar: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    title="O total a devolver, já com juros — é esse valor que vira parcelas em Contas a pagar"
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    max="360"
+                    placeholder="Nº de parcelas"
+                    value={formEmprestimoBancario.numeroParcelas}
+                    onChange={(e) => setFormEmprestimoBancario({ ...formEmprestimoBancario, numeroParcelas: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="date"
+                    value={dataBRparaISO(formEmprestimoBancario.dataContratacao)}
+                    onChange={(e) => setFormEmprestimoBancario({ ...formEmprestimoBancario, dataContratacao: dataISOparaBR(e.target.value) })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    title="Data do 1º vencimento — as demais parcelas seguem mensalmente a partir dela"
+                  />
+                  <input
+                    placeholder="Observações (opcional)"
+                    value={formEmprestimoBancario.observacoes}
+                    onChange={(e) => setFormEmprestimoBancario({ ...formEmprestimoBancario, observacoes: e.target.value })}
+                    className="sm:col-span-3 text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+
+                  {formEmprestimoBancario.valorAPagar && formEmprestimoBancario.dataContratacao && (() => {
+                    const previaParcelas = gerarParcelasDespesaAvulsa({
+                      id: "previa",
+                      dataVencimento: formEmprestimoBancario.dataContratacao,
+                      numeroParcelas: formEmprestimoBancario.numeroParcelas,
+                      valorTotal: Number(formEmprestimoBancario.valorAPagar) || 0,
+                    });
+                    return (
+                      <div
+                        className="sm:col-span-3 p-3 rounded-sm"
+                        style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                      >
+                        <div className="text-xs font-semibold mb-2" style={{ color: "#8A8D93" }}>
+                          Distribuição das parcelas (calculada automaticamente):
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {previaParcelas.map((p) => (
+                            <div
+                              key={p.parcela}
+                              className="text-xs px-2.5 py-1.5 rounded-sm"
+                              style={{ background: "#F5F3EC", border: "1px solid #DCD7C9", color: "#22252A" }}
+                            >
+                              <span className="font-semibold">{p.parcela}</span> — {formatBRLShort(p.valor)} — vence {p.vencimento}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  <button
+                    type="submit"
+                    className="sm:col-span-3 text-xs font-semibold px-3 py-2.5 rounded-sm"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: "#F5F3EC",
+                      background: "#E1590C",
+                    }}
+                  >
+                    SALVAR EMPRÉSTIMO
+                  </button>
+                  <div className="sm:col-span-3 text-xs" style={{ color: "#8A8D93" }}>
+                    As parcelas são lançadas automaticamente em Contas a pagar (e entram no Fluxo de caixa
+                    sozinhas, junto com as demais contas).
+                  </div>
+                </form>
+              )}
+
+              {loadingEmprestimosBancarios ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Carregando…
+                </div>
+              ) : emprestimosBancariosFiltrados.length === 0 ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Nenhum empréstimo bancário cadastrado para esse filtro ainda.
+                </div>
+              ) : (
+                <>
+                  <div className="hidden sm:grid grid-cols-[1fr_0.8fr_0.9fr_0.9fr_0.6fr_0.8fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <span>Banco</span>
+                    <span>Obra</span>
+                    <span>Valor contratado</span>
+                    <span>Valor a pagar</span>
+                    <span>Parcelas</span>
+                    <span>Contratado em</span>
+                    <span></span>
+                  </div>
+                  <div className="space-y-2">
+                    {emprestimosBancariosFiltrados.map((e) => (
+                      <div
+                        key={e.id}
+                        className="grid grid-cols-2 sm:grid-cols-[1fr_0.8fr_0.9fr_0.9fr_0.6fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                        style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                      >
+                        <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{e.banco}</span>
+                        <span className="text-xs" style={{ color: "#6B6F76" }}>{e.obra}</span>
+                        <span className="text-xs" style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}>
+                          {formatBRLShort(e.valorContratado)}
+                        </span>
+                        <span className="text-xs" style={{ color: "#B23A2E", fontFamily: "'IBM Plex Mono', monospace" }}>
+                          {formatBRLShort(e.valorAPagar)}
+                        </span>
+                        <span className="text-xs" style={{ color: "#6B6F76" }}>{e.numeroParcelas}x</span>
+                        <span className="text-xs" style={{ color: "#6B6F76" }}>{e.dataContratacao}</span>
+                        <button
+                          onClick={() => handleDeleteEmprestimoBancario(e.id)}
+                          className="text-xs w-fit"
+                          style={{ color: "#B23A2E" }}
+                          title="Excluir empréstimo e as parcelas geradas em Contas a pagar"
+                        >
+                          Excluir
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              O "valor a pagar" (já com juros, se houver) é dividido pelo número de parcelas e lançado em
+              Contas a pagar — a 1ª parcela vence na data informada, e as demais mensalmente a partir daí.
+              Essas parcelas entram no Fluxo de caixa junto com as demais contas a pagar.
             </p>
           </>
         )}
