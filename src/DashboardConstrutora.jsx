@@ -2086,6 +2086,7 @@ export default function DashboardConstrutora() {
   const [showFormUnidade, setShowFormUnidade] = useState(false);
   const [filtroObraUnidades, setFiltroObraUnidades] = useState("");
   const [filtroStatusUnidades, setFiltroStatusUnidades] = useState("");
+  const [editandoUnidadeId, setEditandoUnidadeId] = useState(null);
   const [formUnidade, setFormUnidade] = useState({
     obra: NOMES_OBRAS[0],
     unidade: "",
@@ -4996,49 +4997,66 @@ export default function DashboardConstrutora() {
                       .sort((a, b) => a.unidade.localeCompare(b.unidade, "pt-BR", { numeric: true }))
                       .map((u) => {
                         const cfg = statusUnidadeConfig[u.statusEfetivo];
+                        const editando = editandoUnidadeId === u.id;
                         return (
                           <div
                             key={u.id}
                             className="grid grid-cols-2 sm:grid-cols-[1fr_0.6fr_1fr_0.8fr_1fr_1fr_1.1fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
-                            <input
-                              value={u.unidade}
-                              onChange={(e) => handleUpdateUnidadeCampo(u.id, "unidade", e.target.value)}
-                              onBlur={handlePersistUnidadesBlur}
-                              className="text-sm font-semibold px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0, width: "100%" }}
-                            />
-                            <input
-                              value={u.andar}
-                              onChange={(e) => handleUpdateUnidadeCampo(u.id, "andar", e.target.value)}
-                              onBlur={handlePersistUnidadesBlur}
-                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0, width: "100%" }}
-                            />
-                            <input
-                              value={u.tipo}
-                              onChange={(e) => handleUpdateUnidadeCampo(u.id, "tipo", e.target.value)}
-                              onBlur={handlePersistUnidadesBlur}
-                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0, width: "100%" }}
-                            />
-                            <input
-                              type="number"
-                              value={u.metragem}
-                              onChange={(e) => handleUpdateUnidadeCampo(u.id, "metragem", Number(e.target.value) || 0)}
-                              onBlur={handlePersistUnidadesBlur}
-                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A", fontFamily: "'IBM Plex Mono', monospace", minWidth: 0, width: "100%" }}
-                            />
-                            <input
-                              type="number"
-                              value={u.valorVenda}
-                              onChange={(e) => handleUpdateUnidadeCampo(u.id, "valorVenda", Number(e.target.value) || 0)}
-                              onBlur={handlePersistUnidadesBlur}
-                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0, width: "100%" }}
-                            />
+                            {editando ? (
+                              <>
+                                <input
+                                  value={u.unidade}
+                                  onChange={(e) => handleUpdateUnidadeCampo(u.id, "unidade", e.target.value)}
+                                  onBlur={handlePersistUnidadesBlur}
+                                  className="text-sm font-semibold px-2 py-1.5 rounded-sm outline-none"
+                                  style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0, width: "100%" }}
+                                />
+                                <input
+                                  value={u.andar}
+                                  onChange={(e) => handleUpdateUnidadeCampo(u.id, "andar", e.target.value)}
+                                  onBlur={handlePersistUnidadesBlur}
+                                  className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                                  style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0, width: "100%" }}
+                                />
+                                <input
+                                  value={u.tipo}
+                                  onChange={(e) => handleUpdateUnidadeCampo(u.id, "tipo", e.target.value)}
+                                  onBlur={handlePersistUnidadesBlur}
+                                  className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                                  style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0, width: "100%" }}
+                                />
+                                <input
+                                  type="number"
+                                  value={u.metragem}
+                                  onChange={(e) => handleUpdateUnidadeCampo(u.id, "metragem", Number(e.target.value) || 0)}
+                                  onBlur={handlePersistUnidadesBlur}
+                                  className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                                  style={{ border: "1px solid #DCD7C9", color: "#22252A", fontFamily: "'IBM Plex Mono', monospace", minWidth: 0, width: "100%" }}
+                                />
+                                <input
+                                  type="number"
+                                  value={u.valorVenda}
+                                  onChange={(e) => handleUpdateUnidadeCampo(u.id, "valorVenda", Number(e.target.value) || 0)}
+                                  onBlur={handlePersistUnidadesBlur}
+                                  className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                                  style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0, width: "100%" }}
+                                />
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-sm font-semibold truncate" style={{ color: "#22252A" }}>{u.unidade}</span>
+                                <span className="text-xs truncate" style={{ color: "#6B6F76" }}>{u.andar || "—"}</span>
+                                <span className="text-xs truncate" style={{ color: "#6B6F76" }}>{u.tipo || "—"}</span>
+                                <span className="text-xs" style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}>
+                                  {u.metragem ? `${u.metragem} m²` : "—"}
+                                </span>
+                                <span className="text-xs font-semibold" style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>
+                                  {formatBRLShort(u.valorVenda)}
+                                </span>
+                              </>
+                            )}
                             <span
                               className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
                               style={{ color: cfg.color, background: cfg.bg }}
@@ -5048,24 +5066,46 @@ export default function DashboardConstrutora() {
                             <span className="text-xs truncate" style={{ color: "#6B6F76" }}>
                               {u.contratoVinculado ? u.contratoVinculado.comprador : "—"}
                             </span>
-                            <div className="flex items-center gap-3">
-                              {u.statusEfetivo !== "vendida" && (
+                            <div className="flex items-center gap-3 flex-wrap">
+                              {editando ? (
                                 <button
-                                  onClick={() => handleToggleStatusManualUnidade(u.id)}
+                                  onClick={() => {
+                                    handlePersistUnidadesBlur();
+                                    setEditandoUnidadeId(null);
+                                  }}
                                   className="text-xs w-fit font-semibold"
-                                  style={{ color: u.statusManual === "reservada" ? "#4F7A5B" : "#B4590C" }}
+                                  style={{ color: "#3D6E8C" }}
                                 >
-                                  {u.statusManual === "reservada" ? "Disponibilizar" : "Reservar"}
+                                  Concluir
                                 </button>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => setEditandoUnidadeId(u.id)}
+                                    className="text-xs w-fit font-semibold"
+                                    style={{ color: "#3D6E8C" }}
+                                  >
+                                    Editar
+                                  </button>
+                                  {u.statusEfetivo !== "vendida" && (
+                                    <button
+                                      onClick={() => handleToggleStatusManualUnidade(u.id)}
+                                      className="text-xs w-fit font-semibold"
+                                      style={{ color: u.statusManual === "reservada" ? "#4F7A5B" : "#B4590C" }}
+                                    >
+                                      {u.statusManual === "reservada" ? "Disponibilizar" : "Reservar"}
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => handleDeleteUnidade(u.id)}
+                                    className="text-xs w-fit"
+                                    style={{ color: "#B23A2E" }}
+                                    title="Excluir unidade"
+                                  >
+                                    Excluir
+                                  </button>
+                                </>
                               )}
-                              <button
-                                onClick={() => handleDeleteUnidade(u.id)}
-                                className="text-xs w-fit"
-                                style={{ color: "#B23A2E" }}
-                                title="Excluir unidade"
-                              >
-                                Excluir
-                              </button>
                             </div>
                           </div>
                         );
