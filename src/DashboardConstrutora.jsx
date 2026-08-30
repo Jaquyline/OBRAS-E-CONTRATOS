@@ -1,0 +1,7253 @@
+import React, { useState, useEffect, useMemo } from "react";
+
+// ---- Importação de PDF: extração por padrão de texto (sem IA) ----
+
+const PDFJS_SCRIPT = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+function loadPdfJs() {
+  return new Promise((resolve, reject) => {
+    if (window.pdfjsLib) {
+      resolve(window.pdfjsLib);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = PDFJS_SCRIPT;
+    script.onload = () => {
+      try {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+        resolve(window.pdfjsLib);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    script.onerror = () => reject(new Error("Falha ao carregar leitor de PDF."));
+    document.body.appendChild(script);
+  });
+}
+
+async function extractTextFromPdf(file) {
+  const pdfjsLib = await loadPdfJs();
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let fullText = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    fullText += content.items.map((item) => item.str).join(" ") + "\n";
+  }
+  return fullText;
+}
+
+// Extrai o texto preservando quebras de linha por linha visual (agrupando
+// itens pela posição Y), essencial para ler extratos bancários tabulares
+// (data | descrição | valor) — extractTextFromPdf junta tudo numa linha só
+// por página e por isso não serve para esse caso.
+async function extractLinesFromPdf(file) {
+  const pdfjsLib = await loadPdfJs();
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const linhas = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const linhasPorY = {};
+    content.items.forEach((item) => {
+      const y = Math.round(item.transform[5]);
+      if (!linhasPorY[y]) linhasPorY[y] = [];
+      linhasPorY[y].push(item);
+    });
+    const ys = Object.keys(linhasPorY)
+      .map(Number)
+      .sort((a, b) => b - a); // de cima para baixo (Y cresce para cima em PDF)
+    ys.forEach((y) => {
+      const texto = linhasPorY[y]
+        .sort((a, b) => a.transform[4] - b.transform[4])
+        .map((it) => it.str)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (texto) linhas.push(texto);
+    });
+  }
+  return linhas;
+}
+
+const MESES = {
+  janeiro: "01", fevereiro: "02", março: "03", marco: "03", abril: "04",
+  maio: "05", junho: "06", julho: "07", agosto: "08", setembro: "09",
+  outubro: "10", novembro: "11", dezembro: "12",
+};
+
+// Extração baseada em padrões de texto comuns em contratos de promessa de
+// compra e venda — funciona bem em modelos parecidos, mas pode falhar ou
+// vir incompleta se o contrato seguir outro formato. Sempre revisar antes de salvar.
+function parseContratoCV(text) {
+  const result = {};
+
+  const unidadeMatch = text.match(/n[°º]\s*(\d{2,4})\s+do\s+([A-ZÀ-Üa-zà-ü\s]+?)(?:,|\.|localizado)/i);
+  if (unidadeMatch) {
+    result.unidade = `Unidade ${unidadeMatch[1]}`;
+  } else {
+    const fallback = text.match(/[Uu]nidade\s*(?:n[°º]?)?\s*(\d{2,4})/);
+    if (fallback) result.unidade = `Unidade ${fallback[1]}`;
+  }
+
+  const nomes = [...text.matchAll(/([A-ZÀ-Ü][A-ZÀ-Ü\s]{3,60}?),\s*brasileir[oa]/g)].map((m) =>
+    m[1].trim().replace(/\s+/g, " ")
+  );
+  if (nomes.length) result.comprador = nomes.join(" e ");
+
+  const valorMatch =
+    text.match(/import[âa]ncia total de\s*R\$\s*([\d.,]+)/i) ||
+    text.match(/pre[çc]o(?:\s*de\s*venda)?[^R$]{0,40}R\$\s*([\d.,]+)/i) ||
+    text.match(/valor total(?:\s*de)?\s*R\$\s*([\d.,]+)/i);
+  if (valorMatch) {
+    const numero = valorMatch[1].replace(/\./g, "").replace(",", ".");
+    result.valor = String(Math.round(parseFloat(numero)));
+  }
+
+  const dataMatch = text.match(/,\s*(\d{1,2})\s+de\s+([a-zà-üçã]+)\s+de\s+(\d{4})/i);
+  if (dataMatch) {
+    const [, dia, mesNome, ano] = dataMatch;
+    const mes = MESES[mesNome.toLowerCase()];
+    if (mes) result.dataAssinatura = `${dia.padStart(2, "0")}/${mes}/${ano}`;
+  }
+
+  return result;
+}
+
+// Extração de notas de compra por padrão de texto — heurística, revisar
+// antes de salvar. Procura fornecedor, valor total, número de parcelas e
+// data de emissão em modelos comuns de nota fiscal / boleto de fornecedor.
+function parseNotaCompra(text) {
+  const result = {};
+
+  const fornecedorMatch = text.match(
+    /([A-ZÀ-Ü][A-ZÀ-Üa-zà-ü0-9\s.\-]{2,60}?)\s*(?:LTDA|ME\b|EIRELI|S\/A|SA\b)/
+  );
+  if (fornecedorMatch) {
+    result.fornecedor = fornecedorMatch[0].trim().replace(/\s+/g, " ");
+  }
+
+  const valorMatch =
+    text.match(/valor total(?:\s*da nota)?\s*[:\-]?\s*R\$\s*([\d.,]+)/i) ||
+    text.match(/total\s*(?:a\s*pagar)?\s*[:\-]?\s*R\$\s*([\d.,]+)/i);
+  if (valorMatch) {
+    const numero = valorMatch[1].replace(/\./g, "").replace(",", ".");
+    result.valorTotal = String(Math.round(parseFloat(numero)));
+  }
+
+  const parcelasMatch =
+    text.match(/(\d{1,2})\s*x\s*(?:de)?\s*R\$/i) ||
+    text.match(/(\d{1,2})\s*parcelas?/i);
+  if (parcelasMatch) {
+    result.numeroParcelas = String(Math.min(24, parseInt(parcelasMatch[1], 10)));
+  }
+
+  const dataMatch =
+    text.match(/emiss[ãa]o[^0-9]{0,15}(\d{1,2})\/(\d{1,2})\/(\d{4})/i) ||
+    text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (dataMatch) {
+    const [, dia, mes, ano] = dataMatch;
+    result.dataEmissao = `${dia.padStart(2, "0")}/${mes.padStart(2, "0")}/${ano}`;
+  }
+
+  return result;
+}
+
+// Detecta possível nota duplicada: mesmo fornecedor (ignorando maiúsculas/
+// espaços), mesmo valor total e mesma data de emissão já cadastrados. É uma
+// checagem simples — fornecedores com nomes escritos de forma diferente ou
+// datas divergentes não são pegos, então continua valendo revisar antes de
+// salvar.
+function encontrarNotaDuplicada(candidata, notasExistentes) {
+  const fornecedorNorm = (candidata.fornecedor || "").trim().toLowerCase();
+  const valorCand = Number(candidata.valorTotal);
+  if (!fornecedorNorm || !candidata.dataEmissao || Number.isNaN(valorCand)) return null;
+
+  return (
+    notasExistentes.find((n) => {
+      const mesmoFornecedor = (n.fornecedor || "").trim().toLowerCase() === fornecedorNorm;
+      const mesmoValor = Math.abs(n.valorTotal - valorCand) < 0.01;
+      const mesmaData = n.dataEmissao === candidata.dataEmissao;
+      return mesmoFornecedor && mesmoValor && mesmaData;
+    }) || null
+  );
+}
+
+// Extração de lançamentos de extrato bancário — heurística baseada em linhas
+// no formato "data  descrição  valor". Funciona bem com extratos simples e
+// tabulares; extratos com colunas de saldo corrente, múltiplas moedas ou
+// layouts muito diferentes podem não ser reconhecidos. Cada lançamento
+// importado fica em uma prévia editável antes de ser confirmado.
+function parseLancamentosExtrato(linhas) {
+  const linhaRegex =
+    /^(\d{2}\/\d{2}(?:\/\d{2,4})?)\s+(.+?)\s+(-)?\s?(?:R\$\s?)?(\d{1,3}(?:\.\d{3})*,\d{2})\s*([CD])?$/i;
+  const resultado = [];
+
+  linhas.forEach((linha) => {
+    const m = linha.match(linhaRegex);
+    if (!m) return;
+    const [, dataStr, descricaoRaw, sinalNeg, valorStr, marcador] = m;
+
+    const [dia, mes, anoRaw] = dataStr.split("/");
+    const ano = !anoRaw ? String(new Date().getFullYear()) : anoRaw.length === 2 ? `20${anoRaw}` : anoRaw;
+    const data = `${dia}/${mes}/${ano}`;
+
+    const numero = parseFloat(valorStr.replace(/\./g, "").replace(",", "."));
+    if (Number.isNaN(numero)) return;
+    const isDebito = sinalNeg === "-" || (marcador && marcador.toUpperCase() === "D");
+    const valor = isDebito ? -Math.abs(numero) : Math.abs(numero);
+
+    const descricao = descricaoRaw.trim().replace(/\s+/g, " ");
+    if (!descricao) return;
+
+    resultado.push({
+      id: `tmp-${resultado.length}-${Date.now()}`,
+      data,
+      descricao,
+      valor,
+      socio: "",
+    });
+  });
+
+  return resultado;
+}
+
+// Extração heurística de número, data de emissão e validade a partir do
+// texto de um PDF de documento da empresa — funciona melhor como ponto de
+// partida; confira e complete os campos antes de salvar.
+function parseDocumentoEmpresa(text) {
+  const result = {};
+
+  const cnpjMatch = text.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/);
+  if (cnpjMatch) {
+    result.numero = cnpjMatch[0];
+  } else {
+    const numeroMatch = text.match(/n[ºo°]\s*[:.]?\s*([\d./-]{4,25})/i);
+    if (numeroMatch) result.numero = numeroMatch[1].trim();
+  }
+
+  const emissaoMatch =
+    text.match(/emiss[ãa]o[^0-9]{0,15}(\d{1,2}\/\d{1,2}\/\d{4})/i) ||
+    text.match(/emitid[oa]\s+em[^0-9]{0,10}(\d{1,2}\/\d{1,2}\/\d{4})/i) ||
+    text.match(/expedid[oa]\s+em[^0-9]{0,10}(\d{1,2}\/\d{1,2}\/\d{4})/i);
+  if (emissaoMatch) result.dataEmissao = emissaoMatch[1];
+
+  const validadeMatch =
+    text.match(/v[áa]lid[oa]\s+at[ée][^0-9]{0,10}(\d{1,2}\/\d{1,2}\/\d{4})/i) ||
+    text.match(/validade[^0-9]{0,10}(\d{1,2}\/\d{1,2}\/\d{4})/i) ||
+    text.match(/vencimento[^0-9]{0,10}(\d{1,2}\/\d{1,2}\/\d{4})/i);
+  if (validadeMatch) result.validade = validadeMatch[1];
+
+  return result;
+}
+
+function parseDateBR(str) {
+  if (!str) return null;
+  const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  const [, dia, mes, ano] = m;
+  return new Date(Number(ano), Number(mes) - 1, Number(dia));
+}
+
+function formatDateBR(date) {
+  const dia = String(date.getDate()).padStart(2, "0");
+  const mes = String(date.getMonth() + 1).padStart(2, "0");
+  const ano = date.getFullYear();
+  return `${dia}/${mes}/${ano}`;
+}
+
+// Conversões para usar <input type="date"> (seletor de calendário nativo) e
+// mesmo assim guardar as datas como "dd/mm/aaaa" — formato usado em todo o
+// resto do painel — sem precisar mudar como as datas são lidas em nenhum
+// outro lugar.
+function dataBRparaISO(dataBR) {
+  if (!dataBR) return "";
+  const m = dataBR.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return "";
+  const [, dia, mes, ano] = m;
+  return `${ano}-${mes.padStart(2, "0")}-${dia.padStart(2, "0")}`;
+}
+
+function dataISOparaBR(dataISO) {
+  if (!dataISO) return "";
+  const m = dataISO.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return "";
+  const [, ano, mes, dia] = m;
+  return `${dia}/${mes}/${ano}`;
+}
+
+function addMonths(date, meses) {
+  const d = new Date(date);
+  d.setMonth(d.getMonth() + meses);
+  return d;
+}
+
+// Gera as parcelas de contas a pagar a partir de uma nota de compra.
+// 1 parcela: vence 30 dias após a emissão. Mais de 1: primeira parcela 30
+// dias após a emissão, demais mensais a partir daí.
+function gerarParcelas(nota) {
+  const emissao = parseDateBR(nota.dataEmissao) || new Date();
+  const n = Math.max(1, Number(nota.numeroParcelas) || 1);
+  const valorParcela = Math.round(nota.valorTotal / n);
+  const parcelas = [];
+  // primeira parcela vence 1 mês após a emissão, cada parcela seguinte +1 mês
+  for (let i = 0; i < n; i++) {
+    const vencimento = addMonths(emissao, i + 1);
+    const valor = i === n - 1 ? nota.valorTotal - valorParcela * (n - 1) : valorParcela;
+    parcelas.push({
+      id: `${nota.id}-${i + 1}`,
+      notaId: nota.id,
+      fornecedor: nota.fornecedor,
+      obra: nota.obra,
+      parcela: `${i + 1}/${n}`,
+      valor,
+      vencimento: formatDateBR(vencimento),
+      status: "pendente",
+    });
+  }
+  return parcelas;
+}
+
+// Gera as parcelas de uma despesa avulsa lançada direto em Contas a pagar
+// (sem passar por nota de compra ou contrato). Diferente de gerarParcelas: o
+// vencimento digitado é o da 1ª parcela — não soma mais 1 mês por cima —
+// e as demais parcelas seguem mensalmente a partir daí.
+function gerarParcelasDespesaAvulsa(despesa) {
+  const primeiroVencimento = parseDateBR(despesa.dataVencimento) || new Date();
+  const n = Math.max(1, Number(despesa.numeroParcelas) || 1);
+  const valorParcela = Math.round(despesa.valorTotal / n);
+  const parcelas = [];
+  for (let i = 0; i < n; i++) {
+    const vencimento = addMonths(primeiroVencimento, i);
+    const valor = i === n - 1 ? despesa.valorTotal - valorParcela * (n - 1) : valorParcela;
+    parcelas.push({
+      id: `${despesa.id}-${i + 1}`,
+      notaId: despesa.id,
+      fornecedor: despesa.fornecedor,
+      obra: despesa.obra,
+      parcela: `${i + 1}/${n}`,
+      valor,
+      vencimento: formatDateBR(vencimento),
+      status: "pendente",
+    });
+  }
+  return parcelas;
+}
+
+// Gera as parcelas de valores a receber a partir de um contrato de compra e
+// venda. Mesma regra de datas de gerarParcelas: 1ª parcela 1 mês após a
+// assinatura, demais mensais a partir daí. Se o contrato tiver
+// "valoresParcelas" (array de números definidos à mão), usa esses valores em
+// vez de dividir o total igualmente. Independente do campo "% pago" do
+// contrato — as duas coisas não se atualizam uma à outra automaticamente,
+// assim como notas de compra não recalculam contas a pagar já geradas.
+function gerarParcelasReceber(contrato) {
+  const assinatura = parseDateBR(contrato.dataAssinatura) || new Date();
+  const personalizadas =
+    Array.isArray(contrato.valoresParcelas) && contrato.valoresParcelas.length > 0
+      ? contrato.valoresParcelas
+      : null;
+  const n = personalizadas ? personalizadas.length : Math.max(1, Number(contrato.numeroParcelas) || 1);
+  const valorParcelaPadrao = Math.round(contrato.valor / n);
+  const parcelas = [];
+  for (let i = 0; i < n; i++) {
+    const vencimento = addMonths(assinatura, i + 1);
+    const valor = personalizadas
+      ? Number(personalizadas[i]) || 0
+      : i === n - 1
+      ? contrato.valor - valorParcelaPadrao * (n - 1)
+      : valorParcelaPadrao;
+    parcelas.push({
+      id: `${contrato.id}-r${i + 1}`,
+      contratoId: contrato.id,
+      unidade: contrato.unidade,
+      comprador: contrato.comprador,
+      parcela: `${i + 1}/${n}`,
+      valor,
+      vencimento: formatDateBR(vencimento),
+      status: "pendente",
+    });
+  }
+  return parcelas;
+}
+
+// ---- Mock data (protótipo — dados fictícios) ----
+
+const obrasIniciais = [
+  {
+    id: "ic",
+    nome: "Isla Catalina",
+    status: "em_andamento",
+    avancoFisico: 0,
+  },
+  {
+    id: "ip",
+    nome: "Residencial Isla Providência",
+    status: "concluida",
+    nota: "Última unidade em comercialização",
+  },
+];
+
+const NOMES_OBRAS = obrasIniciais.map((o) => o.nome);
+
+// Modelo de orçamento de obra por etapa/item — mesma estrutura da planilha
+// "Orçamento de obra" enviada: Quantidade, Valor Unitário e Gasto Real são
+// preenchidos manualmente; Orçado, Saldo e % Executado são calculados.
+const ETAPAS_CUSTO = [
+  {
+    etapa: "1. Serviços Preliminares",
+    itens: [
+      { item: "Instalação de canteiro de obras", unidade: "vb" },
+      { item: "Tapumes e sinalização", unidade: "m" },
+      { item: "Ligações provisórias (água, luz, esgoto)", unidade: "vb" },
+      { item: "Locação da obra (gabarito)", unidade: "vb" },
+    ],
+  },
+  {
+    etapa: "2. Fundação",
+    itens: [
+      { item: "Sondagem do solo (SPT)", unidade: "vb" },
+      { item: "Escavação e terraplenagem", unidade: "m³" },
+      { item: "Estacas/tubulões", unidade: "un" },
+      { item: "Blocos e vigas baldrame", unidade: "m³" },
+      { item: "Impermeabilização da fundação", unidade: "m²" },
+    ],
+  },
+  {
+    etapa: "3. Estrutura",
+    itens: [
+      { item: "Formas para pilares, vigas e lajes", unidade: "m²" },
+      { item: "Aço (armação)", unidade: "kg" },
+      { item: "Concreto usinado", unidade: "m³" },
+      { item: "Lajes (por pavimento)", unidade: "m²" },
+      { item: "Escadas e caixa de elevador (estrutura)", unidade: "vb" },
+    ],
+  },
+  {
+    etapa: "4. Alvenaria e Vedação",
+    itens: [
+      { item: "Alvenaria de blocos (vedação)", unidade: "m²" },
+      { item: "Vergas e contravergas", unidade: "m" },
+      { item: "Impermeabilização de áreas molhadas", unidade: "m²" },
+    ],
+  },
+  {
+    etapa: "5. Instalações Hidrossanitárias",
+    itens: [
+      { item: "Tubulação de água fria/quente", unidade: "vb" },
+      { item: "Esgoto e ventilação", unidade: "vb" },
+      { item: "Caixas d'água e bombas", unidade: "un" },
+      { item: "Louças e metais (por unidade/apto)", unidade: "vb" },
+    ],
+  },
+  {
+    etapa: "6. Instalações Elétricas",
+    itens: [
+      { item: "Infraestrutura elétrica (eletrodutos, fiação)", unidade: "vb" },
+      { item: "Quadros de distribuição", unidade: "un" },
+      { item: "Subestação/entrada de energia", unidade: "vb" },
+      { item: "Iluminação de áreas comuns", unidade: "vb" },
+    ],
+  },
+  {
+    etapa: "7. Instalações Especiais",
+    itens: [
+      { item: "Elevadores (fornecimento e instalação)", unidade: "un" },
+      { item: "Gás (central e tubulação)", unidade: "vb" },
+      { item: "Sistema de incêndio (hidrantes, extintores)", unidade: "vb" },
+      { item: "SPDA (para-raios)", unidade: "vb" },
+      { item: "Gerador de emergência", unidade: "un" },
+    ],
+  },
+  {
+    etapa: "8. Esquadrias",
+    itens: [
+      { item: "Esquadrias de alumínio (janelas/portas)", unidade: "m²" },
+      { item: "Portas internas", unidade: "un" },
+      { item: "Portão/portaria (entrada do prédio)", unidade: "vb" },
+      { item: "Guarda-corpos e grades", unidade: "m" },
+    ],
+  },
+  {
+    etapa: "9. Revestimentos e Acabamentos",
+    itens: [
+      { item: "Reboco/emboço interno e externo", unidade: "m²" },
+      { item: "Revestimento cerâmico (paredes)", unidade: "m²" },
+      { item: "Piso (áreas privativas)", unidade: "m²" },
+      { item: "Piso (áreas comuns)", unidade: "m²" },
+      { item: "Forro (gesso/PVC)", unidade: "m²" },
+      { item: "Pintura interna e externa", unidade: "m²" },
+      { item: "Fachada (revestimento externo)", unidade: "m²" },
+    ],
+  },
+  {
+    etapa: "10. Áreas Comuns e Externas",
+    itens: [
+      { item: "Portaria e hall de entrada", unidade: "vb" },
+      { item: "Paisagismo", unidade: "vb" },
+      { item: "Piscina/área de lazer (se houver)", unidade: "vb" },
+      { item: "Muros e calçadas", unidade: "m" },
+      { item: "Estacionamento", unidade: "m²" },
+    ],
+  },
+  {
+    etapa: "11. Administração e Legalização",
+    itens: [
+      { item: "Projeto arquitetônico e complementares", unidade: "vb" },
+      { item: "ART/RRT e responsabilidade técnica", unidade: "vb" },
+      { item: "Alvará de construção", unidade: "vb" },
+      { item: "Habite-se", unidade: "vb" },
+      { item: "Averbação e registro", unidade: "vb" },
+      { item: "Administração da obra (engenheiro/mestre)", unidade: "mês" },
+    ],
+  },
+  {
+    etapa: "12. Reserva Técnica",
+    itens: [{ item: "Contingência (imprevistos)", unidade: "vb" }],
+  },
+];
+
+function gerarCustosItensIniciais(obraNome) {
+  const itens = [];
+  let seq = 1;
+  ETAPAS_CUSTO.forEach(({ etapa, itens: itensEtapa }) => {
+    itensEtapa.forEach(({ item, unidade }) => {
+      itens.push({
+        id: `custo-${seq}`,
+        obra: obraNome,
+        etapa,
+        item,
+        unidade,
+        quantidade: "",
+        valorUnitario: "",
+        gastoReal: "",
+        observacoes: "",
+      });
+      seq += 1;
+    });
+  });
+  return itens;
+}
+
+const defaultCustosItens = gerarCustosItensIniciais(NOMES_OBRAS[0]);
+
+// Réplica das fórmulas da planilha: Orçado = Quantidade × Valor Unitário (só
+// se os dois estiverem preenchidos); Saldo = Orçado − Gasto Real; % Executado
+// = Gasto Real ÷ Orçado. Célula em branco na planilha = null aqui.
+function custoOrcadoItem(it) {
+  if (it.quantidade === "" || it.valorUnitario === "" || it.quantidade == null || it.valorUnitario == null) {
+    return null;
+  }
+  const q = Number(it.quantidade);
+  const v = Number(it.valorUnitario);
+  if (Number.isNaN(q) || Number.isNaN(v)) return null;
+  return q * v;
+}
+
+function custoSaldoItem(it) {
+  const orcado = custoOrcadoItem(it);
+  if (orcado === null) return null;
+  const gasto = it.gastoReal === "" || it.gastoReal == null ? 0 : Number(it.gastoReal) || 0;
+  return orcado - gasto;
+}
+
+function custoPctItem(it) {
+  const orcado = custoOrcadoItem(it);
+  if (!orcado) return null;
+  const gasto = it.gastoReal === "" || it.gastoReal == null ? 0 : Number(it.gastoReal) || 0;
+  return gasto / orcado;
+}
+
+// Soma orçado/gasto/saldo/% de um conjunto de itens — usado para os
+// subtotais por etapa e para o total geral da obra.
+function resumoCustoItens(itens) {
+  const orcado = itens.reduce((s, it) => s + (custoOrcadoItem(it) || 0), 0);
+  const gasto = itens.reduce(
+    (s, it) => s + (it.gastoReal === "" || it.gastoReal == null ? 0 : Number(it.gastoReal) || 0),
+    0
+  );
+  return { orcado, gasto, saldo: orcado - gasto, pct: orcado ? gasto / orcado : null };
+}
+
+// Gasto real "efetivo" de um item: se houver parcelas de contas a pagar
+// vinculadas a ele (campo custoItemId) e já pagas, o gasto real vem da soma
+// dessas parcelas — o campo digitado manualmente é ignorado nesse caso. Sem
+// vínculo nenhum, usa o valor digitado manualmente, como antes.
+function gastoRealEfetivo(item, contasPagarLista) {
+  const vinculadas = contasPagarLista.filter(
+    (c) => c.custoItemId === item.id && statusPagarDisplay(c) === "pago"
+  );
+  if (vinculadas.length > 0) {
+    return vinculadas.reduce((s, c) => s + c.valor, 0);
+  }
+  return item.gastoReal;
+}
+
+const TIPOS_FORNECEDOR = ["Fornecedor de material", "Subempreiteiro"];
+
+// contrato de fornecedor/subempreiteiro — "vigente" por padrão; "vencendo"
+// nos 30 dias antes do término; "vencido" depois do término; "encerrado" só
+// quando marcado manualmente (ex: contrato finalizado antes do prazo)
+function statusContratoFornecedorDisplay(c) {
+  if (c.encerrado) return "encerrado";
+  const termino = parseDateBR(c.dataTermino);
+  if (!termino) return "ativo";
+  const hoje = new Date(new Date().toDateString());
+  if (termino < hoje) return "vencido";
+  const em30 = new Date(hoje);
+  em30.setDate(em30.getDate() + 30);
+  if (termino <= em30) return "vencendo";
+  return "ativo";
+}
+
+// dias até o término do contrato (negativo = dias em atraso); null se não
+// houver data de término informada
+function diasRestantesContrato(c) {
+  const termino = parseDateBR(c.dataTermino);
+  if (!termino) return null;
+  const hoje = new Date(new Date().toDateString());
+  return Math.round((termino - hoje) / (1000 * 60 * 60 * 24));
+}
+
+// Extração heurística de dados de contrato de fornecedor a partir do texto
+// do PDF — CNPJ, valor do contrato e datas de início/término. Igual aos
+// outros importadores: revise os campos antes de salvar.
+function parseContratoFornecedor(text) {
+  const result = {};
+
+  const cnpjMatch = text.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/);
+  if (cnpjMatch) result.cnpj = cnpjMatch[0];
+
+  const valorMatch =
+    text.match(/valor (?:total )?(?:do )?contrato\s*[:\-]?\s*R\$\s*([\d.,]+)/i) ||
+    text.match(/valor global\s*[:\-]?\s*R\$\s*([\d.,]+)/i);
+  if (valorMatch) {
+    const numero = valorMatch[1].replace(/\./g, "").replace(",", ".");
+    result.valor = String(Math.round(parseFloat(numero)));
+  }
+
+  const inicioMatch =
+    text.match(/in[íi]cio[^0-9]{0,15}(\d{1,2}\/\d{1,2}\/\d{4})/i) ||
+    text.match(/vig[êe]ncia[^0-9]{0,15}(\d{1,2}\/\d{1,2}\/\d{4})/i);
+  if (inicioMatch) result.dataInicio = inicioMatch[1];
+
+  const terminoMatch =
+    text.match(/t[ée]rmino[^0-9]{0,15}(\d{1,2}\/\d{1,2}\/\d{4})/i) ||
+    text.match(/prazo[^0-9]{0,20}at[ée][^0-9]{0,10}(\d{1,2}\/\d{1,2}\/\d{4})/i);
+  if (terminoMatch) result.dataTermino = terminoMatch[1];
+
+  return result;
+}
+
+const defaultContratosFornecedores = [];
+
+const defaultContratosServicos = [];
+
+const defaultContratosCV = [];
+
+const defaultUnidadesObra = [];
+
+const statusUnidadeConfig = {
+  disponivel: { label: "Disponível", color: "#4F7A5B", bg: "#E8EEE8" },
+  reservada: { label: "Reservada", color: "#B4590C", bg: "#FBEBDB" },
+  vendida: { label: "Vendida", color: "#3D6E8C", bg: "#E4EBEF" },
+};
+
+// Status "vendida" é automático: quando existe um contrato de compra e
+// venda com o mesmo nome de unidade, a unidade aparece como vendida (com o
+// comprador do contrato) — não precisa marcar manualmente. Sem contrato
+// correspondente, usa o status escolhido à mão (Disponível/Reservada).
+function statusUnidadeEfetivo(unidade, contratosCVLista) {
+  const contrato = contratosCVLista.find(
+    (c) => c.unidade.trim().toLowerCase() === unidade.unidade.trim().toLowerCase()
+  );
+  if (contrato) return { status: "vendida", contrato };
+  return { status: unidade.statusManual || "disponivel", contrato: null };
+}
+
+// Parcelas geradas a partir dos contratos acima; o número de parcelas já
+// marcadas como recebidas segue proporcionalmente o "% pago" de cada
+// contrato (só para os dados fictícios — depois de criado, um contrato novo
+// gera parcelas todas pendentes).
+const defaultValoresReceber = defaultContratosCV.flatMap((c) => {
+  const parcelas = gerarParcelasReceber(c);
+  const pagas = Math.round((c.percentualPago / 100) * parcelas.length);
+  return parcelas.map((p, i) => (i < pagas ? { ...p, status: "pago" } : p));
+});
+
+const defaultNotasCompra = [];
+
+const defaultContasPagar = [
+  ...defaultNotasCompra.flatMap((n) => gerarParcelas(n)),
+  ...defaultContratosFornecedores.flatMap((c) =>
+    gerarParcelas({
+      id: c.id,
+      dataEmissao: c.dataInicio,
+      numeroParcelas: c.numeroParcelas,
+      valorTotal: c.valor,
+      fornecedor: c.fornecedor,
+      obra: c.obra,
+    })
+  ),
+  ...defaultContratosServicos.flatMap((c) =>
+    gerarParcelas({
+      id: c.id,
+      dataEmissao: c.dataInicio,
+      numeroParcelas: c.numeroParcelas,
+      valorTotal: c.valor,
+      fornecedor: c.fornecedor,
+      obra: c.obra,
+    })
+  ),
+];
+
+const defaultExtrato = [];
+
+const defaultEmprestimosSocios = [];
+
+const MESES_ABREV = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+
+function mesAnoKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function mesAnoLabel(date) {
+  return `${MESES_ABREV[date.getMonth()]}/${String(date.getFullYear()).slice(2)}`;
+}
+
+// Detalhe do fluxo de caixa de um mês específico (chave "aaaa-mm"): lista
+// cada lançamento de origem (valores a receber, contas a pagar, extrato,
+// empréstimos de sócios) que caiu naquele mês, separado em entradas/saídas —
+// usado para expandir uma linha da planilha detalhada de fluxo de caixa.
+function detalheFluxoMes(chave, valoresReceberLista, contasPagarLista, extratoLista, emprestimosSociosLista) {
+  const entradas = [];
+  const saidas = [];
+
+  valoresReceberLista.forEach((v) => {
+    const d = parseDateBR(v.vencimento);
+    if (d && mesAnoKey(d) === chave) {
+      entradas.push({
+        id: `receber-${v.id}`,
+        origem: "Valores a receber",
+        descricao: `${v.comprador} — ${v.unidade} (${v.parcela})`,
+        valor: v.valor,
+        data: v.vencimento,
+      });
+    }
+  });
+
+  contasPagarLista.forEach((c) => {
+    const d = parseDateBR(c.vencimento);
+    if (d && mesAnoKey(d) === chave) {
+      saidas.push({
+        id: `pagar-${c.id}`,
+        origem: "Contas a pagar",
+        descricao: `${c.fornecedor} — ${c.obra} (${c.parcela})`,
+        valor: c.valor,
+        data: c.vencimento,
+      });
+    }
+  });
+
+  extratoLista.forEach((l) => {
+    const d = parseDateBR(l.data);
+    if (d && mesAnoKey(d) === chave) {
+      if (l.valor >= 0) {
+        entradas.push({ id: `extrato-${l.id}`, origem: "Extrato bancário", descricao: l.descricao, valor: l.valor, data: l.data });
+      } else {
+        saidas.push({ id: `extrato-${l.id}`, origem: "Extrato bancário", descricao: l.descricao, valor: Math.abs(l.valor), data: l.data });
+      }
+    }
+  });
+
+  emprestimosSociosLista.forEach((e) => {
+    const d = parseDateBR(e.data);
+    if (d && mesAnoKey(d) === chave) {
+      if (e.tipo === "aporte") {
+        entradas.push({ id: `socio-${e.id}`, origem: "Empréstimo de sócio", descricao: `Aporte — ${e.socio}`, valor: e.valor, data: e.data });
+      } else {
+        saidas.push({ id: `socio-${e.id}`, origem: "Empréstimo de sócio", descricao: `Devolução — ${e.socio}`, valor: e.valor, data: e.data });
+      }
+    }
+  });
+
+  entradas.sort((a, b) => (parseDateBR(a.data) || 0) - (parseDateBR(b.data) || 0));
+  saidas.sort((a, b) => (parseDateBR(a.data) || 0) - (parseDateBR(b.data) || 0));
+  return { entradas, saidas };
+}
+
+// ---- Helpers ----
+
+const formatBRL = (v) =>
+  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+
+const formatBRLShort = (v) => {
+  if (Math.abs(v) >= 1000000) return `R$ ${(v / 1000000).toFixed(1)}M`;
+  if (Math.abs(v) >= 1000) return `R$ ${(v / 1000).toFixed(0)}mil`;
+  return formatBRL(v);
+};
+
+const statusConfig = {
+  ativo: { label: "Ativo", color: "#4F7A5B", bg: "#E8EEE8" },
+  vencendo: { label: "Vencendo", color: "#B4590C", bg: "#FBEBDB" },
+  vencido: { label: "Vencido", color: "#B23A2E", bg: "#F8E3E0" },
+  encerrado: { label: "Encerrado", color: "#8A8D93", bg: "#EFEDE6" },
+};
+
+const statusPagamentoConfig = {
+  quitado: { label: "Quitado", color: "#4F7A5B", bg: "#E8EEE8" },
+  em_dia: { label: "Em dia", color: "#3D6E8C", bg: "#E4EBEF" },
+  atrasado: { label: "Atrasado", color: "#B23A2E", bg: "#F8E3E0" },
+};
+
+const statusPagarConfig = {
+  pago: { label: "Pago", color: "#4F7A5B", bg: "#E8EEE8" },
+  pendente: { label: "Pendente", color: "#3D6E8C", bg: "#E4EBEF" },
+  vencido: { label: "Vencido", color: "#B23A2E", bg: "#F8E3E0" },
+};
+
+// pago é guardado; vencido é calculado comparando o vencimento com hoje
+function statusPagarDisplay(c) {
+  if (c.status === "pago") return "pago";
+  const venc = parseDateBR(c.vencimento);
+  if (venc && venc < new Date(new Date().toDateString())) return "vencido";
+  return "pendente";
+}
+
+const statusReceberConfig = {
+  pago: { label: "Recebido", color: "#4F7A5B", bg: "#E8EEE8" },
+  pendente: { label: "Pendente", color: "#3D6E8C", bg: "#E4EBEF" },
+  vencido: { label: "Vencido", color: "#B23A2E", bg: "#F8E3E0" },
+};
+
+// mesma lógica de statusPagarDisplay, aplicada às parcelas de valores a receber
+function statusReceberDisplay(v) {
+  if (v.status === "pago") return "pago";
+  const venc = parseDateBR(v.vencimento);
+  if (venc && venc < new Date(new Date().toDateString())) return "vencido";
+  return "pendente";
+}
+
+function tipoExtratoConfig(valor) {
+  return valor >= 0
+    ? { label: "Crédito", color: "#4F7A5B", bg: "#E8EEE8" }
+    : { label: "Débito", color: "#B23A2E", bg: "#F8E3E0" };
+}
+
+const tipoSocioConfig = {
+  aporte: { label: "Aporte (empréstimo ao caixa)", color: "#4F7A5B", bg: "#E8EEE8" },
+  devolucao: { label: "Devolução ao sócio", color: "#B23A2E", bg: "#F8E3E0" },
+};
+
+const DOCUMENTOS_ESSENCIAIS = [
+  "CNO",
+  "Contrato de Permuta ou Compra de Terreno",
+  "Contrato Social",
+  "Alteração Contratual",
+  "RG do Sócio",
+  "CNPJ",
+];
+
+const statusDocumentoConfig = {
+  vencido: { label: "Vencido", color: "#B23A2E", bg: "#F8E3E0" },
+  vencendo: { label: "Vencendo", color: "#B4590C", bg: "#FBEBDB" },
+  valido: { label: "Válido", color: "#4F7A5B", bg: "#E8EEE8" },
+  sem_validade: { label: "Sem validade", color: "#3D6E8C", bg: "#E4EBEF" },
+};
+
+// sem validade informada = documento permanente (ex: CNPJ, contrato social)
+function statusDocumentoDisplay(doc) {
+  if (!doc.validade) return "sem_validade";
+  const venc = parseDateBR(doc.validade);
+  if (!venc) return "sem_validade";
+  const hoje = new Date(new Date().toDateString());
+  if (venc < hoje) return "vencido";
+  const em30 = new Date(hoje);
+  em30.setDate(em30.getDate() + 30);
+  if (venc <= em30) return "vencendo";
+  return "valido";
+}
+
+// Ruler-style progress bar — signature element evoking a measuring tape
+function RulerBar({ pct, colorFrom = "#3D6E8C", colorTo = "#3D6E8C" }) {
+  const clamped = Math.min(100, Math.max(0, pct));
+  return (
+    <div className="relative h-6 w-full rounded-sm overflow-hidden" style={{ background: "#E4E0D6" }}>
+      <div
+        className="absolute inset-y-0 left-0 rounded-sm"
+        style={{
+          width: `${clamped}%`,
+          background: colorFrom,
+          transition: "width 700ms ease-out",
+        }}
+      />
+      {/* tick marks, like a tape measure */}
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage:
+            "repeating-linear-gradient(to right, rgba(34,37,42,0.35) 0px, rgba(34,37,42,0.35) 1px, transparent 1px, transparent 10%)",
+        }}
+      />
+      <div
+        className="absolute inset-y-0 flex items-center pl-1.5 text-[11px] font-semibold tracking-wide"
+        style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+      >
+        {clamped}%
+      </div>
+    </div>
+  );
+}
+
+function KpiCard({ eyebrow, value, sub, accent }) {
+  return (
+    <div
+      className="flex-1 min-w-[180px] rounded-md p-4 border"
+      style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+    >
+      <div
+        className="text-[11px] uppercase tracking-[0.14em] font-semibold mb-2"
+        style={{ color: "#6B6F76", fontFamily: "'Oswald', sans-serif" }}
+      >
+        {eyebrow}
+      </div>
+      <div
+        className="text-2xl font-semibold"
+        style={{ color: accent || "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+      >
+        {value}
+      </div>
+      {sub && (
+        <div className="text-xs mt-1" style={{ color: "#8A8D93" }}>
+          {sub}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Relatório consolidado — resume os números de todas as abas numa única
+// página, pronta para imprimir ou salvar como PDF (menu do navegador).
+// Componentes genéricos de relatório — usados pelas abas que não têm layout
+// próprio (Custos das obras continua com o layout detalhado por etapa).
+function ReportKpis({ items }) {
+  return (
+    <div className="flex flex-wrap gap-3 mb-6">
+      {items.map(({ label, value, accent }) => (
+        <div key={label} className="flex-1 min-w-[150px] rounded-md p-4 border" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
+          <div className="text-[11px] uppercase tracking-[0.14em] font-semibold mb-2" style={{ color: "#6B6F76", fontFamily: "'Oswald', sans-serif" }}>
+            {label}
+          </div>
+          <div className="text-xl font-semibold" style={{ color: accent || "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>
+            {value}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ReportTable({ titulo, columns, rows }) {
+  const templateCols = columns.map((c) => c.width || "1fr").join(" ");
+  return (
+    <div className="mb-6">
+      {titulo && (
+        <h3
+          className="text-sm uppercase tracking-[0.1em] font-semibold mb-2"
+          style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+        >
+          {titulo}
+        </h3>
+      )}
+      <div
+        className="hidden sm:grid gap-2 px-2 pb-1 text-[10px] uppercase tracking-wide font-semibold"
+        style={{ color: "#8A8D93", gridTemplateColumns: templateCols }}
+      >
+        {columns.map((c) => (
+          <span key={c.label}>{c.label}</span>
+        ))}
+      </div>
+      <div className="space-y-1">
+        {rows.length === 0 ? (
+          <div className="text-xs py-3 text-center" style={{ color: "#8A8D93" }}>
+            Nenhum registro.
+          </div>
+        ) : (
+          rows.map((row, i) => (
+            <div
+              key={i}
+              className="grid grid-cols-2 sm:block sm:grid gap-1.5 sm:gap-2 items-center rounded-sm px-2 py-1.5 text-xs"
+              style={{ border: "1px solid #E4E0D6", gridTemplateColumns: templateCols }}
+            >
+              {row.map((cell, j) => (
+                <span
+                  key={j}
+                  style={{
+                    color: "#22252A",
+                    fontFamily: columns[j] && columns[j].mono ? "'IBM Plex Mono', monospace" : undefined,
+                  }}
+                >
+                  {cell}
+                </span>
+              ))}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Relatório — resume os números da aba ativa numa página pronta para
+// imprimir ou salvar como PDF (menu do navegador). "custos" tem um layout
+// detalhado próprio (etapas + itens); as demais abas usam tabelas genéricas.
+function ReportView({
+  tipo,
+  onFechar,
+  obraCustoSelecionada,
+  itensObraCustoAtual,
+  totalGeralObraCusto,
+  obrasComRealizado,
+  totalOrcado,
+  totalRealizado,
+  saldoCaixa,
+  vencendoEm30,
+  contratosCV,
+  totalVGV,
+  totalRecebidoCV,
+  unidadesAtrasadas,
+  valoresReceber,
+  saldoPorUnidade,
+  totalAReceber,
+  totalRecebidoParcelas,
+  parcelasReceberVencidas,
+  notasCompra,
+  totalNotasCompra,
+  contasPagar,
+  totalAPagar,
+  totalPago,
+  parcelasVencidas,
+  extrato,
+  saldoExtrato,
+  totalCreditosExtrato,
+  totalDebitosExtrato,
+  movimentosSocios,
+  saldoPorSocio,
+  saldoComSocios,
+  totalAportado,
+  totalDevolvido,
+  documentos,
+  documentosVencidos,
+  documentosVencendo,
+  essenciaisPendentes,
+  contratosFornecedores,
+  totalContratadoFornecedores,
+  contratosFornecedoresVencendo,
+  contratosFornecedoresVencidos,
+  contratosFornecedoresAtivos,
+  contratosServicos,
+  totalContratadoServicos,
+  contratosServicosVencendo,
+  contratosServicosVencidos,
+  contratosServicosAtivos,
+  totalEntradasFluxo,
+  totalSaidasFluxo,
+  fluxoCaixa,
+  unidadesComStatus,
+  totalVGVPotencial,
+  totalVGVVendido,
+  unidadesDisponiveis,
+  unidadesReservadas,
+  unidadesVendidas,
+}) {
+  const agora = new Date();
+  const dataGeracao = `${agora.toLocaleDateString("pt-BR")} às ${agora.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
+  const MESES_EXTENSO = [
+    "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+    "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+  ];
+  const dataExtenso = `${agora.getDate()} de ${MESES_EXTENSO[agora.getMonth()]} de ${agora.getFullYear()}`;
+
+  let titulo = "Relatório";
+  let kpis = [];
+  let tabelas = [];
+  let saldosConsolidados = [];
+
+  if (tipo === "consolidado") {
+    titulo = "Relatório Consolidado — Obras & Contratos";
+    tabelas = [
+      {
+        titulo: "Obras — orçado × realizado",
+        columns: [
+          { label: "Obra", width: "1.4fr" },
+          { label: "Orçado", width: "1fr", mono: true },
+          { label: "Realizado", width: "1fr", mono: true },
+          { label: "Saldo", width: "1fr", mono: true },
+          { label: "Avanço físico", width: "0.9fr" },
+        ],
+        rows: obrasComRealizado.map((o) => [
+          o.nome,
+          o.status === "concluida" ? "—" : formatBRLShort(o.orcado),
+          o.status === "concluida" ? "—" : formatBRLShort(o.realizado),
+          o.status === "concluida" ? "Concluída" : formatBRLShort(o.orcado - o.realizado),
+          o.status === "concluida" ? "—" : `${o.avancoFisico}%`,
+        ]),
+      },
+    ];
+    saldosConsolidados = [
+      {
+        titulo: "Financeiro consolidado",
+        linhas: [
+          ["Total contratado", formatBRL(totalOrcado)],
+          ["Total realizado", formatBRL(totalRealizado)],
+          ["Saldo em caixa (últimos 6 meses)", formatBRL(saldoCaixa)],
+          ["Contratos vencendo em 30 dias", `${vencendoEm30}`],
+        ],
+      },
+      {
+        titulo: "Contratos de compra e venda",
+        linhas: [
+          ["VGV total", formatBRL(totalVGV)],
+          ["Recebido até agora", formatBRL(totalRecebidoCV)],
+          ["Unidades com pagamento atrasado", `${unidadesAtrasadas}`],
+        ],
+      },
+      {
+        titulo: "Valores a receber",
+        linhas: [
+          ["Total a receber", formatBRL(totalAReceber)],
+          ["Total recebido", formatBRL(totalRecebidoParcelas)],
+          ["Parcelas vencidas", `${parcelasReceberVencidas}`],
+        ],
+      },
+      {
+        titulo: "Notas de compras",
+        linhas: [
+          ["Total em notas", formatBRL(totalNotasCompra)],
+          ["Notas cadastradas", `${notasCompra.length}`],
+        ],
+      },
+      {
+        titulo: "Contas a pagar",
+        linhas: [
+          ["Total a pagar", formatBRL(totalAPagar)],
+          ["Total pago", formatBRL(totalPago)],
+          ["Parcelas vencidas", `${parcelasVencidas}`],
+        ],
+      },
+      {
+        titulo: "Extrato bancário",
+        linhas: [
+          ["Saldo do extrato", formatBRL(saldoExtrato)],
+          ["Total de créditos", formatBRL(totalCreditosExtrato)],
+          ["Total de débitos", formatBRL(totalDebitosExtrato)],
+        ],
+      },
+      {
+        titulo: "Empréstimos de sócios",
+        linhas: [
+          ["Saldo com sócios", formatBRL(saldoComSocios)],
+          ["Total aportado", formatBRL(totalAportado)],
+          ["Total devolvido", formatBRL(totalDevolvido)],
+        ],
+      },
+    ];
+  } else if (tipo === "geral") {
+    titulo = "Relatório — Visão Geral";
+    kpis = [
+      { label: "Total contratado", value: formatBRL(totalOrcado) },
+      { label: "Total realizado", value: formatBRL(totalRealizado), accent: "#3D6E8C" },
+      { label: "Saldo em caixa (6 meses)", value: formatBRL(saldoCaixa), accent: saldoCaixa >= 0 ? "#4F7A5B" : "#B23A2E" },
+      { label: "Contratos vencendo em 30 dias", value: `${vencendoEm30}` },
+    ];
+    tabelas = [
+      {
+        titulo: "Obras — orçado × realizado",
+        columns: [
+          { label: "Obra", width: "1.4fr" },
+          { label: "Orçado", width: "1fr", mono: true },
+          { label: "Realizado", width: "1fr", mono: true },
+          { label: "Saldo", width: "1fr", mono: true },
+          { label: "Avanço físico", width: "0.9fr" },
+        ],
+        rows: obrasComRealizado.map((o) => [
+          o.nome,
+          o.status === "concluida" ? "—" : formatBRLShort(o.orcado),
+          o.status === "concluida" ? "—" : formatBRLShort(o.realizado),
+          o.status === "concluida" ? "Concluída" : formatBRLShort(o.orcado - o.realizado),
+          o.status === "concluida" ? "—" : `${o.avancoFisico}%`,
+        ]),
+      },
+    ];
+  } else if (tipo === "unidades") {
+    titulo = "Relatório — Unidades e Tabela de Vendas";
+    kpis = [
+      { label: "VGV potencial", value: formatBRL(totalVGVPotencial) },
+      { label: "VGV vendido", value: formatBRL(totalVGVVendido), accent: "#3D6E8C" },
+      { label: "Disponíveis", value: `${unidadesDisponiveis}`, accent: "#4F7A5B" },
+      { label: "Reservadas", value: `${unidadesReservadas}`, accent: "#B4590C" },
+      { label: "Vendidas", value: `${unidadesVendidas}`, accent: "#3D6E8C" },
+    ];
+    tabelas = [
+      {
+        titulo: "Unidades",
+        columns: [
+          { label: "Unidade", width: "1fr" },
+          { label: "Tipo", width: "1fr" },
+          { label: "Metragem", width: "0.7fr" },
+          { label: "Valor de venda", width: "1fr", mono: true },
+          { label: "Status", width: "0.8fr" },
+          { label: "Comprador", width: "1.2fr" },
+        ],
+        rows: unidadesComStatus.map((u) => [
+          u.unidade,
+          u.tipo || "—",
+          u.metragem ? `${u.metragem} m²` : "—",
+          formatBRLShort(u.valorVenda),
+          statusUnidadeConfig[u.statusEfetivo].label,
+          u.contratoVinculado ? u.contratoVinculado.comprador : "—",
+        ]),
+      },
+    ];
+  } else if (tipo === "cv") {
+    titulo = "Relatório — Contratos de Compra e Venda";
+    kpis = [
+      { label: "VGV total", value: formatBRL(totalVGV) },
+      { label: "Recebido até agora", value: formatBRL(totalRecebidoCV), accent: "#3D6E8C" },
+      { label: "Unidades atrasadas", value: `${unidadesAtrasadas}`, accent: unidadesAtrasadas > 0 ? "#B23A2E" : "#22252A" },
+    ];
+    tabelas = [
+      {
+        titulo: "Contratos",
+        columns: [
+          { label: "Unidade", width: "1.1fr" },
+          { label: "Comprador", width: "1.4fr" },
+          { label: "Valor", width: "1fr", mono: true },
+          { label: "% pago", width: "0.6fr" },
+          { label: "Assinatura", width: "0.9fr", mono: true },
+          { label: "Status", width: "0.8fr" },
+        ],
+        rows: contratosCV.map((c) => [
+          c.unidade,
+          c.comprador,
+          formatBRLShort(c.valor),
+          `${c.percentualPago}%`,
+          c.dataAssinatura,
+          statusPagamentoConfig[c.statusPagamento] ? statusPagamentoConfig[c.statusPagamento].label : c.statusPagamento,
+        ]),
+      },
+    ];
+  } else if (tipo === "receber") {
+    titulo = "Relatório — Valores a Receber";
+    kpis = [
+      { label: "Total a receber", value: formatBRL(totalAReceber), accent: "#B4590C" },
+      { label: "Total recebido", value: formatBRL(totalRecebidoParcelas), accent: "#4F7A5B" },
+      { label: "Parcelas vencidas", value: `${parcelasReceberVencidas}`, accent: parcelasReceberVencidas > 0 ? "#B23A2E" : "#22252A" },
+    ];
+    tabelas = [
+      {
+        titulo: "Saldo por unidade e cliente",
+        columns: [
+          { label: "Unidade", width: "1.1fr" },
+          { label: "Comprador", width: "1.4fr" },
+          { label: "Total da venda", width: "1fr", mono: true },
+          { label: "Recebido", width: "1fr", mono: true },
+          { label: "Saldo a receber", width: "1fr", mono: true },
+        ],
+        rows: saldoPorUnidade.map((g) => [
+          g.unidade,
+          g.comprador,
+          formatBRLShort(g.valorTotal),
+          formatBRLShort(g.recebido),
+          formatBRLShort(g.saldoAReceber),
+        ]),
+      },
+    ];
+  } else if (tipo === "notas") {
+    titulo = "Relatório — Notas de Compras";
+    kpis = [
+      { label: "Total em notas", value: formatBRL(totalNotasCompra) },
+      { label: "Notas cadastradas", value: `${notasCompra.length}` },
+    ];
+    tabelas = [
+      {
+        titulo: "Notas de compras",
+        columns: [
+          { label: "Fornecedor", width: "1.4fr" },
+          { label: "Obra", width: "1fr" },
+          { label: "Valor total", width: "1fr", mono: true },
+          { label: "Emissão", width: "0.8fr", mono: true },
+          { label: "Parcelas", width: "0.6fr" },
+        ],
+        rows: notasCompra.map((n) => [n.fornecedor, n.obra, formatBRLShort(n.valorTotal), n.dataEmissao, `${n.numeroParcelas}x`]),
+      },
+    ];
+  } else if (tipo === "pagar") {
+    titulo = "Relatório — Contas a Pagar";
+    kpis = [
+      { label: "Total a pagar", value: formatBRL(totalAPagar), accent: "#B4590C" },
+      { label: "Total pago", value: formatBRL(totalPago), accent: "#4F7A5B" },
+      { label: "Parcelas vencidas", value: `${parcelasVencidas}`, accent: parcelasVencidas > 0 ? "#B23A2E" : "#22252A" },
+    ];
+    tabelas = [
+      {
+        titulo: "Contas a pagar",
+        columns: [
+          { label: "Fornecedor", width: "1.3fr" },
+          { label: "Obra", width: "1fr" },
+          { label: "Parcela", width: "0.6fr" },
+          { label: "Valor", width: "0.9fr", mono: true },
+          { label: "Vencimento", width: "0.9fr", mono: true },
+          { label: "Status", width: "0.8fr" },
+        ],
+        rows: contasPagar.map((c) => [
+          c.fornecedor,
+          c.obra,
+          c.parcela,
+          formatBRLShort(c.valor),
+          c.vencimento,
+          statusPagarConfig[statusPagarDisplay(c)].label,
+        ]),
+      },
+    ];
+  } else if (tipo === "extrato") {
+    titulo = "Relatório — Extrato Bancário";
+    kpis = [
+      { label: "Saldo do extrato", value: formatBRL(saldoExtrato), accent: saldoExtrato >= 0 ? "#4F7A5B" : "#B23A2E" },
+      { label: "Total de créditos", value: formatBRL(totalCreditosExtrato), accent: "#4F7A5B" },
+      { label: "Total de débitos", value: formatBRL(totalDebitosExtrato), accent: "#B23A2E" },
+    ];
+    tabelas = [
+      {
+        titulo: "Lançamentos",
+        columns: [
+          { label: "Data", width: "0.8fr", mono: true },
+          { label: "Descrição", width: "1.8fr" },
+          { label: "Valor", width: "1fr", mono: true },
+          { label: "Tipo", width: "0.7fr" },
+        ],
+        rows: extrato.map((l) => [
+          l.data,
+          l.descricao,
+          `${l.valor >= 0 ? "+" : "−"}${formatBRLShort(Math.abs(l.valor))}`,
+          l.valor >= 0 ? "Crédito" : "Débito",
+        ]),
+      },
+    ];
+  } else if (tipo === "socios") {
+    titulo = "Relatório — Empréstimos de Sócios";
+    kpis = [
+      { label: "Saldo com sócios", value: formatBRL(saldoComSocios), accent: saldoComSocios > 0 ? "#B4590C" : "#22252A" },
+      { label: "Total aportado", value: formatBRL(totalAportado), accent: "#4F7A5B" },
+      { label: "Total devolvido", value: formatBRL(totalDevolvido), accent: "#3D6E8C" },
+    ];
+    tabelas = [
+      {
+        titulo: "Saldo por sócio",
+        columns: [
+          { label: "Sócio", width: "1.4fr" },
+          { label: "Saldo", width: "1.2fr", mono: true },
+        ],
+        rows: saldoPorSocio.map((s) => [
+          s.socio,
+          s.saldo > 0
+            ? `Empresa deve ${formatBRLShort(s.saldo)}`
+            : s.saldo < 0
+            ? `Sócio deve ${formatBRLShort(Math.abs(s.saldo))}`
+            : "Quitado",
+        ]),
+      },
+      {
+        titulo: "Movimentos",
+        columns: [
+          { label: "Sócio", width: "1.1fr" },
+          { label: "Tipo", width: "1.2fr" },
+          { label: "Valor", width: "0.9fr", mono: true },
+          { label: "Data", width: "0.8fr", mono: true },
+          { label: "Obra", width: "1fr" },
+        ],
+        rows: movimentosSocios.map((m) => [
+          m.socio,
+          tipoSocioConfig[m.tipo].label,
+          formatBRLShort(m.valor),
+          m.data,
+          m.obra || "—",
+        ]),
+      },
+    ];
+  } else if (tipo === "documentos") {
+    titulo = "Relatório — Documentos da Empresa";
+    kpis = [
+      { label: "Documentos anexados", value: `${documentos.length}` },
+      { label: "Vencidos", value: `${documentosVencidos}`, accent: documentosVencidos > 0 ? "#B23A2E" : "#22252A" },
+      { label: "Vencendo em 30 dias", value: `${documentosVencendo}`, accent: documentosVencendo > 0 ? "#B4590C" : "#22252A" },
+    ];
+    tabelas = [
+      {
+        titulo: "Documentos",
+        columns: [
+          { label: "Categoria", width: "1fr" },
+          { label: "Nome", width: "1.3fr" },
+          { label: "Número", width: "1fr" },
+          { label: "Validade", width: "0.8fr", mono: true },
+          { label: "Status", width: "0.8fr" },
+        ],
+        rows: documentos.map((d) => [
+          d.categoria,
+          d.nome,
+          d.numero || "—",
+          d.validade || "—",
+          statusDocumentoConfig[statusDocumentoDisplay(d)].label,
+        ]),
+      },
+    ];
+    if (essenciaisPendentes.length > 0) {
+      kpis.push({ label: "Pendentes", value: essenciaisPendentes.join(", "), accent: "#B4590C" });
+    }
+  } else if (tipo === "fornecedores") {
+    titulo = "Relatório — Contratos de Fornecedores";
+    kpis = [
+      { label: "Total contratado", value: formatBRL(totalContratadoFornecedores) },
+      { label: "Vencendo em 30 dias", value: `${contratosFornecedoresVencendo}`, accent: contratosFornecedoresVencendo > 0 ? "#B4590C" : "#22252A" },
+      { label: "Vencidos", value: `${contratosFornecedoresVencidos}`, accent: contratosFornecedoresVencidos > 0 ? "#B23A2E" : "#22252A" },
+      { label: "Ativos", value: `${contratosFornecedoresAtivos}`, accent: "#4F7A5B" },
+    ];
+    tabelas = [
+      {
+        titulo: "Contratos de fornecedores",
+        columns: [
+          { label: "Fornecedor", width: "1.3fr" },
+          { label: "Tipo", width: "1fr" },
+          { label: "Obra", width: "1fr" },
+          { label: "Valor", width: "0.9fr", mono: true },
+          { label: "Término", width: "0.9fr", mono: true },
+          { label: "Status", width: "0.8fr" },
+        ],
+        rows: contratosFornecedores.map((c) => [
+          c.fornecedor,
+          c.tipo,
+          c.obra,
+          formatBRLShort(c.valor),
+          c.dataTermino || "—",
+          statusConfig[statusContratoFornecedorDisplay(c)].label,
+        ]),
+      },
+    ];
+  } else if (tipo === "servicos") {
+    titulo = "Relatório — Contratos de Prestação de Serviços";
+    kpis = [
+      { label: "Total contratado", value: formatBRL(totalContratadoServicos) },
+      { label: "Vencendo em 30 dias", value: `${contratosServicosVencendo}`, accent: contratosServicosVencendo > 0 ? "#B4590C" : "#22252A" },
+      { label: "Vencidos", value: `${contratosServicosVencidos}`, accent: contratosServicosVencidos > 0 ? "#B23A2E" : "#22252A" },
+      { label: "Ativos", value: `${contratosServicosAtivos}`, accent: "#4F7A5B" },
+    ];
+    tabelas = [
+      {
+        titulo: "Contratos de prestação de serviços",
+        columns: [
+          { label: "Prestador", width: "1.4fr" },
+          { label: "Obra", width: "1fr" },
+          { label: "Valor", width: "0.9fr", mono: true },
+          { label: "Término", width: "0.9fr", mono: true },
+          { label: "Status", width: "0.8fr" },
+        ],
+        rows: contratosServicos.map((c) => [
+          c.fornecedor,
+          c.obra,
+          formatBRLShort(c.valor),
+          c.dataTermino || "—",
+          statusConfig[statusContratoFornecedorDisplay(c)].label,
+        ]),
+      },
+    ];
+  } else if (tipo === "fluxocaixa") {
+    titulo = "Relatório — Fluxo de Caixa";
+    kpis = [
+      { label: "Saldo em caixa (6 meses)", value: formatBRL(saldoCaixa), accent: saldoCaixa >= 0 ? "#4F7A5B" : "#B23A2E" },
+      { label: "Total de entradas", value: formatBRL(totalEntradasFluxo), accent: "#4F7A5B" },
+      { label: "Total de saídas", value: formatBRL(totalSaidasFluxo), accent: "#B23A2E" },
+    ];
+    let acumuladoRelatorio = 0;
+    tabelas = [
+      {
+        titulo: "Fluxo de caixa mensal",
+        columns: [
+          { label: "Mês", width: "0.8fr" },
+          { label: "Entradas", width: "1fr", mono: true },
+          { label: "Saídas", width: "1fr", mono: true },
+          { label: "Saldo do mês", width: "1fr", mono: true },
+          { label: "Saldo acumulado", width: "1fr", mono: true },
+        ],
+        rows: fluxoCaixa.map((f) => {
+          const saldoMes = f.entradas - f.saidas;
+          acumuladoRelatorio += saldoMes;
+          return [f.mes, formatBRL(f.entradas), formatBRL(f.saidas), formatBRL(saldoMes), formatBRL(acumuladoRelatorio)];
+        }),
+      },
+    ];
+  }
+
+  return (
+    <div className="rounded-md p-6 sm:p-8" style={{ background: "#FFFFFF", border: "1px solid #DCD7C9" }}>
+      <div className="flex items-center justify-end gap-2 mb-4 no-print">
+        <button
+          onClick={() => window.print()}
+          className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+          style={{
+            fontFamily: "'Oswald', sans-serif",
+            letterSpacing: "0.03em",
+            color: "#F5F3EC",
+            background: "#E1590C",
+          }}
+        >
+          🖨 IMPRIMIR / SALVAR PDF
+        </button>
+        <button
+          onClick={onFechar}
+          className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+          style={{
+            fontFamily: "'Oswald', sans-serif",
+            letterSpacing: "0.03em",
+            color: "#22252A",
+            background: "#E4E0D6",
+          }}
+        >
+          ← VOLTAR AO PAINEL
+        </button>
+      </div>
+
+      <div className="mb-6">
+        <p
+          className="text-sm font-semibold"
+          style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+        >
+          J &amp; G Incorporadora Ltda
+        </p>
+        <p className="text-xs mb-3" style={{ color: "#6B6F76" }}>CNPJ 21.203.244/0001-41</p>
+        <h1
+          className="text-xl font-semibold"
+          style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+        >
+          {tipo === "custos" ? `Relatório de Custos — ${obraCustoSelecionada}` : titulo}
+        </h1>
+        <p className="text-xs mt-1" style={{ color: "#8A8D93" }}>Gerado em {dataGeracao}</p>
+      </div>
+
+      {tipo === "custos" ? (
+        <>
+          <div className="flex flex-wrap gap-3 mb-6">
+            <div className="flex-1 min-w-[150px] rounded-md p-4 border" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
+              <div className="text-[11px] uppercase tracking-[0.14em] font-semibold mb-2" style={{ color: "#6B6F76", fontFamily: "'Oswald', sans-serif" }}>
+                Total orçado
+              </div>
+              <div className="text-xl font-semibold" style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>
+                {formatBRL(totalGeralObraCusto.orcado)}
+              </div>
+            </div>
+            <div className="flex-1 min-w-[150px] rounded-md p-4 border" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
+              <div className="text-[11px] uppercase tracking-[0.14em] font-semibold mb-2" style={{ color: "#6B6F76", fontFamily: "'Oswald', sans-serif" }}>
+                Total gasto real
+              </div>
+              <div className="text-xl font-semibold" style={{ color: "#3D6E8C", fontFamily: "'IBM Plex Mono', monospace" }}>
+                {formatBRL(totalGeralObraCusto.gasto)}
+              </div>
+            </div>
+            <div className="flex-1 min-w-[150px] rounded-md p-4 border" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
+              <div className="text-[11px] uppercase tracking-[0.14em] font-semibold mb-2" style={{ color: "#6B6F76", fontFamily: "'Oswald', sans-serif" }}>
+                Saldo do orçamento
+              </div>
+              <div
+                className="text-xl font-semibold"
+                style={{ color: totalGeralObraCusto.saldo >= 0 ? "#4F7A5B" : "#B23A2E", fontFamily: "'IBM Plex Mono', monospace" }}
+              >
+                {formatBRL(totalGeralObraCusto.saldo)}
+              </div>
+            </div>
+            <div className="flex-1 min-w-[150px] rounded-md p-4 border" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
+              <div className="text-[11px] uppercase tracking-[0.14em] font-semibold mb-2" style={{ color: "#6B6F76", fontFamily: "'Oswald', sans-serif" }}>
+                % Executado
+              </div>
+              <div className="text-xl font-semibold" style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>
+                {totalGeralObraCusto.pct !== null ? `${Math.round(totalGeralObraCusto.pct * 100)}%` : "—"}
+              </div>
+            </div>
+          </div>
+
+          {itensObraCustoAtual.length === 0 ? (
+            <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+              Nenhum item de orçamento cadastrado para esta obra ainda.
+            </div>
+          ) : (
+            <>
+              <div className="mb-6">
+                <h3
+                  className="text-sm uppercase tracking-[0.1em] font-semibold mb-2"
+                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Resumo por etapa
+                </h3>
+                <div className="hidden sm:grid grid-cols-[1.8fr_1fr_1fr_1fr_0.8fr] gap-2 px-3 pb-1 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <span>Etapa</span>
+                  <span>Orçado</span>
+                  <span>Gasto real</span>
+                  <span>Saldo</span>
+                  <span>% Exec.</span>
+                </div>
+                <div className="space-y-1">
+                  {ETAPAS_CUSTO.map(({ etapa }) => {
+                    const resumo = resumoCustoItens(itensObraCustoAtual.filter((it) => it.etapa === etapa));
+                    return (
+                      <div
+                        key={etapa}
+                        className="grid grid-cols-2 sm:grid-cols-[1.8fr_1fr_1fr_1fr_0.8fr] gap-2 items-center rounded-sm px-3 py-1.5 text-sm"
+                        style={{ border: "1px solid #E4E0D6" }}
+                      >
+                        <span style={{ color: "#22252A" }}>{etapa}</span>
+                        <span style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>{formatBRL(resumo.orcado)}</span>
+                        <span style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>{formatBRL(resumo.gasto)}</span>
+                        <span style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>{formatBRL(resumo.saldo)}</span>
+                        <span className="font-semibold" style={{ color: resumo.pct === null ? "#8A8D93" : resumo.pct > 1 ? "#B23A2E" : "#4F7A5B" }}>
+                          {resumo.pct !== null ? `${Math.round(resumo.pct * 100)}%` : "—"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  <div
+                    className="grid grid-cols-2 sm:grid-cols-[1.8fr_1fr_1fr_1fr_0.8fr] gap-2 items-center rounded-sm px-3 py-2 text-sm font-semibold"
+                    style={{ background: "#EFE9DA", border: "1px solid #C7BFA8" }}
+                  >
+                    <span style={{ color: "#22252A" }}>TOTAL GERAL DA OBRA</span>
+                    <span style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>{formatBRL(totalGeralObraCusto.orcado)}</span>
+                    <span style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>{formatBRL(totalGeralObraCusto.gasto)}</span>
+                    <span style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>{formatBRL(totalGeralObraCusto.saldo)}</span>
+                    <span style={{ color: "#22252A" }}>
+                      {totalGeralObraCusto.pct !== null ? `${Math.round(totalGeralObraCusto.pct * 100)}%` : "—"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h3
+                  className="text-sm uppercase tracking-[0.1em] font-semibold mb-3"
+                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Itens do orçamento
+                </h3>
+                {ETAPAS_CUSTO.map(({ etapa }) => {
+                  const itensEtapa = itensObraCustoAtual.filter((it) => it.etapa === etapa);
+                  if (itensEtapa.length === 0) return null;
+                  const resumo = resumoCustoItens(itensEtapa);
+                  return (
+                    <div key={etapa} className="mb-4" style={{ breakInside: "avoid" }}>
+                      <div
+                        className="text-sm font-semibold px-3 py-1.5 rounded-sm mb-1"
+                        style={{ color: "#22252A", background: "#EFE9DA" }}
+                      >
+                        {etapa}
+                      </div>
+                      <div className="hidden sm:grid grid-cols-[1.7fr_0.4fr_0.6fr_0.8fr_0.8fr_0.8fr_0.8fr_0.5fr] gap-2 px-2 pb-1 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                        <span>Item</span>
+                        <span>Un.</span>
+                        <span>Qtd</span>
+                        <span>Vl. Unit.</span>
+                        <span>Orçado</span>
+                        <span>Gasto real</span>
+                        <span>Saldo</span>
+                        <span>% exec.</span>
+                      </div>
+                      <div className="space-y-1">
+                        {itensEtapa.map((it) => {
+                          const orcadoItem = custoOrcadoItem(it);
+                          const saldoItem = custoSaldoItem(it);
+                          const pctItem = custoPctItem(it);
+                          return (
+                            <div
+                              key={it.id}
+                              className="grid grid-cols-2 sm:grid-cols-[1.7fr_0.4fr_0.6fr_0.8fr_0.8fr_0.8fr_0.8fr_0.5fr] gap-1.5 sm:gap-2 items-center rounded-sm px-2 py-1 text-xs"
+                              style={{ borderBottom: "1px solid #F0EEE6" }}
+                            >
+                              <span style={{ color: "#22252A" }}>
+                                {it.item}
+                                {it.observacoes ? ` — ${it.observacoes}` : ""}
+                              </span>
+                              <span style={{ color: "#6B6F76" }}>{it.unidade}</span>
+                              <span style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}>{it.quantidade || "—"}</span>
+                              <span style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}>
+                                {it.valorUnitario ? formatBRLShort(Number(it.valorUnitario)) : "—"}
+                              </span>
+                              <span style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>
+                                {orcadoItem !== null ? formatBRLShort(orcadoItem) : "—"}
+                              </span>
+                              <span style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>
+                                {it.gastoReal ? formatBRLShort(Number(it.gastoReal)) : "—"}
+                              </span>
+                              <span
+                                style={{
+                                  color: saldoItem !== null && saldoItem < 0 ? "#B23A2E" : "#22252A",
+                                  fontFamily: "'IBM Plex Mono', monospace",
+                                }}
+                              >
+                                {saldoItem !== null ? formatBRLShort(saldoItem) : "—"}
+                              </span>
+                              <span
+                                className="font-semibold"
+                                style={{ color: pctItem === null ? "#8A8D93" : pctItem > 1 ? "#B23A2E" : "#4F7A5B" }}
+                              >
+                                {pctItem !== null ? `${Math.round(pctItem * 100)}%` : "—"}
+                              </span>
+                            </div>
+                          );
+                        })}
+                        <div
+                          className="grid grid-cols-2 sm:grid-cols-[1.7fr_0.4fr_0.6fr_0.8fr_0.8fr_0.8fr_0.8fr_0.5fr] gap-1.5 sm:gap-2 items-center rounded-sm px-2 py-1.5 text-xs font-semibold"
+                          style={{ background: "#F5F3EC" }}
+                        >
+                          <span className="sm:col-span-4" style={{ color: "#22252A" }}>Subtotal — {etapa}</span>
+                          <span className="hidden sm:block" style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>
+                            {formatBRLShort(resumo.orcado)}
+                          </span>
+                          <span style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>{formatBRLShort(resumo.gasto)}</span>
+                          <span style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>{formatBRLShort(resumo.saldo)}</span>
+                          <span style={{ color: "#22252A" }}>
+                            {resumo.pct !== null ? `${Math.round(resumo.pct * 100)}%` : "—"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          <ReportKpis items={kpis} />
+          {tabelas.map((t) => (
+            <ReportTable key={t.titulo} titulo={t.titulo} columns={t.columns} rows={t.rows} />
+          ))}
+          {saldosConsolidados.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              {saldosConsolidados.map(({ titulo: tituloSecao, linhas }) => (
+                <div key={tituloSecao}>
+                  <h3
+                    className="text-sm uppercase tracking-[0.1em] font-semibold mb-2"
+                    style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                  >
+                    {tituloSecao}
+                  </h3>
+                  <div className="space-y-1">
+                    {linhas.map(([label, valor]) => (
+                      <div
+                        key={label}
+                        className="flex items-baseline justify-between gap-3 text-sm rounded-sm px-3 py-1.5"
+                        style={{ border: "1px solid #E4E0D6" }}
+                      >
+                        <span style={{ color: "#6B6F76" }}>{label}</span>
+                        <span
+                          className="font-semibold text-right"
+                          style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+                        >
+                          {valor}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      <div className="mt-10 pt-6" style={{ borderTop: "1px solid #E4E0D6" }}>
+        <p className="text-sm mb-12" style={{ color: "#22252A" }}>
+          Balneário Camboriú/SC, {dataExtenso}.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-10">
+          <div className="text-center">
+            <div style={{ borderTop: "1px solid #22252A" }} className="pt-2">
+              <span className="text-sm font-semibold" style={{ color: "#22252A" }}>
+                Gabriel Oltramari Neto
+              </span>
+            </div>
+          </div>
+          <div className="text-center">
+            <div style={{ borderTop: "1px solid #22252A" }} className="pt-2">
+              <span className="text-sm font-semibold" style={{ color: "#22252A" }}>
+                João Gabriel Herdt
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function DashboardConstrutora() {
+  const [selectedObra, setSelectedObra] = useState(null);
+  const [activeTab, setActiveTab] = useState("geral");
+  const [modoRelatorio, setModoRelatorio] = useState(false);
+  const [tipoRelatorio, setTipoRelatorio] = useState(null);
+
+  const [obrasState, setObrasState] = useState(obrasIniciais);
+  const [loadingObras, setLoadingObras] = useState(true);
+
+  const [custosItens, setCustosItens] = useState([]);
+  const [loadingCustos, setLoadingCustos] = useState(true);
+  const [saveErrorCustos, setSaveErrorCustos] = useState(null);
+  const [etapasCustoColapsadas, setEtapasCustoColapsadas] = useState({});
+  const [obraCustoSelecionada, setObraCustoSelecionada] = useState(NOMES_OBRAS[0]);
+
+  function toggleEtapaCustoColapsada(etapa) {
+    setEtapasCustoColapsadas((prev) => ({ ...prev, [etapa]: !prev[etapa] }));
+  }
+
+  const [mesesFluxoExpandidos, setMesesFluxoExpandidos] = useState({});
+
+  function toggleMesFluxoExpandido(chave) {
+    setMesesFluxoExpandidos((prev) => ({ ...prev, [chave]: !prev[chave] }));
+  }
+
+  const [contratosFornecedores, setContratosFornecedores] = useState([]);
+  const [loadingFornecedores, setLoadingFornecedores] = useState(true);
+  const [saveErrorFornecedores, setSaveErrorFornecedores] = useState(null);
+  const [showFormFornecedor, setShowFormFornecedor] = useState(false);
+  const [pdfImportingFornecedor, setPdfImportingFornecedor] = useState(false);
+  const [pdfImportErrorFornecedor, setPdfImportErrorFornecedor] = useState(null);
+  const [pdfImportedFieldsFornecedor, setPdfImportedFieldsFornecedor] = useState([]);
+  const [filtroObraFornecedores, setFiltroObraFornecedores] = useState("");
+  const [formFornecedor, setFormFornecedor] = useState({
+    fornecedor: "",
+    cnpj: "",
+    obra: NOMES_OBRAS[0],
+    tipo: TIPOS_FORNECEDOR[0],
+    objeto: "",
+    valor: "",
+    numeroParcelas: "1",
+    dataInicio: "",
+    dataTermino: "",
+    observacoes: "",
+    arquivo: null,
+  });
+
+  const [contratosServicos, setContratosServicos] = useState([]);
+  const [loadingServicos, setLoadingServicos] = useState(true);
+  const [saveErrorServicos, setSaveErrorServicos] = useState(null);
+  const [showFormServico, setShowFormServico] = useState(false);
+  const [pdfImportingServico, setPdfImportingServico] = useState(false);
+  const [pdfImportErrorServico, setPdfImportErrorServico] = useState(null);
+  const [pdfImportedFieldsServico, setPdfImportedFieldsServico] = useState([]);
+  const [filtroObraServicos, setFiltroObraServicos] = useState("");
+  const [formServico, setFormServico] = useState({
+    fornecedor: "",
+    cnpj: "",
+    obra: NOMES_OBRAS[0],
+    objeto: "",
+    valor: "",
+    numeroParcelas: "1",
+    dataInicio: "",
+    dataTermino: "",
+    observacoes: "",
+    arquivo: null,
+  });
+
+  const [contratosCV, setContratosCV] = useState([]);
+  const [valoresReceber, setValoresReceber] = useState([]);
+  const [loadingCV, setLoadingCV] = useState(true);
+  const [saveError, setSaveError] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [pdfImporting, setPdfImporting] = useState(false);
+  const [pdfImportError, setPdfImportError] = useState(null);
+  const [pdfImportedFields, setPdfImportedFields] = useState([]);
+  const [form, setForm] = useState({
+    unidade: "",
+    comprador: "",
+    valor: "",
+    percentualPago: "",
+    dataAssinatura: "",
+    statusPagamento: "em_dia",
+    numeroParcelas: "1",
+  });
+  const [personalizarParcelasCV, setPersonalizarParcelasCV] = useState(false);
+  const [valoresParcelasCV, setValoresParcelasCV] = useState([]);
+
+  const [unidadesObra, setUnidadesObra] = useState([]);
+  const [loadingUnidades, setLoadingUnidades] = useState(true);
+  const [saveErrorUnidades, setSaveErrorUnidades] = useState(null);
+  const [showFormUnidade, setShowFormUnidade] = useState(false);
+  const [filtroObraUnidades, setFiltroObraUnidades] = useState("");
+  const [filtroStatusUnidades, setFiltroStatusUnidades] = useState("");
+  const [formUnidade, setFormUnidade] = useState({
+    obra: NOMES_OBRAS[0],
+    unidade: "",
+    andar: "",
+    tipo: "",
+    metragem: "",
+    valorVenda: "",
+    observacoes: "",
+  });
+
+  const [notasCompra, setNotasCompra] = useState([]);
+  const [contasPagar, setContasPagar] = useState([]);
+  const [loadingNotas, setLoadingNotas] = useState(true);
+  const [saveErrorNotas, setSaveErrorNotas] = useState(null);
+  const [showFormNota, setShowFormNota] = useState(false);
+  const [pdfImportingNota, setPdfImportingNota] = useState(false);
+  const [pdfImportErrorNota, setPdfImportErrorNota] = useState(null);
+  const [pdfImportedFieldsNota, setPdfImportedFieldsNota] = useState([]);
+  const [duplicataNota, setDuplicataNota] = useState(null);
+  const [formNota, setFormNota] = useState({
+    fornecedor: "",
+    obra: NOMES_OBRAS[0],
+    valorTotal: "",
+    dataEmissao: "",
+    numeroParcelas: "1",
+  });
+
+  const [extrato, setExtrato] = useState([]);
+  const [loadingExtrato, setLoadingExtrato] = useState(true);
+  const [saveErrorExtrato, setSaveErrorExtrato] = useState(null);
+  const [showFormExtrato, setShowFormExtrato] = useState(false);
+  const [pdfImportingExtrato, setPdfImportingExtrato] = useState(false);
+  const [pdfImportErrorExtrato, setPdfImportErrorExtrato] = useState(null);
+  const [extratoPreview, setExtratoPreview] = useState([]);
+  const [formExtrato, setFormExtrato] = useState({
+    data: "",
+    descricao: "",
+    valor: "",
+    tipo: "credito",
+    socio: "",
+  });
+
+  const [emprestimosSocios, setEmprestimosSocios] = useState([]);
+  const [loadingSocios, setLoadingSocios] = useState(true);
+  const [saveErrorSocios, setSaveErrorSocios] = useState(null);
+  const [showFormSocio, setShowFormSocio] = useState(false);
+  const [formSocio, setFormSocio] = useState({
+    socio: "",
+    tipo: "aporte",
+    valor: "",
+    data: "",
+    obra: NOMES_OBRAS[0],
+    observacao: "",
+  });
+
+  const [documentos, setDocumentos] = useState([]);
+  const [loadingDocumentos, setLoadingDocumentos] = useState(true);
+  const [saveErrorDocumentos, setSaveErrorDocumentos] = useState(null);
+  const [showFormDocumento, setShowFormDocumento] = useState(false);
+  const [uploadingDocumento, setUploadingDocumento] = useState(false);
+  const [uploadErrorDocumento, setUploadErrorDocumento] = useState(null);
+  const [abrindoDocumentoId, setAbrindoDocumentoId] = useState(null);
+  const [enviandoWhatsappId, setEnviandoWhatsappId] = useState(null);
+  const [pdfReadingDocumento, setPdfReadingDocumento] = useState(false);
+  const [pdfImportedFieldsDocumento, setPdfImportedFieldsDocumento] = useState([]);
+  const [uploadingCategoria, setUploadingCategoria] = useState(null);
+  const [formDocumento, setFormDocumento] = useState({
+    categoria: "Outro",
+    nome: "",
+    numero: "",
+    dataEmissao: "",
+    validade: "",
+    observacao: "",
+    arquivo: null,
+  });
+
+  const [filtroObraNotas, setFiltroObraNotas] = useState("");
+  const [filtroObraPagar, setFiltroObraPagar] = useState("");
+  const [filtroObraSocios, setFiltroObraSocios] = useState("");
+  const [showFormDespesa, setShowFormDespesa] = useState(false);
+  const [formDespesa, setFormDespesa] = useState({
+    fornecedor: "",
+    obra: NOMES_OBRAS[0],
+    valor: "",
+    dataVencimento: "",
+    numeroParcelas: "1",
+  });
+
+  const STORAGE_KEY = "contratos-cv";
+  const STORAGE_KEY_RECEBER = "valores-receber";
+  const STORAGE_KEY_NOTAS = "notas-compra";
+  const STORAGE_KEY_PAGAR = "contas-pagar";
+  const STORAGE_KEY_EXTRATO = "extrato-bancario";
+  const STORAGE_KEY_SOCIOS = "emprestimos-socios";
+  const STORAGE_KEY_DOCUMENTOS = "documentos-empresa-index";
+  const STORAGE_KEY_OBRAS = "obras-orcamento";
+  const STORAGE_KEY_CUSTOS = "custos-obra-itens";
+  const STORAGE_KEY_FORNECEDORES = "contratos-fornecedores";
+  const STORAGE_KEY_SERVICOS = "contratos-servicos";
+  const STORAGE_KEY_UNIDADES = "unidades-obra";
+  const chaveArquivoDocumento = (id) => `documento-arquivo-${id}`;
+  const chaveArquivoContratoFornecedor = (id) => `contrato-fornecedor-arquivo-${id}`;
+  const chaveArquivoContratoServico = (id) => `contrato-servico-arquivo-${id}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_UNIDADES, false);
+        if (!cancelled) {
+          setUnidadesObra(result ? JSON.parse(result.value) : defaultUnidadesObra);
+        }
+      } catch (err) {
+        if (!cancelled) setUnidadesObra(defaultUnidadesObra);
+      } finally {
+        if (!cancelled) setLoadingUnidades(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_FORNECEDORES, false);
+        if (!cancelled) {
+          setContratosFornecedores(result ? JSON.parse(result.value) : defaultContratosFornecedores);
+        }
+      } catch (err) {
+        if (!cancelled) setContratosFornecedores(defaultContratosFornecedores);
+      } finally {
+        if (!cancelled) setLoadingFornecedores(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_SERVICOS, false);
+        if (!cancelled) {
+          setContratosServicos(result ? JSON.parse(result.value) : defaultContratosServicos);
+        }
+      } catch (err) {
+        if (!cancelled) setContratosServicos(defaultContratosServicos);
+      } finally {
+        if (!cancelled) setLoadingServicos(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_OBRAS, false);
+        if (!cancelled) {
+          setObrasState(result ? JSON.parse(result.value) : obrasIniciais);
+        }
+      } catch (err) {
+        if (!cancelled) setObrasState(obrasIniciais);
+      } finally {
+        if (!cancelled) setLoadingObras(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_CUSTOS, false);
+        if (!cancelled) {
+          setCustosItens(result ? JSON.parse(result.value) : defaultCustosItens);
+        }
+      } catch (err) {
+        if (!cancelled) setCustosItens(defaultCustosItens);
+      } finally {
+        if (!cancelled) setLoadingCustos(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const [contratosResult, receberResult] = await Promise.all([
+          window.storage.get(STORAGE_KEY, false),
+          window.storage.get(STORAGE_KEY_RECEBER, false),
+        ]);
+        if (!cancelled) {
+          setContratosCV(contratosResult ? JSON.parse(contratosResult.value) : defaultContratosCV);
+          setValoresReceber(receberResult ? JSON.parse(receberResult.value) : defaultValoresReceber);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setContratosCV(defaultContratosCV);
+          setValoresReceber(defaultValoresReceber);
+        }
+      } finally {
+        if (!cancelled) setLoadingCV(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const [notasResult, pagarResult] = await Promise.all([
+          window.storage.get(STORAGE_KEY_NOTAS, false),
+          window.storage.get(STORAGE_KEY_PAGAR, false),
+        ]);
+        if (!cancelled) {
+          setNotasCompra(notasResult ? JSON.parse(notasResult.value) : defaultNotasCompra);
+          setContasPagar(pagarResult ? JSON.parse(pagarResult.value) : defaultContasPagar);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setNotasCompra(defaultNotasCompra);
+          setContasPagar(defaultContasPagar);
+        }
+      } finally {
+        if (!cancelled) setLoadingNotas(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_EXTRATO, false);
+        if (!cancelled) {
+          setExtrato(result ? JSON.parse(result.value) : defaultExtrato);
+        }
+      } catch (err) {
+        if (!cancelled) setExtrato(defaultExtrato);
+      } finally {
+        if (!cancelled) setLoadingExtrato(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_SOCIOS, false);
+        if (!cancelled) {
+          setEmprestimosSocios(result ? JSON.parse(result.value) : defaultEmprestimosSocios);
+        }
+      } catch (err) {
+        if (!cancelled) setEmprestimosSocios(defaultEmprestimosSocios);
+      } finally {
+        if (!cancelled) setLoadingSocios(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_DOCUMENTOS, false);
+        if (!cancelled) {
+          setDocumentos(result ? JSON.parse(result.value) : []);
+        }
+      } catch (err) {
+        if (!cancelled) setDocumentos([]);
+      } finally {
+        if (!cancelled) setLoadingDocumentos(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Reavalia possível duplicidade sempre que o formulário de nota (vindo do
+  // PDF ou digitado) ou a lista de notas já cadastradas mudar.
+  useEffect(() => {
+    if (!showFormNota) {
+      setDuplicataNota(null);
+      return;
+    }
+    setDuplicataNota(encontrarNotaDuplicada(formNota, notasCompra));
+  }, [showFormNota, formNota.fornecedor, formNota.valorTotal, formNota.dataEmissao, notasCompra]);
+
+  async function persistContratosEReceber(nextContratos, nextReceber) {
+    setContratosCV(nextContratos);
+    setValoresReceber(nextReceber);
+    try {
+      const [r1, r2] = await Promise.all([
+        window.storage.set(STORAGE_KEY, JSON.stringify(nextContratos), false),
+        window.storage.set(STORAGE_KEY_RECEBER, JSON.stringify(nextReceber), false),
+      ]);
+      if (!r1 || !r2) setSaveError("Não foi possível salvar. Tente novamente.");
+      else setSaveError(null);
+    } catch (err) {
+      setSaveError("Não foi possível salvar. Tente novamente.");
+    }
+  }
+
+  function handleUpdateCustoItemCampo(id, campo, valor) {
+    setCustosItens((prev) => prev.map((it) => (it.id === id ? { ...it, [campo]: valor } : it)));
+  }
+
+  async function persistCustosItens(nextList) {
+    setCustosItens(nextList);
+    try {
+      const result = await window.storage.set(STORAGE_KEY_CUSTOS, JSON.stringify(nextList), false);
+      if (!result) setSaveErrorCustos("Não foi possível salvar. Tente novamente.");
+      else setSaveErrorCustos(null);
+    } catch (err) {
+      setSaveErrorCustos("Não foi possível salvar. Tente novamente.");
+    }
+  }
+
+  function handlePersistCustosBlur() {
+    persistCustosItens(custosItens);
+  }
+
+  function handleAddContrato(e) {
+    e.preventDefault();
+    if (!form.unidade || !form.comprador || !form.valor) return;
+    const usarPersonalizadas =
+      personalizarParcelasCV && valoresParcelasCV.length === (Number(form.numeroParcelas) || 1);
+    const novo = {
+      id: Date.now(),
+      unidade: form.unidade,
+      comprador: form.comprador,
+      valor: Number(form.valor),
+      percentualPago: Number(form.percentualPago) || 0,
+      dataAssinatura: form.dataAssinatura || new Date().toLocaleDateString("pt-BR"),
+      statusPagamento: form.statusPagamento,
+      numeroParcelas: Number(form.numeroParcelas) || 1,
+      ...(usarPersonalizadas ? { valoresParcelas: valoresParcelasCV.map((v) => Number(v) || 0) } : {}),
+    };
+    const novasParcelas = gerarParcelasReceber(novo);
+    persistContratosEReceber([...contratosCV, novo], [...valoresReceber, ...novasParcelas]);
+    setForm({
+      unidade: "",
+      comprador: "",
+      valor: "",
+      percentualPago: "",
+      dataAssinatura: "",
+      statusPagamento: "em_dia",
+      numeroParcelas: "1",
+    });
+    setPersonalizarParcelasCV(false);
+    setValoresParcelasCV([]);
+    setShowForm(false);
+  }
+
+  // Gera (ou regenera) a lista de valores editáveis de cada parcela, uma
+  // divisão igual do valor do contrato como ponto de partida — o usuário
+  // pode ajustar cada valor individualmente antes de salvar.
+  function handleAtivarPersonalizarParcelasCV() {
+    const n = Math.max(1, Number(form.numeroParcelas) || 1);
+    const valorTotal = Number(form.valor) || 0;
+    const valorParcela = Math.round(valorTotal / n);
+    const valores = Array.from({ length: n }, (_, i) =>
+      i === n - 1 ? valorTotal - valorParcela * (n - 1) : valorParcela
+    );
+    setValoresParcelasCV(valores);
+    setPersonalizarParcelasCV(true);
+  }
+
+  function handleAtualizarValorParcelaCV(indice, valor) {
+    setValoresParcelasCV((prev) => prev.map((v, i) => (i === indice ? valor : v)));
+  }
+
+  function handleDeleteContrato(id) {
+    persistContratosEReceber(
+      contratosCV.filter((c) => c.id !== id),
+      valoresReceber.filter((v) => v.contratoId !== id)
+    );
+  }
+
+  function handleToggleParcelaRecebida(id) {
+    persistContratosEReceber(
+      contratosCV,
+      valoresReceber.map((v) => (v.id === id ? { ...v, status: v.status === "pago" ? "pendente" : "pago" } : v))
+    );
+  }
+
+  async function persistUnidadesObra(nextList) {
+    setUnidadesObra(nextList);
+    try {
+      const result = await window.storage.set(STORAGE_KEY_UNIDADES, JSON.stringify(nextList), false);
+      if (!result) setSaveErrorUnidades("Não foi possível salvar. Tente novamente.");
+      else setSaveErrorUnidades(null);
+    } catch (err) {
+      setSaveErrorUnidades("Não foi possível salvar. Tente novamente.");
+    }
+  }
+
+  function handleAddUnidade(e) {
+    e.preventDefault();
+    if (!formUnidade.unidade || !formUnidade.valorVenda) return;
+    const novo = {
+      id: Date.now(),
+      obra: formUnidade.obra || NOMES_OBRAS[0],
+      unidade: formUnidade.unidade,
+      andar: formUnidade.andar,
+      tipo: formUnidade.tipo,
+      metragem: Number(formUnidade.metragem) || 0,
+      valorVenda: Number(formUnidade.valorVenda) || 0,
+      statusManual: "disponivel",
+      observacoes: formUnidade.observacoes,
+    };
+    persistUnidadesObra([...unidadesObra, novo]);
+    setFormUnidade({ obra: NOMES_OBRAS[0], unidade: "", andar: "", tipo: "", metragem: "", valorVenda: "", observacoes: "" });
+    setShowFormUnidade(false);
+  }
+
+  function handleDeleteUnidade(id) {
+    persistUnidadesObra(unidadesObra.filter((u) => u.id !== id));
+  }
+
+  function handleUpdateUnidadeCampo(id, campo, valor) {
+    setUnidadesObra((prev) => prev.map((u) => (u.id === id ? { ...u, [campo]: valor } : u)));
+  }
+
+  function handlePersistUnidadesBlur() {
+    persistUnidadesObra(unidadesObra);
+  }
+
+  function handleToggleStatusManualUnidade(id) {
+    persistUnidadesObra(
+      unidadesObra.map((u) =>
+        u.id === id ? { ...u, statusManual: u.statusManual === "reservada" ? "disponivel" : "reservada" } : u
+      )
+    );
+  }
+
+  async function handlePdfImport(e) {
+    const file = e.target.files[0];
+    e.target.value = ""; // permite selecionar o mesmo arquivo de novo depois
+    if (!file) return;
+    setPdfImporting(true);
+    setPdfImportError(null);
+    setPdfImportedFields([]);
+    try {
+      const text = await extractTextFromPdf(file);
+      const parsed = parseContratoCV(text);
+      if (Object.keys(parsed).length === 0) {
+        setPdfImportError("Não consegui reconhecer os campos neste PDF. Preencha manualmente.");
+      } else {
+        setForm((prev) => ({ ...prev, ...parsed }));
+        setPdfImportedFields(Object.keys(parsed));
+      }
+    } catch (err) {
+      setPdfImportError("Não foi possível ler esse PDF. Preencha manualmente.");
+    } finally {
+      setPdfImporting(false);
+    }
+  }
+
+  async function persistNotasEPagar(nextNotas, nextContas) {
+    setNotasCompra(nextNotas);
+    setContasPagar(nextContas);
+    try {
+      const [r1, r2] = await Promise.all([
+        window.storage.set(STORAGE_KEY_NOTAS, JSON.stringify(nextNotas), false),
+        window.storage.set(STORAGE_KEY_PAGAR, JSON.stringify(nextContas), false),
+      ]);
+      if (!r1 || !r2) setSaveErrorNotas("Não foi possível salvar. Tente novamente.");
+      else setSaveErrorNotas(null);
+    } catch (err) {
+      setSaveErrorNotas("Não foi possível salvar. Tente novamente.");
+    }
+  }
+
+  function handleAddNota(e) {
+    e.preventDefault();
+    if (!formNota.fornecedor || !formNota.valorTotal) return;
+    const novaNota = {
+      id: Date.now(),
+      fornecedor: formNota.fornecedor,
+      obra: formNota.obra || NOMES_OBRAS[0],
+      valorTotal: Number(formNota.valorTotal),
+      dataEmissao: formNota.dataEmissao || new Date().toLocaleDateString("pt-BR"),
+      numeroParcelas: Number(formNota.numeroParcelas) || 1,
+    };
+    const novasParcelas = gerarParcelas(novaNota);
+    persistNotasEPagar([...notasCompra, novaNota], [...contasPagar, ...novasParcelas]);
+    setFormNota({ fornecedor: "", obra: NOMES_OBRAS[0], valorTotal: "", dataEmissao: "", numeroParcelas: "1" });
+    setShowFormNota(false);
+  }
+
+  function handleDeleteNota(id) {
+    persistNotasEPagar(
+      notasCompra.filter((n) => n.id !== id),
+      contasPagar.filter((c) => c.notaId !== id)
+    );
+  }
+
+  function handleToggleParcelaPaga(id) {
+    persistNotasEPagar(
+      notasCompra,
+      contasPagar.map((c) => (c.id === id ? { ...c, status: c.status === "pago" ? "pendente" : "pago" } : c))
+    );
+  }
+
+  function handleDeleteContaPagar(id) {
+    persistNotasEPagar(notasCompra, contasPagar.filter((c) => c.id !== id));
+  }
+
+  // Lança uma despesa direto em Contas a pagar, sem precisar cadastrar uma
+  // nota de compra ou contrato — para gastos avulsos/imprevistos da obra.
+  function handleAddDespesaAvulsa(e) {
+    e.preventDefault();
+    if (!formDespesa.fornecedor || !formDespesa.valor) return;
+    const despesa = {
+      id: Date.now(),
+      fornecedor: formDespesa.fornecedor,
+      obra: formDespesa.obra || NOMES_OBRAS[0],
+      valorTotal: Number(formDespesa.valor) || 0,
+      dataVencimento: formDespesa.dataVencimento || new Date().toLocaleDateString("pt-BR"),
+      numeroParcelas: Number(formDespesa.numeroParcelas) || 1,
+    };
+    const novasParcelas = gerarParcelasDespesaAvulsa(despesa);
+    persistNotasEPagar(notasCompra, [...contasPagar, ...novasParcelas]);
+    setFormDespesa({ fornecedor: "", obra: NOMES_OBRAS[0], valor: "", dataVencimento: "", numeroParcelas: "1" });
+    setShowFormDespesa(false);
+  }
+
+  // Vincula uma parcela de contas a pagar a um item do orçamento (Custos das
+  // obras). Quando paga, o valor passa a compor o "Gasto real" daquele item
+  // automaticamente — sem precisar digitar. Uma parcela vincula a só um
+  // item; um item pode ter várias parcelas vinculadas.
+  function handleVincularCustoItem(parcelaId, custoItemId) {
+    persistNotasEPagar(
+      notasCompra,
+      contasPagar.map((c) => (c.id === parcelaId ? { ...c, custoItemId } : c))
+    );
+  }
+
+  async function handlePdfImportNota(e) {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setPdfImportingNota(true);
+    setPdfImportErrorNota(null);
+    setPdfImportedFieldsNota([]);
+    try {
+      const text = await extractTextFromPdf(file);
+      const parsed = parseNotaCompra(text);
+      if (Object.keys(parsed).length === 0) {
+        setPdfImportErrorNota("Não consegui reconhecer os campos neste PDF. Preencha manualmente.");
+      } else {
+        setFormNota((prev) => ({ ...prev, ...parsed }));
+        setPdfImportedFieldsNota(Object.keys(parsed));
+      }
+    } catch (err) {
+      setPdfImportErrorNota("Não foi possível ler esse PDF. Preencha manualmente.");
+    } finally {
+      setPdfImportingNota(false);
+    }
+  }
+
+  async function persistExtrato(nextList) {
+    setExtrato(nextList);
+    try {
+      const result = await window.storage.set(STORAGE_KEY_EXTRATO, JSON.stringify(nextList), false);
+      if (!result) setSaveErrorExtrato("Não foi possível salvar. Tente novamente.");
+      else setSaveErrorExtrato(null);
+    } catch (err) {
+      setSaveErrorExtrato("Não foi possível salvar. Tente novamente.");
+    }
+  }
+
+  function handleAddLancamento(e) {
+    e.preventDefault();
+    if (!formExtrato.descricao || !formExtrato.valor || !formExtrato.data) return;
+    const numero = Math.abs(Number(formExtrato.valor));
+    const novo = {
+      id: Date.now(),
+      data: formExtrato.data,
+      descricao: formExtrato.descricao,
+      valor: formExtrato.tipo === "debito" ? -numero : numero,
+      socio: formExtrato.socio.trim(),
+      parcelaReceberId: "",
+    };
+    persistExtrato([...extrato, novo]);
+    setFormExtrato({ data: "", descricao: "", valor: "", tipo: "credito", socio: "" });
+    setShowFormExtrato(false);
+  }
+
+  function handleDeleteLancamento(id) {
+    persistExtrato(extrato.filter((l) => l.id !== id));
+  }
+
+  function handleUpdateExtratoSocio(id, socio) {
+    setExtrato((prev) => prev.map((l) => (l.id === id ? { ...l, socio } : l)));
+  }
+
+  function handlePersistExtratoSocio() {
+    persistExtrato(extrato);
+  }
+
+  // Vincula (ou desvincula) um lançamento do extrato a uma parcela de
+  // valores a receber. Ao vincular, marca a parcela como recebida; ao trocar
+  // ou remover o vínculo, a parcela anterior volta a pendente — a parcela
+  // marcada manualmente na aba Valores a receber também usa esse mesmo
+  // campo de status, então desvincular sempre reabre a parcela.
+  function handleVincularParcelaReceber(lancamentoId, parcelaId) {
+    const lancamentoAtual = extrato.find((l) => l.id === lancamentoId);
+    const parcelaAnteriorId = lancamentoAtual ? lancamentoAtual.parcelaReceberId : "";
+
+    const novoExtrato = extrato.map((l) =>
+      l.id === lancamentoId ? { ...l, parcelaReceberId: parcelaId } : l
+    );
+    const novoValoresReceber = valoresReceber.map((v) => {
+      if (parcelaAnteriorId && v.id === parcelaAnteriorId && v.id !== parcelaId) {
+        return { ...v, status: "pendente" };
+      }
+      if (parcelaId && v.id === parcelaId) {
+        return { ...v, status: "pago" };
+      }
+      return v;
+    });
+
+    persistExtrato(novoExtrato);
+    persistContratosEReceber(contratosCV, novoValoresReceber);
+  }
+
+  // Opções de parcelas selecionáveis para vincular a um lançamento: a
+  // parcela já vinculada a ele (se houver) mais as pendentes/vencidas que
+  // nenhum outro lançamento já vinculou.
+  function opcoesParcelaReceberPara(lancamentoId, parcelaAtualId) {
+    const vinculadasPorOutros = new Set(
+      extrato.filter((le) => le.id !== lancamentoId && le.parcelaReceberId).map((le) => le.parcelaReceberId)
+    );
+    return valoresReceber.filter(
+      (v) => v.id === parcelaAtualId || (!vinculadasPorOutros.has(v.id) && v.status !== "pago")
+    );
+  }
+
+  async function handlePdfImportExtrato(e) {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setPdfImportingExtrato(true);
+    setPdfImportErrorExtrato(null);
+    try {
+      const linhas = await extractLinesFromPdf(file);
+      const lancamentos = parseLancamentosExtrato(linhas);
+      if (lancamentos.length === 0) {
+        setPdfImportErrorExtrato(
+          "Não consegui reconhecer lançamentos neste PDF. O formato deste extrato pode ser diferente do esperado — tente adicionar manualmente."
+        );
+      } else {
+        setExtratoPreview(lancamentos);
+      }
+    } catch (err) {
+      setPdfImportErrorExtrato("Não foi possível ler esse PDF.");
+    } finally {
+      setPdfImportingExtrato(false);
+    }
+  }
+
+  function handleUpdatePreviewRow(id, campo, valor) {
+    setExtratoPreview((prev) => prev.map((l) => (l.id === id ? { ...l, [campo]: valor } : l)));
+  }
+
+  function handleTogglePreviewTipo(id) {
+    setExtratoPreview((prev) => prev.map((l) => (l.id === id ? { ...l, valor: -l.valor } : l)));
+  }
+
+  function handleRemovePreviewRow(id) {
+    setExtratoPreview((prev) => prev.filter((l) => l.id !== id));
+  }
+
+  function handleConfirmImportExtrato() {
+    const confirmados = extratoPreview.map((l, i) => ({
+      id: Date.now() + i,
+      data: l.data,
+      descricao: l.descricao,
+      valor: Number(l.valor),
+      socio: (l.socio || "").trim(),
+      parcelaReceberId: "",
+    }));
+    persistExtrato([...extrato, ...confirmados]);
+    setExtratoPreview([]);
+  }
+
+  function handleDiscardPreviewExtrato() {
+    setExtratoPreview([]);
+  }
+
+  async function persistSocios(nextList) {
+    setEmprestimosSocios(nextList);
+    try {
+      const result = await window.storage.set(STORAGE_KEY_SOCIOS, JSON.stringify(nextList), false);
+      if (!result) setSaveErrorSocios("Não foi possível salvar. Tente novamente.");
+      else setSaveErrorSocios(null);
+    } catch (err) {
+      setSaveErrorSocios("Não foi possível salvar. Tente novamente.");
+    }
+  }
+
+  function handleAddEmprestimo(e) {
+    e.preventDefault();
+    if (!formSocio.socio || !formSocio.valor) return;
+    const novo = {
+      id: Date.now(),
+      socio: formSocio.socio,
+      tipo: formSocio.tipo,
+      valor: Math.abs(Number(formSocio.valor)),
+      data: formSocio.data || new Date().toLocaleDateString("pt-BR"),
+      obra: formSocio.obra || NOMES_OBRAS[0],
+      observacao: formSocio.observacao,
+    };
+    persistSocios([...emprestimosSocios, novo]);
+    setFormSocio({ socio: "", tipo: "aporte", valor: "", data: "", obra: NOMES_OBRAS[0], observacao: "" });
+    setShowFormSocio(false);
+  }
+
+  function handleDeleteEmprestimo(id) {
+    persistSocios(emprestimosSocios.filter((e) => e.id !== id));
+  }
+
+  async function persistDocumentos(nextList) {
+    setDocumentos(nextList);
+    try {
+      const result = await window.storage.set(STORAGE_KEY_DOCUMENTOS, JSON.stringify(nextList), false);
+      if (!result) setSaveErrorDocumentos("Não foi possível salvar. Tente novamente.");
+      else setSaveErrorDocumentos(null);
+    } catch (err) {
+      setSaveErrorDocumentos("Não foi possível salvar. Tente novamente.");
+    }
+  }
+
+  async function handleFormDocumentoFile(e) {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) {
+      setUploadErrorDocumento("Arquivo muito grande — máximo recomendado de 3 MB por documento.");
+      return;
+    }
+    setUploadErrorDocumento(null);
+    setPdfImportedFieldsDocumento([]);
+    setFormDocumento((prev) => ({ ...prev, arquivo: file }));
+
+    if (file.type === "application/pdf") {
+      setPdfReadingDocumento(true);
+      try {
+        const text = await extractTextFromPdf(file);
+        const parsed = parseDocumentoEmpresa(text);
+        if (Object.keys(parsed).length > 0) {
+          setFormDocumento((prev) => ({ ...prev, ...parsed, arquivo: file }));
+          setPdfImportedFieldsDocumento(Object.keys(parsed));
+        }
+      } catch (err) {
+        // leitura falhou — segue com o arquivo anexado, campos preenchidos manualmente
+      } finally {
+        setPdfReadingDocumento(false);
+      }
+    }
+  }
+
+  async function handleAddDocumento(e) {
+    e.preventDefault();
+    if (!formDocumento.nome) return;
+    setUploadingDocumento(true);
+    setUploadErrorDocumento(null);
+    try {
+      const id = Date.now();
+      let arquivoNome = null;
+      let arquivoTipo = null;
+
+      if (formDocumento.arquivo) {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error("Falha ao ler arquivo."));
+          reader.readAsDataURL(formDocumento.arquivo);
+        });
+        const resultArquivo = await window.storage.set(chaveArquivoDocumento(id), dataUrl, false);
+        if (!resultArquivo) {
+          setUploadErrorDocumento("Não foi possível salvar o arquivo (pode ter excedido o limite de tamanho).");
+          setUploadingDocumento(false);
+          return;
+        }
+        arquivoNome = formDocumento.arquivo.name;
+        arquivoTipo = formDocumento.arquivo.type;
+      }
+
+      const novo = {
+        id,
+        categoria: formDocumento.categoria,
+        nome: formDocumento.nome,
+        numero: formDocumento.numero,
+        dataEmissao: formDocumento.dataEmissao,
+        validade: formDocumento.validade,
+        observacao: formDocumento.observacao,
+        arquivoNome,
+        arquivoTipo,
+      };
+      await persistDocumentos([...documentos, novo]);
+      setFormDocumento({
+        categoria: "Outro",
+        nome: "",
+        numero: "",
+        dataEmissao: "",
+        validade: "",
+        observacao: "",
+        arquivo: null,
+      });
+      setPdfImportedFieldsDocumento([]);
+      setShowFormDocumento(false);
+    } catch (err) {
+      setUploadErrorDocumento("Não foi possível anexar o arquivo. Tente novamente.");
+    } finally {
+      setUploadingDocumento(false);
+    }
+  }
+
+  async function handleDeleteDocumento(id) {
+    persistDocumentos(documentos.filter((d) => d.id !== id));
+    try {
+      await window.storage.delete(chaveArquivoDocumento(id), false);
+    } catch (err) {
+      // arquivo pode já não existir — segue normalmente
+    }
+  }
+
+  async function handleAbrirDocumento(doc) {
+    if (!doc.arquivoNome) return;
+    setAbrindoDocumentoId(doc.id);
+    try {
+      const result = await window.storage.get(chaveArquivoDocumento(doc.id), false);
+      if (result) {
+        const link = document.createElement("a");
+        link.href = result.value;
+        link.download = doc.arquivoNome;
+        link.target = "_blank";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } catch (err) {
+      setSaveErrorDocumentos("Não foi possível abrir o arquivo.");
+    } finally {
+      setAbrindoDocumentoId(null);
+    }
+  }
+
+  // Envia o documento pelo WhatsApp. Tenta primeiro o menu nativo de
+  // compartilhar do aparelho (Web Share API com arquivo) — quando disponível,
+  // o arquivo já sai anexado e você escolhe o contato na hora. Se o
+  // navegador não suportar isso (comum em navegador de desktop ou dentro
+  // deste painel incorporado), baixa o arquivo e abre o WhatsApp com uma
+  // mensagem pronta, para você anexar manualmente.
+  async function handleEnviarWhatsapp(doc) {
+    if (!doc.arquivoNome) return;
+    setEnviandoWhatsappId(doc.id);
+    try {
+      const result = await window.storage.get(chaveArquivoDocumento(doc.id), false);
+      if (!result) {
+        setSaveErrorDocumentos("Não foi possível carregar o arquivo para enviar.");
+        return;
+      }
+      const dataUrl = result.value;
+
+      let compartilhado = false;
+      if (typeof navigator !== "undefined" && navigator.share) {
+        try {
+          const resposta = await fetch(dataUrl);
+          const blob = await resposta.blob();
+          const file = new File([blob], doc.arquivoNome, { type: doc.arquivoTipo || blob.type });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: doc.nome, text: `Documento: ${doc.nome}` });
+            compartilhado = true;
+          }
+        } catch (err) {
+          // usuário cancelou o compartilhamento ou o navegador recusou — segue para o fallback
+        }
+      }
+
+      if (!compartilhado) {
+        const link = document.createElement("a");
+        link.href = dataUrl;
+        link.download = doc.arquivoNome;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        const texto = encodeURIComponent(`Segue o documento: ${doc.nome}`);
+        window.open(`https://wa.me/?text=${texto}`, "_blank");
+      }
+    } catch (err) {
+      setSaveErrorDocumentos("Não foi possível preparar o envio pelo WhatsApp.");
+    } finally {
+      setEnviandoWhatsappId(null);
+    }
+  }
+
+  // Anexa um arquivo diretamente numa categoria fixa do checklist — sem
+  // passar pelo formulário genérico. Se for PDF, tenta ler número, emissão e
+  // validade automaticamente; o nome do documento vem do nome do arquivo
+  // (útil para diferenciar, por exemplo, o RG de cada sócio).
+  async function handleAnexarDocumentoCategoria(categoria, file) {
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) {
+      setUploadErrorDocumento("Arquivo muito grande — máximo recomendado de 3 MB por documento.");
+      return;
+    }
+    setUploadErrorDocumento(null);
+    setUploadingCategoria(categoria);
+    try {
+      let numero = "";
+      let dataEmissao = "";
+      let validade = "";
+      if (file.type === "application/pdf") {
+        try {
+          const text = await extractTextFromPdf(file);
+          const parsed = parseDocumentoEmpresa(text);
+          numero = parsed.numero || "";
+          dataEmissao = parsed.dataEmissao || "";
+          validade = parsed.validade || "";
+        } catch (err) {
+          // leitura falhou — segue sem preencher automaticamente
+        }
+      }
+
+      const id = Date.now();
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("Falha ao ler arquivo."));
+        reader.readAsDataURL(file);
+      });
+      const resultArquivo = await window.storage.set(chaveArquivoDocumento(id), dataUrl, false);
+      if (!resultArquivo) {
+        setUploadErrorDocumento("Não foi possível salvar o arquivo (pode ter excedido o limite de tamanho).");
+        return;
+      }
+
+      const nomeArquivo = file.name.replace(/\.[^/.]+$/, "") || categoria;
+      const novo = {
+        id,
+        categoria,
+        nome: nomeArquivo,
+        numero,
+        dataEmissao,
+        validade,
+        observacao: "",
+        arquivoNome: file.name,
+        arquivoTipo: file.type,
+      };
+      await persistDocumentos([...documentos, novo]);
+    } catch (err) {
+      setUploadErrorDocumento("Não foi possível anexar o arquivo. Tente novamente.");
+    } finally {
+      setUploadingCategoria(null);
+    }
+  }
+
+  function handleUpdateDocumentoCampo(id, campo, valor) {
+    setDocumentos((prev) => prev.map((d) => (d.id === id ? { ...d, [campo]: valor } : d)));
+  }
+
+  function handlePersistDocumentosBlur() {
+    persistDocumentos(documentos);
+  }
+
+  async function persistContratosFornecedores(nextList) {
+    setContratosFornecedores(nextList);
+    try {
+      const result = await window.storage.set(STORAGE_KEY_FORNECEDORES, JSON.stringify(nextList), false);
+      if (!result) setSaveErrorFornecedores("Não foi possível salvar. Tente novamente.");
+      else setSaveErrorFornecedores(null);
+    } catch (err) {
+      setSaveErrorFornecedores("Não foi possível salvar. Tente novamente.");
+    }
+  }
+
+  async function handleFormFornecedorFile(e) {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) {
+      setPdfImportErrorFornecedor("Arquivo muito grande — máximo recomendado de 3 MB.");
+      return;
+    }
+    setPdfImportErrorFornecedor(null);
+    setPdfImportedFieldsFornecedor([]);
+    setFormFornecedor((prev) => ({ ...prev, arquivo: file }));
+
+    if (file.type === "application/pdf") {
+      setPdfImportingFornecedor(true);
+      try {
+        const text = await extractTextFromPdf(file);
+        const parsed = parseContratoFornecedor(text);
+        if (Object.keys(parsed).length > 0) {
+          setFormFornecedor((prev) => ({ ...prev, ...parsed, arquivo: file }));
+          setPdfImportedFieldsFornecedor(Object.keys(parsed));
+        }
+      } catch (err) {
+        // leitura falhou — segue com o arquivo anexado, campos preenchidos manualmente
+      } finally {
+        setPdfImportingFornecedor(false);
+      }
+    }
+  }
+
+  async function handleAddContratoFornecedor(e) {
+    e.preventDefault();
+    if (!formFornecedor.fornecedor || !formFornecedor.valor) return;
+    try {
+      const id = Date.now();
+      let arquivoNome = null;
+      let arquivoTipo = null;
+
+      if (formFornecedor.arquivo) {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error("Falha ao ler arquivo."));
+          reader.readAsDataURL(formFornecedor.arquivo);
+        });
+        const resultArquivo = await window.storage.set(chaveArquivoContratoFornecedor(id), dataUrl, false);
+        if (!resultArquivo) {
+          setPdfImportErrorFornecedor("Não foi possível salvar o arquivo (pode ter excedido o limite de tamanho).");
+          return;
+        }
+        arquivoNome = formFornecedor.arquivo.name;
+        arquivoTipo = formFornecedor.arquivo.type;
+      }
+
+      const novo = {
+        id,
+        fornecedor: formFornecedor.fornecedor,
+        cnpj: formFornecedor.cnpj,
+        obra: formFornecedor.obra || NOMES_OBRAS[0],
+        tipo: formFornecedor.tipo,
+        objeto: formFornecedor.objeto,
+        valor: Number(formFornecedor.valor) || 0,
+        numeroParcelas: Number(formFornecedor.numeroParcelas) || 1,
+        dataInicio: formFornecedor.dataInicio || new Date().toLocaleDateString("pt-BR"),
+        dataTermino: formFornecedor.dataTermino,
+        encerrado: false,
+        observacoes: formFornecedor.observacoes,
+        arquivoNome,
+        arquivoTipo,
+      };
+      const novasParcelas = gerarParcelas({
+        id: novo.id,
+        dataEmissao: novo.dataInicio,
+        numeroParcelas: novo.numeroParcelas,
+        valorTotal: novo.valor,
+        fornecedor: novo.fornecedor,
+        obra: novo.obra,
+      });
+      await persistContratosFornecedores([...contratosFornecedores, novo]);
+      await persistNotasEPagar(notasCompra, [...contasPagar, ...novasParcelas]);
+      setFormFornecedor({
+        fornecedor: "",
+        cnpj: "",
+        obra: NOMES_OBRAS[0],
+        tipo: TIPOS_FORNECEDOR[0],
+        objeto: "",
+        valor: "",
+        numeroParcelas: "1",
+        dataInicio: "",
+        dataTermino: "",
+        observacoes: "",
+        arquivo: null,
+      });
+      setPdfImportedFieldsFornecedor([]);
+      setShowFormFornecedor(false);
+    } catch (err) {
+      setPdfImportErrorFornecedor("Não foi possível salvar o contrato. Tente novamente.");
+    }
+  }
+
+  async function handleDeleteContratoFornecedor(id) {
+    persistContratosFornecedores(contratosFornecedores.filter((c) => c.id !== id));
+    persistNotasEPagar(notasCompra, contasPagar.filter((c) => c.notaId !== id));
+    try {
+      await window.storage.delete(chaveArquivoContratoFornecedor(id), false);
+    } catch (err) {
+      // arquivo pode já não existir — segue normalmente
+    }
+  }
+
+  function handleToggleEncerradoFornecedor(id) {
+    persistContratosFornecedores(
+      contratosFornecedores.map((c) => (c.id === id ? { ...c, encerrado: !c.encerrado } : c))
+    );
+  }
+
+  async function handleAbrirAnexoFornecedor(contrato) {
+    if (!contrato.arquivoNome) return;
+    try {
+      const result = await window.storage.get(chaveArquivoContratoFornecedor(contrato.id), false);
+      if (result) {
+        const link = document.createElement("a");
+        link.href = result.value;
+        link.download = contrato.arquivoNome;
+        link.target = "_blank";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } catch (err) {
+      setSaveErrorFornecedores("Não foi possível abrir o arquivo.");
+    }
+  }
+
+  async function persistContratosServicos(nextList) {
+    setContratosServicos(nextList);
+    try {
+      const result = await window.storage.set(STORAGE_KEY_SERVICOS, JSON.stringify(nextList), false);
+      if (!result) setSaveErrorServicos("Não foi possível salvar. Tente novamente.");
+      else setSaveErrorServicos(null);
+    } catch (err) {
+      setSaveErrorServicos("Não foi possível salvar. Tente novamente.");
+    }
+  }
+
+  async function handleFormServicoFile(e) {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) {
+      setPdfImportErrorServico("Arquivo muito grande — máximo recomendado de 3 MB.");
+      return;
+    }
+    setPdfImportErrorServico(null);
+    setPdfImportedFieldsServico([]);
+    setFormServico((prev) => ({ ...prev, arquivo: file }));
+
+    if (file.type === "application/pdf") {
+      setPdfImportingServico(true);
+      try {
+        const text = await extractTextFromPdf(file);
+        const parsed = parseContratoFornecedor(text);
+        if (Object.keys(parsed).length > 0) {
+          setFormServico((prev) => ({ ...prev, ...parsed, arquivo: file }));
+          setPdfImportedFieldsServico(Object.keys(parsed));
+        }
+      } catch (err) {
+        // leitura falhou — segue com o arquivo anexado, campos preenchidos manualmente
+      } finally {
+        setPdfImportingServico(false);
+      }
+    }
+  }
+
+  async function handleAddContratoServico(e) {
+    e.preventDefault();
+    if (!formServico.fornecedor || !formServico.valor) return;
+    try {
+      const id = Date.now();
+      let arquivoNome = null;
+      let arquivoTipo = null;
+
+      if (formServico.arquivo) {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error("Falha ao ler arquivo."));
+          reader.readAsDataURL(formServico.arquivo);
+        });
+        const resultArquivo = await window.storage.set(chaveArquivoContratoServico(id), dataUrl, false);
+        if (!resultArquivo) {
+          setPdfImportErrorServico("Não foi possível salvar o arquivo (pode ter excedido o limite de tamanho).");
+          return;
+        }
+        arquivoNome = formServico.arquivo.name;
+        arquivoTipo = formServico.arquivo.type;
+      }
+
+      const novo = {
+        id,
+        fornecedor: formServico.fornecedor,
+        cnpj: formServico.cnpj,
+        obra: formServico.obra || NOMES_OBRAS[0],
+        objeto: formServico.objeto,
+        valor: Number(formServico.valor) || 0,
+        numeroParcelas: Number(formServico.numeroParcelas) || 1,
+        dataInicio: formServico.dataInicio || new Date().toLocaleDateString("pt-BR"),
+        dataTermino: formServico.dataTermino,
+        encerrado: false,
+        observacoes: formServico.observacoes,
+        arquivoNome,
+        arquivoTipo,
+      };
+      const novasParcelas = gerarParcelas({
+        id: novo.id,
+        dataEmissao: novo.dataInicio,
+        numeroParcelas: novo.numeroParcelas,
+        valorTotal: novo.valor,
+        fornecedor: novo.fornecedor,
+        obra: novo.obra,
+      });
+      await persistContratosServicos([...contratosServicos, novo]);
+      await persistNotasEPagar(notasCompra, [...contasPagar, ...novasParcelas]);
+      setFormServico({
+        fornecedor: "",
+        cnpj: "",
+        obra: NOMES_OBRAS[0],
+        objeto: "",
+        valor: "",
+        numeroParcelas: "1",
+        dataInicio: "",
+        dataTermino: "",
+        observacoes: "",
+        arquivo: null,
+      });
+      setPdfImportedFieldsServico([]);
+      setShowFormServico(false);
+    } catch (err) {
+      setPdfImportErrorServico("Não foi possível salvar o contrato. Tente novamente.");
+    }
+  }
+
+  async function handleDeleteContratoServico(id) {
+    persistContratosServicos(contratosServicos.filter((c) => c.id !== id));
+    persistNotasEPagar(notasCompra, contasPagar.filter((c) => c.notaId !== id));
+    try {
+      await window.storage.delete(chaveArquivoContratoServico(id), false);
+    } catch (err) {
+      // arquivo pode já não existir — segue normalmente
+    }
+  }
+
+  function handleToggleEncerradoServico(id) {
+    persistContratosServicos(
+      contratosServicos.map((c) => (c.id === id ? { ...c, encerrado: !c.encerrado } : c))
+    );
+  }
+
+  async function handleAbrirAnexoServico(contrato) {
+    if (!contrato.arquivoNome) return;
+    try {
+      const result = await window.storage.get(chaveArquivoContratoServico(contrato.id), false);
+      if (result) {
+        const link = document.createElement("a");
+        link.href = result.value;
+        link.download = contrato.arquivoNome;
+        link.target = "_blank";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } catch (err) {
+      setSaveErrorServicos("Não foi possível abrir o arquivo.");
+    }
+  }
+
+  // Orçado e realizado por obra agora vêm do orçamento detalhado (aba Custos
+  // das obras): orçado = soma de Quantidade × Valor Unitário de cada item;
+  // realizado = soma do Gasto Real (vinculado a contas a pagar quando houver,
+  // senão o valor digitado manualmente) de cada item.
+  const custosItensComGasto = custosItens.map((it) => ({
+    ...it,
+    gastoReal: gastoRealEfetivo(it, contasPagar),
+    gastoRealVinculado: contasPagar.some((c) => c.custoItemId === it.id),
+  }));
+
+  const obrasComRealizado = obrasState.map((o) => {
+    const resumo = resumoCustoItens(custosItensComGasto.filter((it) => it.obra === o.nome));
+    return { ...o, orcado: resumo.orcado, realizado: resumo.gasto };
+  });
+
+  const totalOrcado = obrasComRealizado.reduce((s, o) => s + (o.orcado || 0), 0);
+  const totalRealizado = obrasComRealizado.reduce((s, o) => s + (o.realizado || 0), 0);
+
+  const itensObraCustoAtual = custosItensComGasto.filter((it) => it.obra === obraCustoSelecionada);
+  const totalGeralObraCusto = resumoCustoItens(itensObraCustoAtual);
+
+  // Fluxo de caixa calculado automaticamente:
+  // entradas = valor de cada parcela de valores a receber, lançado no mês de
+  //            vencimento, + créditos do extrato bancário + aportes de sócios;
+  // saídas   = valor de cada parcela de contas a pagar, lançado no mês de vencimento,
+  //            + débitos do extrato bancário + devoluções a sócios.
+  // Extrato bancário e empréstimos de sócios somam-se às entradas/saídas já
+  // calculadas — não substituem (cuidado com contagem em dobro se o mesmo
+  // movimento aparecer em mais de uma fonte).
+  const fluxoCaixa = useMemo(() => {
+    const porMes = {};
+
+    valoresReceber.forEach((v) => {
+      const data = parseDateBR(v.vencimento);
+      if (!data) return;
+      const key = mesAnoKey(data);
+      if (!porMes[key]) porMes[key] = { data, entradas: 0, saidas: 0 };
+      porMes[key].entradas += v.valor;
+    });
+
+    contasPagar.forEach((c) => {
+      const data = parseDateBR(c.vencimento);
+      if (!data) return;
+      const key = mesAnoKey(data);
+      if (!porMes[key]) porMes[key] = { data, entradas: 0, saidas: 0 };
+      porMes[key].saidas += c.valor;
+    });
+
+    extrato.forEach((l) => {
+      const data = parseDateBR(l.data);
+      if (!data) return;
+      const key = mesAnoKey(data);
+      if (!porMes[key]) porMes[key] = { data, entradas: 0, saidas: 0 };
+      if (l.valor >= 0) porMes[key].entradas += l.valor;
+      else porMes[key].saidas += Math.abs(l.valor);
+    });
+
+    emprestimosSocios.forEach((e) => {
+      const data = parseDateBR(e.data);
+      if (!data) return;
+      const key = mesAnoKey(data);
+      if (!porMes[key]) porMes[key] = { data, entradas: 0, saidas: 0 };
+      if (e.tipo === "aporte") porMes[key].entradas += e.valor;
+      else porMes[key].saidas += e.valor;
+    });
+
+    return Object.values(porMes)
+      .sort((a, b) => a.data - b.data)
+      .slice(-6)
+      .map((m) => ({
+        mes: mesAnoLabel(m.data),
+        chave: mesAnoKey(m.data),
+        entradas: Math.round(m.entradas),
+        saidas: Math.round(m.saidas),
+      }));
+  }, [valoresReceber, contasPagar, extrato, emprestimosSocios]);
+
+  const totalEntradasFluxo = fluxoCaixa.reduce((s, f) => s + f.entradas, 0);
+  const totalSaidasFluxo = fluxoCaixa.reduce((s, f) => s + f.saidas, 0);
+  const saldoCaixa = totalEntradasFluxo - totalSaidasFluxo;
+
+  // Planilha detalhada do fluxo de caixa: saldo do mês e saldo acumulado
+  // (fluxoCaixa já vem ordenado do mês mais antigo para o mais recente).
+  let acumuladoFluxo = 0;
+  const fluxoCaixaDetalhado = fluxoCaixa.map((f) => {
+    const saldoMes = f.entradas - f.saidas;
+    acumuladoFluxo += saldoMes;
+    return { ...f, saldoMes, saldoAcumulado: acumuladoFluxo };
+  });
+
+  const contratosVencimentosTodos = [...contratosFornecedores, ...contratosServicos];
+  const vencendoEm30 = contratosVencimentosTodos.filter((c) => statusContratoFornecedorDisplay(c) === "vencendo").length;
+
+  const contratosFornecedoresFiltrados = filtroObraFornecedores
+    ? contratosFornecedores.filter((c) => c.obra === filtroObraFornecedores)
+    : contratosFornecedores;
+  const totalContratadoFornecedores = contratosFornecedoresFiltrados.reduce((s, c) => s + c.valor, 0);
+  const contratosFornecedoresVencendo = contratosFornecedoresFiltrados.filter(
+    (c) => statusContratoFornecedorDisplay(c) === "vencendo"
+  ).length;
+  const contratosFornecedoresVencidos = contratosFornecedoresFiltrados.filter(
+    (c) => statusContratoFornecedorDisplay(c) === "vencido"
+  ).length;
+  const contratosFornecedoresAtivos = contratosFornecedoresFiltrados.filter(
+    (c) => statusContratoFornecedorDisplay(c) === "ativo"
+  ).length;
+
+  const contratosServicosFiltrados = filtroObraServicos
+    ? contratosServicos.filter((c) => c.obra === filtroObraServicos)
+    : contratosServicos;
+  const totalContratadoServicos = contratosServicosFiltrados.reduce((s, c) => s + c.valor, 0);
+  const contratosServicosVencendo = contratosServicosFiltrados.filter(
+    (c) => statusContratoFornecedorDisplay(c) === "vencendo"
+  ).length;
+  const contratosServicosVencidos = contratosServicosFiltrados.filter(
+    (c) => statusContratoFornecedorDisplay(c) === "vencido"
+  ).length;
+  const contratosServicosAtivos = contratosServicosFiltrados.filter(
+    (c) => statusContratoFornecedorDisplay(c) === "ativo"
+  ).length;
+
+  const totalVGV = contratosCV.reduce((s, c) => s + c.valor, 0);
+  const totalRecebidoCV = contratosCV.reduce((s, c) => s + c.valor * (c.percentualPago / 100), 0);
+  const unidadesAtrasadas = contratosCV.filter((c) => c.statusPagamento === "atrasado").length;
+
+  // Status de cada unidade calculado (vendida = tem contrato de compra e
+  // venda correspondente); filtro combina obra + status efetivo.
+  const unidadesComStatus = unidadesObra.map((u) => {
+    const { status, contrato } = statusUnidadeEfetivo(u, contratosCV);
+    return { ...u, statusEfetivo: status, contratoVinculado: contrato };
+  });
+  const unidadesFiltradas = unidadesComStatus.filter(
+    (u) => (!filtroObraUnidades || u.obra === filtroObraUnidades) && (!filtroStatusUnidades || u.statusEfetivo === filtroStatusUnidades)
+  );
+  const totalVGVPotencial = unidadesComStatus.reduce((s, u) => s + u.valorVenda, 0);
+  const totalVGVVendido = unidadesComStatus.filter((u) => u.statusEfetivo === "vendida").reduce((s, u) => s + u.valorVenda, 0);
+  const unidadesDisponiveis = unidadesComStatus.filter((u) => u.statusEfetivo === "disponivel").length;
+  const unidadesReservadas = unidadesComStatus.filter((u) => u.statusEfetivo === "reservada").length;
+  const unidadesVendidas = unidadesComStatus.filter((u) => u.statusEfetivo === "vendida").length;
+
+  const notasFiltradas = filtroObraNotas ? notasCompra.filter((n) => n.obra === filtroObraNotas) : notasCompra;
+  const contasPagarFiltradas = filtroObraPagar
+    ? contasPagar.filter((c) => c.obra === filtroObraPagar)
+    : contasPagar;
+
+  const totalNotasCompra = notasFiltradas.reduce((s, n) => s + n.valorTotal, 0);
+  const totalAPagar = contasPagarFiltradas
+    .filter((c) => statusPagarDisplay(c) !== "pago")
+    .reduce((s, c) => s + c.valor, 0);
+  const totalPago = contasPagarFiltradas
+    .filter((c) => statusPagarDisplay(c) === "pago")
+    .reduce((s, c) => s + c.valor, 0);
+  const parcelasVencidas = contasPagarFiltradas.filter((c) => statusPagarDisplay(c) === "vencido").length;
+
+  const saldoExtrato = extrato.reduce((s, l) => s + l.valor, 0);
+  const totalCreditosExtrato = extrato.filter((l) => l.valor >= 0).reduce((s, l) => s + l.valor, 0);
+  const totalDebitosExtrato = extrato.filter((l) => l.valor < 0).reduce((s, l) => s + Math.abs(l.valor), 0);
+
+  // Lançamentos do extrato bancário marcados com um sócio contam como
+  // empréstimo/devolução automaticamente (crédito = aporte, débito =
+  // devolução), sem duplicar o registro manual — cada movimento é contado
+  // só na fonte onde foi lançado.
+  const movimentosSocios = [
+    ...emprestimosSocios.map((e) => ({ ...e, origem: "manual" })),
+    ...extrato
+      .filter((l) => l.socio)
+      .map((l) => ({
+        id: `extrato-${l.id}`,
+        socio: l.socio,
+        tipo: l.valor >= 0 ? "aporte" : "devolucao",
+        valor: Math.abs(l.valor),
+        data: l.data,
+        obra: "",
+        observacao: l.descricao,
+        origem: "extrato",
+      })),
+  ];
+
+  const movimentosSociosFiltrados = filtroObraSocios
+    ? movimentosSocios.filter((m) => m.obra === filtroObraSocios)
+    : movimentosSocios;
+
+  const totalAportado = movimentosSociosFiltrados
+    .filter((e) => e.tipo === "aporte")
+    .reduce((s, e) => s + e.valor, 0);
+  const totalDevolvido = movimentosSociosFiltrados
+    .filter((e) => e.tipo === "devolucao")
+    .reduce((s, e) => s + e.valor, 0);
+  const saldoComSocios = totalAportado - totalDevolvido;
+  const saldoPorSocio = Object.entries(
+    movimentosSociosFiltrados.reduce((acc, e) => {
+      acc[e.socio] = (acc[e.socio] || 0) + (e.tipo === "aporte" ? e.valor : -e.valor);
+      return acc;
+    }, {})
+  )
+    .map(([socio, saldo]) => ({ socio, saldo }))
+    .sort((a, b) => b.saldo - a.saldo);
+
+  const categoriasComDocumento = new Set(documentos.map((d) => d.categoria));
+  const essenciaisPendentes = DOCUMENTOS_ESSENCIAIS.filter((c) => !categoriasComDocumento.has(c));
+  const documentosVencidos = documentos.filter((d) => statusDocumentoDisplay(d) === "vencido").length;
+  const documentosVencendo = documentos.filter((d) => statusDocumentoDisplay(d) === "vencendo").length;
+
+  const totalAReceber = valoresReceber
+    .filter((v) => statusReceberDisplay(v) !== "pago")
+    .reduce((s, v) => s + v.valor, 0);
+  const totalRecebidoParcelas = valoresReceber
+    .filter((v) => statusReceberDisplay(v) === "pago")
+    .reduce((s, v) => s + v.valor, 0);
+  const parcelasReceberVencidas = valoresReceber.filter((v) => statusReceberDisplay(v) === "vencido").length;
+
+  // Agrupa as parcelas por unidade + cliente: total da venda, valor já
+  // recebido, saldo a receber e a lista de parcelas (pro detalhe expandido).
+  const saldoPorUnidade = Object.values(
+    valoresReceber.reduce((acc, v) => {
+      const chave = `${v.unidade}|${v.comprador}`;
+      if (!acc[chave]) {
+        acc[chave] = { chave, unidade: v.unidade, comprador: v.comprador, valorTotal: 0, recebido: 0, parcelas: [] };
+      }
+      acc[chave].valorTotal += v.valor;
+      if (statusReceberDisplay(v) === "pago") acc[chave].recebido += v.valor;
+      acc[chave].parcelas.push(v);
+      return acc;
+    }, {})
+  )
+    .map((g) => ({ ...g, saldoAReceber: g.valorTotal - g.recebido }))
+    .sort((a, b) => b.saldoAReceber - a.saldoAReceber);
+
+  // Apaga todos os dados salvos neste painel (inclusive o que já estiver
+  // gravado no armazenamento do navegador — mudar os dados padrão no código
+  // não limpa o que já foi salvo antes) e volta tudo ao estado vazio.
+  async function handleLimparTodosDados() {
+    const confirmado = window.confirm(
+      "Isso apaga TODOS os dados salvos neste painel (contratos, notas, contas a pagar, extrato, sócios, documentos, custos, unidades, fornecedores e serviços) e não pode ser desfeito. Continuar?"
+    );
+    if (!confirmado) return;
+
+    const chaves = [
+      STORAGE_KEY,
+      STORAGE_KEY_RECEBER,
+      STORAGE_KEY_NOTAS,
+      STORAGE_KEY_PAGAR,
+      STORAGE_KEY_EXTRATO,
+      STORAGE_KEY_SOCIOS,
+      STORAGE_KEY_DOCUMENTOS,
+      STORAGE_KEY_OBRAS,
+      STORAGE_KEY_CUSTOS,
+      STORAGE_KEY_FORNECEDORES,
+      STORAGE_KEY_SERVICOS,
+      STORAGE_KEY_UNIDADES,
+    ];
+    for (const chave of chaves) {
+      try {
+        await window.storage.delete(chave, false);
+      } catch (err) {
+        // chave pode já não existir — segue normalmente
+      }
+    }
+
+    setContratosCV([]);
+    setValoresReceber([]);
+    setNotasCompra([]);
+    setContasPagar([]);
+    setExtrato([]);
+    setEmprestimosSocios([]);
+    setDocumentos([]);
+    setObrasState(obrasIniciais);
+    setCustosItens(defaultCustosItens);
+    setContratosFornecedores([]);
+    setContratosServicos([]);
+    setUnidadesObra([]);
+  }
+
+  return (
+    <div
+      id="painel-obras-contratos"
+      className="w-full"
+      style={{
+        background: "#22252A",
+        fontFamily: "'Inter', sans-serif",
+        height: "100vh",
+        overflowY: "auto",
+      }}
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+        @media print {
+          .no-print { display: none !important; }
+          #painel-obras-contratos { background: #FFFFFF !important; height: auto !important; overflow: visible !important; }
+        }
+      `}</style>
+
+      <div className="max-w-6xl mx-auto px-5 py-8 sm:px-8">
+        {/* Header */}
+        <header className="mb-8 flex items-end justify-between flex-wrap gap-3 no-print">
+          <div>
+            <div
+              className="text-[11px] uppercase tracking-[0.2em] font-semibold mb-1"
+              style={{ color: "#E1590C", fontFamily: "'Oswald', sans-serif" }}
+            >
+              Painel consolidado
+            </div>
+            <h1
+              className="text-3xl sm:text-4xl font-semibold text-white tracking-tight"
+              style={{ fontFamily: "'Oswald', sans-serif" }}
+            >
+              Obras &amp; Contratos
+            </h1>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-sm" style={{ color: "#9BA0A6" }}>
+              Obra Isla Catalina · atualizado hoje
+            </span>
+            <button
+              onClick={() => {
+                setTipoRelatorio("consolidado");
+                setModoRelatorio(true);
+              }}
+              className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+              style={{
+                fontFamily: "'Oswald', sans-serif",
+                letterSpacing: "0.03em",
+                color: "#F5F3EC",
+                background: "#3D6E8C",
+              }}
+            >
+              📄 GERAR RELATÓRIO
+            </button>
+            <button
+              onClick={handleLimparTodosDados}
+              className="text-xs px-2 py-1.5 rounded-sm"
+              style={{ color: "#9BA0A6", background: "transparent", border: "1px solid #3A3E45" }}
+              title="Apaga todos os dados salvos neste painel, inclusive o que já estiver gravado no armazenamento"
+            >
+              🗑 Limpar dados
+            </button>
+          </div>
+        </header>
+
+        {modoRelatorio ? (
+          <ReportView
+            tipo={tipoRelatorio || activeTab}
+            onFechar={() => {
+              setModoRelatorio(false);
+              setTipoRelatorio(null);
+            }}
+            obraCustoSelecionada={obraCustoSelecionada}
+            itensObraCustoAtual={itensObraCustoAtual}
+            totalGeralObraCusto={totalGeralObraCusto}
+            obrasComRealizado={obrasComRealizado}
+            totalOrcado={totalOrcado}
+            totalRealizado={totalRealizado}
+            saldoCaixa={saldoCaixa}
+            vencendoEm30={vencendoEm30}
+            contratosCV={contratosCV}
+            totalVGV={totalVGV}
+            totalRecebidoCV={totalRecebidoCV}
+            unidadesAtrasadas={unidadesAtrasadas}
+            valoresReceber={valoresReceber}
+            saldoPorUnidade={saldoPorUnidade}
+            totalAReceber={totalAReceber}
+            totalRecebidoParcelas={totalRecebidoParcelas}
+            parcelasReceberVencidas={parcelasReceberVencidas}
+            notasCompra={notasCompra}
+            totalNotasCompra={totalNotasCompra}
+            contasPagar={contasPagar}
+            totalAPagar={totalAPagar}
+            totalPago={totalPago}
+            parcelasVencidas={parcelasVencidas}
+            extrato={extrato}
+            saldoExtrato={saldoExtrato}
+            totalCreditosExtrato={totalCreditosExtrato}
+            totalDebitosExtrato={totalDebitosExtrato}
+            movimentosSocios={movimentosSocios}
+            saldoPorSocio={saldoPorSocio}
+            saldoComSocios={saldoComSocios}
+            totalAportado={totalAportado}
+            totalDevolvido={totalDevolvido}
+            documentos={documentos}
+            documentosVencidos={documentosVencidos}
+            documentosVencendo={documentosVencendo}
+            essenciaisPendentes={essenciaisPendentes}
+            contratosFornecedores={contratosFornecedores}
+            totalContratadoFornecedores={totalContratadoFornecedores}
+            contratosFornecedoresVencendo={contratosFornecedoresVencendo}
+            contratosFornecedoresVencidos={contratosFornecedoresVencidos}
+            contratosFornecedoresAtivos={contratosFornecedoresAtivos}
+            contratosServicos={contratosServicos}
+            totalContratadoServicos={totalContratadoServicos}
+            contratosServicosVencendo={contratosServicosVencendo}
+            contratosServicosVencidos={contratosServicosVencidos}
+            contratosServicosAtivos={contratosServicosAtivos}
+            totalEntradasFluxo={totalEntradasFluxo}
+            totalSaidasFluxo={totalSaidasFluxo}
+            fluxoCaixa={fluxoCaixa}
+            unidadesComStatus={unidadesComStatus}
+            totalVGVPotencial={totalVGVPotencial}
+            totalVGVVendido={totalVGVVendido}
+            unidadesDisponiveis={unidadesDisponiveis}
+            unidadesReservadas={unidadesReservadas}
+            unidadesVendidas={unidadesVendidas}
+          />
+        ) : (
+        <>
+        {/* Tab nav */}
+        <div className="flex flex-wrap justify-center gap-1 mb-7 border-b no-print" style={{ borderColor: "#3A3E45" }}>
+          {[
+            { id: "geral", label: "Visão geral" },
+            { id: "fluxocaixa", label: "Fluxo de caixa" },
+            { id: "custos", label: "Custos das obras" },
+            { id: "unidades", label: "Unidades e tabela de vendas" },
+            { id: "cv", label: "Contratos de compra e venda" },
+            { id: "receber", label: "Valores a receber" },
+            { id: "notas", label: "Notas de compras" },
+            { id: "pagar", label: "Contas a pagar" },
+            { id: "extrato", label: "Extrato bancário" },
+            { id: "socios", label: "Empréstimos de sócios" },
+            { id: "documentos", label: "Documentos da empresa" },
+            { id: "fornecedores", label: "Contratos de fornecedores" },
+            { id: "servicos", label: "Contratos de prestação de serviços" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className="px-4 py-2.5 text-sm font-medium transition-colors"
+              style={{
+                fontFamily: "'Oswald', sans-serif",
+                letterSpacing: "0.03em",
+                color: activeTab === tab.id ? "#F5F3EC" : "#8A8D93",
+                borderBottom: activeTab === tab.id ? "2px solid #E1590C" : "2px solid transparent",
+              }}
+            >
+              {tab.label.toUpperCase()}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === "geral" && (
+        <>
+        {/* KPI row */}
+        <div className="flex flex-wrap gap-3 mb-8">
+          <KpiCard eyebrow="Total contratado" value={formatBRLShort(totalOrcado)} sub={formatBRL(totalOrcado)} />
+          <KpiCard
+            eyebrow="Total realizado"
+            value={formatBRLShort(totalRealizado)}
+            sub={totalOrcado ? `${Math.round((totalRealizado / totalOrcado) * 100)}% do contratado` : "sem orçamento detalhado ainda"}
+            accent="#3D6E8C"
+          />
+          <KpiCard
+            eyebrow="Saldo em caixa"
+            value={formatBRLShort(saldoCaixa)}
+            sub="consolidado, últimos 6 meses"
+            accent={saldoCaixa >= 0 ? "#4F7A5B" : "#B23A2E"}
+          />
+          <KpiCard
+            eyebrow="Contratos vencendo"
+            value={`${vencendoEm30}`}
+            sub="nos próximos 30 dias"
+            accent={vencendoEm30 > 0 ? "#B4590C" : "#22252A"}
+          />
+        </div>
+
+        {/* Main grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+          {/* Obras */}
+          <section
+            className="lg:col-span-3 rounded-md p-5 border"
+            style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+          >
+            <h2
+              className="text-sm uppercase tracking-[0.12em] font-semibold mb-4"
+              style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+            >
+              Isla Catalina — orçado × realizado
+            </h2>
+            <div className="space-y-4">
+              {obrasComRealizado.map((o) => {
+                const isConcluida = o.status === "concluida";
+                const pctFinanceiro = isConcluida || !o.orcado ? null : Math.round((o.realizado / o.orcado) * 100);
+                const isSelected = selectedObra === o.id;
+                return (
+                  <button
+                    key={o.id}
+                    onClick={() => setSelectedObra(isSelected ? null : o.id)}
+                    className="w-full text-left rounded-sm p-3 transition-colors"
+                    style={{
+                      background: isSelected ? "#EFE9DA" : "transparent",
+                      border: "1px solid " + (isSelected ? "#C7BFA8" : "transparent"),
+                    }}
+                  >
+                    <div className="flex items-baseline justify-between mb-1.5">
+                      <span className="font-semibold text-sm" style={{ color: "#22252A" }}>
+                        {o.nome}
+                      </span>
+                      {!isConcluida && (
+                        <span
+                          className="text-xs"
+                          style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                        >
+                          {formatBRLShort(o.realizado)} / {formatBRLShort(o.orcado)}
+                        </span>
+                      )}
+                    </div>
+                    {isConcluida ? (
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full"
+                          style={{ color: "#4F7A5B", background: "#E8EEE8" }}
+                        >
+                          Concluída
+                        </span>
+                        {o.nota && (
+                          <span className="text-xs" style={{ color: "#8A8D93" }}>
+                            {o.nota}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <RulerBar pct={pctFinanceiro || 0} colorFrom={pctFinanceiro > 95 ? "#B4590C" : "#3D6E8C"} />
+                    )}
+                    {isSelected && !isConcluida && (
+                      <div className="mt-2 flex gap-4 text-xs" style={{ color: "#6B6F76" }}>
+                        <span>Avanço físico: <strong style={{ color: "#22252A" }}>{o.avancoFisico}%</strong></span>
+                        <span>
+                          Saldo do orçamento:{" "}
+                          <strong style={{ color: "#22252A" }}>{formatBRLShort(o.orcado - o.realizado)}</strong>
+                        </span>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Contratos */}
+          <section
+            className="lg:col-span-2 rounded-md p-5 border"
+            style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+          >
+            <h2
+              className="text-sm uppercase tracking-[0.12em] font-semibold mb-4"
+              style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+            >
+              Contratos de fornecedores e serviços — atenção a vencimentos
+            </h2>
+            {contratosVencimentosTodos.length === 0 ? (
+              <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                Nenhum contrato de fornecedor ou serviço cadastrado ainda.
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {contratosVencimentosTodos
+                  .slice()
+                  .sort((a, b) => {
+                    const da = diasRestantesContrato(a);
+                    const db = diasRestantesContrato(b);
+                    if (da === null) return 1;
+                    if (db === null) return -1;
+                    return da - db;
+                  })
+                  .map((c) => {
+                    const status = statusContratoFornecedorDisplay(c);
+                    const cfg = statusConfig[status];
+                    const dias = diasRestantesContrato(c);
+                    return (
+                      <div
+                        key={c.id}
+                        className="flex items-center justify-between rounded-sm px-3 py-2.5"
+                        style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                      >
+                        <div className="min-w-0 pr-2">
+                          <div className="text-sm font-medium truncate" style={{ color: "#22252A" }}>
+                            {c.fornecedor}
+                          </div>
+                          <div className="text-xs" style={{ color: "#8A8D93" }}>
+                            {c.tipo || "Prestação de serviço"} · {c.obra}
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <span
+                            className="text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full"
+                            style={{ color: cfg.color, background: cfg.bg }}
+                          >
+                            {cfg.label}
+                          </span>
+                          <span
+                            className="text-[11px]"
+                            style={{ color: "#8A8D93", fontFamily: "'IBM Plex Mono', monospace" }}
+                          >
+                            {dias === null
+                              ? "sem prazo definido"
+                              : dias >= 0
+                              ? `${dias}d restantes`
+                              : `${Math.abs(dias)}d em atraso`}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </section>
+        </div>
+
+        {/* Avisos de vencimento — contas a pagar */}
+        <section
+          className="mt-5 rounded-md p-5 border"
+          style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+        >
+          <h2
+            className="text-sm uppercase tracking-[0.12em] font-semibold mb-4"
+            style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+          >
+            Contas a pagar — avisos de vencimento
+          </h2>
+          {loadingNotas ? (
+            <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+              Carregando…
+            </div>
+          ) : (() => {
+            const avisos = contasPagar
+              .filter((c) => statusPagarDisplay(c) === "vencido" || statusPagarDisplay(c) === "vencendo")
+              .slice()
+              .sort((a, b) => (parseDateBR(a.vencimento) || 0) - (parseDateBR(b.vencimento) || 0));
+            return avisos.length === 0 ? (
+              <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                Nenhuma conta a pagar vencendo ou vencida nos próximos 30 dias.
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {avisos.map((c) => {
+                  const cfg = statusPagarConfig[statusPagarDisplay(c)];
+                  return (
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between rounded-sm px-3 py-2.5"
+                      style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                    >
+                      <div className="min-w-0 pr-2">
+                        <div className="text-sm font-medium truncate" style={{ color: "#22252A" }}>
+                          {c.fornecedor} · {c.parcela}
+                        </div>
+                        <div className="text-xs" style={{ color: "#8A8D93" }}>
+                          {c.obra} · vence {c.vencimento}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span
+                          className="text-[10px] uppercase tracking-wide font-semibold px-2 py-0.5 rounded-full"
+                          style={{ color: cfg.color, background: cfg.bg }}
+                        >
+                          {cfg.label}
+                        </span>
+                        <span
+                          className="text-[11px]"
+                          style={{ color: "#8A8D93", fontFamily: "'IBM Plex Mono', monospace" }}
+                        >
+                          {formatBRLShort(c.valor)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </section>
+
+        <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+          Protótipo com dados fictícios — clique em uma obra para ver detalhes do orçamento. O fluxo de
+          caixa detalhado ficou na aba própria "Fluxo de caixa".
+        </p>
+        </>
+        )}
+
+        {activeTab === "fluxocaixa" && (
+          <>
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => {
+                  setTipoRelatorio(null);
+                  setModoRelatorio(true);
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
+              >
+                📄 GERAR RELATÓRIO
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-3 mb-6">
+              <KpiCard
+                eyebrow="Saldo em caixa (6 meses)"
+                value={formatBRLShort(saldoCaixa)}
+                sub={formatBRL(saldoCaixa)}
+                accent={saldoCaixa >= 0 ? "#4F7A5B" : "#B23A2E"}
+              />
+              <KpiCard eyebrow="Total de entradas" value={formatBRLShort(totalEntradasFluxo)} sub={formatBRL(totalEntradasFluxo)} accent="#4F7A5B" />
+              <KpiCard eyebrow="Total de saídas" value={formatBRLShort(totalSaidasFluxo)} sub={formatBRL(totalSaidasFluxo)} accent="#B23A2E" />
+            </div>
+
+            <section
+              className="rounded-md p-5 border"
+              style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+            >
+              <h2
+                className="text-sm uppercase tracking-[0.12em] font-semibold mb-1"
+                style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Planilha detalhada — mês a mês
+              </h2>
+              <p className="text-xs mb-4" style={{ color: "#8A8D93" }}>
+                Calculado automaticamente: entradas somam as parcelas de valores a receber no mês de
+                vencimento, mais os créditos do extrato bancário e os aportes de sócios; saídas somam as
+                parcelas de contas a pagar no mês de vencimento, mais os débitos do extrato bancário e as
+                devoluções a sócios.
+              </p>
+              {loadingCV || loadingNotas || loadingExtrato || loadingSocios ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Carregando fluxo de caixa…
+                </div>
+              ) : fluxoCaixaDetalhado.length === 0 ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Sem dados suficientes ainda — cadastre contratos de compra e venda, notas de compras,
+                  lançamentos do extrato bancário ou empréstimos de sócios.
+                </div>
+              ) : (
+                <>
+                  <div className="hidden sm:grid grid-cols-[0.8fr_1fr_1fr_1fr_1fr] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <span>Mês</span>
+                    <span>Entradas</span>
+                    <span>Saídas</span>
+                    <span>Saldo do mês</span>
+                    <span>Saldo acumulado</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {fluxoCaixaDetalhado.map((f) => {
+                      const expandido = !!mesesFluxoExpandidos[f.chave];
+                      const detalhe = expandido
+                        ? detalheFluxoMes(f.chave, valoresReceber, contasPagar, extrato, emprestimosSocios)
+                        : null;
+                      return (
+                        <div key={f.mes} className="rounded-sm overflow-hidden" style={{ border: "1px solid #E4E0D6" }}>
+                          <button
+                            type="button"
+                            onClick={() => toggleMesFluxoExpandido(f.chave)}
+                            className="w-full text-left grid grid-cols-2 sm:grid-cols-[0.8fr_1fr_1fr_1fr_1fr] gap-2 sm:gap-3 items-center px-3 py-2.5 cursor-pointer"
+                            style={{ background: "#FFFFFF" }}
+                          >
+                            <span className="text-sm font-semibold flex items-center gap-1.5" style={{ color: "#22252A" }}>
+                              {f.mes}
+                              <span className="text-xs" style={{ color: "#8A8D93" }}>{expandido ? "▲" : "▼"}</span>
+                            </span>
+                            <span className="text-sm" style={{ color: "#4F7A5B", fontFamily: "'IBM Plex Mono', monospace" }}>
+                              {formatBRLShort(f.entradas)}
+                            </span>
+                            <span className="text-sm" style={{ color: "#B23A2E", fontFamily: "'IBM Plex Mono', monospace" }}>
+                              {formatBRLShort(f.saidas)}
+                            </span>
+                            <span
+                              className="text-sm font-semibold"
+                              style={{ color: f.saldoMes >= 0 ? "#4F7A5B" : "#B23A2E", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {formatBRLShort(f.saldoMes)}
+                            </span>
+                            <span
+                              className="text-sm font-semibold"
+                              style={{ color: f.saldoAcumulado >= 0 ? "#22252A" : "#B23A2E", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {formatBRLShort(f.saldoAcumulado)}
+                            </span>
+                          </button>
+
+                          {expandido && (
+                            <div className="px-3 pt-2 pb-3" style={{ background: "#F5F3EC" }}>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                  <div className="text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: "#4F7A5B" }}>
+                                    Entradas ({detalhe.entradas.length})
+                                  </div>
+                                  {detalhe.entradas.length === 0 ? (
+                                    <div className="text-xs" style={{ color: "#8A8D93" }}>Nenhuma entrada neste mês.</div>
+                                  ) : (
+                                    <div className="space-y-1">
+                                      {detalhe.entradas.map((item) => (
+                                        <div
+                                          key={item.id}
+                                          className="flex items-center justify-between gap-2 rounded-sm px-2 py-1.5"
+                                          style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                                        >
+                                          <div className="min-w-0 pr-2">
+                                            <div className="text-xs truncate" style={{ color: "#22252A" }}>{item.descricao}</div>
+                                            <div className="text-[11px]" style={{ color: "#8A8D93" }}>{item.origem} · {item.data}</div>
+                                          </div>
+                                          <span
+                                            className="text-xs shrink-0"
+                                            style={{ color: "#4F7A5B", fontFamily: "'IBM Plex Mono', monospace" }}
+                                          >
+                                            {formatBRLShort(item.valor)}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                                <div>
+                                  <div className="text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: "#B23A2E" }}>
+                                    Saídas ({detalhe.saidas.length})
+                                  </div>
+                                  {detalhe.saidas.length === 0 ? (
+                                    <div className="text-xs" style={{ color: "#8A8D93" }}>Nenhuma saída neste mês.</div>
+                                  ) : (
+                                    <div className="space-y-1">
+                                      {detalhe.saidas.map((item) => (
+                                        <div
+                                          key={item.id}
+                                          className="flex items-center justify-between gap-2 rounded-sm px-2 py-1.5"
+                                          style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                                        >
+                                          <div className="min-w-0 pr-2">
+                                            <div className="text-xs truncate" style={{ color: "#22252A" }}>{item.descricao}</div>
+                                            <div className="text-[11px]" style={{ color: "#8A8D93" }}>{item.origem} · {item.data}</div>
+                                          </div>
+                                          <span
+                                            className="text-xs shrink-0"
+                                            style={{ color: "#B23A2E", fontFamily: "'IBM Plex Mono', monospace" }}
+                                          >
+                                            {formatBRLShort(item.valor)}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <div
+                      className="grid grid-cols-2 sm:grid-cols-[0.8fr_1fr_1fr_1fr_1fr] gap-2 sm:gap-3 items-center rounded-sm px-3 py-2.5 mt-1"
+                      style={{ background: "#EFE9DA", border: "1px solid #C7BFA8" }}
+                    >
+                      <span className="text-sm font-semibold" style={{ color: "#22252A" }}>TOTAL</span>
+                      <span className="text-sm font-semibold" style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>
+                        {formatBRLShort(totalEntradasFluxo)}
+                      </span>
+                      <span className="text-sm font-semibold" style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>
+                        {formatBRLShort(totalSaidasFluxo)}
+                      </span>
+                      <span
+                        className="text-sm font-semibold"
+                        style={{ color: saldoCaixa >= 0 ? "#4F7A5B" : "#B23A2E", fontFamily: "'IBM Plex Mono', monospace" }}
+                      >
+                        {formatBRLShort(saldoCaixa)}
+                      </span>
+                      <span className="text-sm font-semibold" style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>
+                        {fluxoCaixaDetalhado.length > 0 ? formatBRLShort(fluxoCaixaDetalhado[fluxoCaixaDetalhado.length - 1].saldoAcumulado) : "—"}
+                      </span>
+                    </div>
+                  </div>
+                </>
+              )}
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              Clique num mês para ver quais lançamentos (valores a receber, contas a pagar, extrato
+              bancário, empréstimos de sócios) compõem as entradas e saídas daquele mês. Os avisos de
+              vencimento de contas a pagar e de contratos ficaram na Visão geral, no lugar deste gráfico.
+            </p>
+          </>
+        )}
+
+        {activeTab === "custos" && (
+          <>
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => {
+                  setTipoRelatorio(null);
+                  setModoRelatorio(true);
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
+              >
+                📄 GERAR RELATÓRIO
+              </button>
+            </div>
+
+            <div className="mb-4 flex items-center gap-2 flex-wrap">
+              <label
+                className="text-xs font-semibold uppercase tracking-wide"
+                style={{ color: "#8A8D93", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Obra:
+              </label>
+              <select
+                value={obraCustoSelecionada}
+                onChange={(e) => setObraCustoSelecionada(e.target.value)}
+                className="text-sm px-3 py-1.5 rounded-sm outline-none"
+                style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
+              >
+                {NOMES_OBRAS.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-wrap gap-3 mb-6">
+              <KpiCard eyebrow="Total orçado" value={formatBRLShort(totalGeralObraCusto.orcado)} sub={formatBRL(totalGeralObraCusto.orcado)} />
+              <KpiCard
+                eyebrow="Total gasto real"
+                value={formatBRLShort(totalGeralObraCusto.gasto)}
+                sub={totalGeralObraCusto.orcado ? `${Math.round((totalGeralObraCusto.pct || 0) * 100)}% do orçado` : "sem orçamento preenchido"}
+                accent="#3D6E8C"
+              />
+              <KpiCard
+                eyebrow="Saldo do orçamento"
+                value={formatBRLShort(totalGeralObraCusto.saldo)}
+                sub="orçado − gasto real"
+                accent={totalGeralObraCusto.saldo >= 0 ? "#4F7A5B" : "#B23A2E"}
+              />
+            </div>
+
+            {saveErrorCustos && (
+              <div className="mb-4 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                {saveErrorCustos}
+              </div>
+            )}
+
+            <section
+              className="mb-5 rounded-md p-5 border"
+              style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+            >
+              <h2
+                className="text-sm uppercase tracking-[0.12em] font-semibold mb-4"
+                style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Resumo do orçamento por etapa
+              </h2>
+
+              {loadingCustos ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Carregando…
+                </div>
+              ) : (
+                <>
+                  <div className="hidden sm:grid grid-cols-[1.8fr_1fr_1fr_0.8fr] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <span>Etapa</span>
+                    <span>Orçado</span>
+                    <span>Gasto real</span>
+                    <span>% Executado</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {ETAPAS_CUSTO.map(({ etapa }) => {
+                      const resumo = resumoCustoItens(itensObraCustoAtual.filter((it) => it.etapa === etapa));
+                      return (
+                        <div
+                          key={etapa}
+                          className="grid grid-cols-2 sm:grid-cols-[1.8fr_1fr_1fr_0.8fr] gap-2 sm:gap-3 items-center rounded-sm px-3 py-2"
+                          style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                        >
+                          <span className="text-sm" style={{ color: "#22252A" }}>{etapa}</span>
+                          <span className="text-sm" style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>{formatBRLShort(resumo.orcado)}</span>
+                          <span className="text-sm" style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>{formatBRLShort(resumo.gasto)}</span>
+                          <span className="text-xs font-semibold" style={{ color: resumo.pct === null ? "#8A8D93" : resumo.pct > 1 ? "#B23A2E" : resumo.pct > 0.9 ? "#B4590C" : "#4F7A5B" }}>
+                            {resumo.pct !== null ? `${Math.round(resumo.pct * 100)}%` : "—"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    <div
+                      className="grid grid-cols-2 sm:grid-cols-[1.8fr_1fr_1fr_0.8fr] gap-2 sm:gap-3 items-center rounded-sm px-3 py-2.5 mt-1"
+                      style={{ background: "#EFE9DA", border: "1px solid #C7BFA8" }}
+                    >
+                      <span className="text-sm font-semibold" style={{ color: "#22252A" }}>TOTAL GERAL DA OBRA</span>
+                      <span className="text-sm font-semibold" style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>{formatBRLShort(totalGeralObraCusto.orcado)}</span>
+                      <span className="text-sm font-semibold" style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}>{formatBRLShort(totalGeralObraCusto.gasto)}</span>
+                      <span className="text-xs font-semibold" style={{ color: "#22252A" }}>
+                        {totalGeralObraCusto.pct !== null ? `${Math.round(totalGeralObraCusto.pct * 100)}%` : "—"}
+                      </span>
+                    </div>
+                  </div>
+                </>
+              )}
+            </section>
+
+            <section
+              className="rounded-md p-5 border"
+              style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+            >
+              <h2
+                className="text-sm uppercase tracking-[0.12em] font-semibold mb-1"
+                style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Itens do orçamento
+              </h2>
+              <p className="text-xs mb-4" style={{ color: "#8A8D93" }}>
+                Preencha Quantidade, Valor Unitário e Gasto Real — Orçado, Saldo e % Executado são
+                calculados automaticamente. Mesmo modelo da planilha enviada. Itens com o ícone 🔗 têm o
+                Gasto Real vindo de parcelas pagas vinculadas na aba Contas a pagar — não editável aqui.
+              </p>
+
+              {loadingCustos ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Carregando…
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {ETAPAS_CUSTO.map(({ etapa }) => {
+                    const itensEtapa = itensObraCustoAtual.filter((it) => it.etapa === etapa);
+                    const resumo = resumoCustoItens(itensEtapa);
+                    const colapsada = !!etapasCustoColapsadas[etapa];
+                    return (
+                      <div key={etapa} className="rounded-sm overflow-hidden" style={{ border: "1px solid #E4E0D6" }}>
+                        <button
+                          type="button"
+                          onClick={() => toggleEtapaCustoColapsada(etapa)}
+                          className="w-full text-left flex items-center justify-between px-3 py-2.5 flex-wrap gap-2"
+                          style={{ background: "#EFE9DA" }}
+                        >
+                          <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{etapa}</span>
+                          <span className="text-xs flex items-center gap-3" style={{ color: "#6B6F76" }}>
+                            <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
+                              {formatBRLShort(resumo.gasto)} / {formatBRLShort(resumo.orcado)}
+                            </span>
+                            <span>{colapsada ? "▼ expandir" : "▲ recolher"}</span>
+                          </span>
+                        </button>
+
+                        {!colapsada && (
+                          <div className="p-3" style={{ background: "#FFFFFF" }}>
+                            <div className="hidden sm:grid grid-cols-[1.7fr_0.4fr_0.6fr_0.8fr_0.8fr_0.8fr_0.8fr_0.5fr] gap-2 px-1 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                              <span>Item</span>
+                              <span>Un.</span>
+                              <span>Qtd</span>
+                              <span>Vl. Unit.</span>
+                              <span>Orçado</span>
+                              <span>Gasto real</span>
+                              <span>Saldo</span>
+                              <span>% exec.</span>
+                            </div>
+                            <div className="space-y-1.5">
+                              {itensEtapa.map((it) => {
+                                const orcadoItem = custoOrcadoItem(it);
+                                const saldoItem = custoSaldoItem(it);
+                                const pctItem = custoPctItem(it);
+                                return (
+                                  <div
+                                    key={it.id}
+                                    className="grid grid-cols-2 sm:grid-cols-[1.7fr_0.4fr_0.6fr_0.8fr_0.8fr_0.8fr_0.8fr_0.5fr] gap-1.5 sm:gap-2 items-center rounded-sm px-1.5 py-1.5"
+                                    style={{ borderBottom: "1px solid #F0EEE6" }}
+                                  >
+                                    <div className="flex flex-col gap-0.5">
+                                      <span className="text-sm" style={{ color: "#22252A" }}>{it.item}</span>
+                                      <input
+                                        placeholder="Observações (opcional)"
+                                        value={it.observacoes}
+                                        onChange={(e) => handleUpdateCustoItemCampo(it.id, "observacoes", e.target.value)}
+                                        onBlur={handlePersistCustosBlur}
+                                        className="text-[11px] px-1.5 py-1 rounded-sm outline-none"
+                                        style={{ border: "1px solid #E4E0D6", color: "#8A8D93" }}
+                                      />
+                                    </div>
+                                    <span className="text-xs" style={{ color: "#6B6F76" }}>{it.unidade}</span>
+                                    <input
+                                      type="number"
+                                      value={it.quantidade}
+                                      onChange={(e) => handleUpdateCustoItemCampo(it.id, "quantidade", e.target.value)}
+                                      onBlur={handlePersistCustosBlur}
+                                      className="text-xs px-1.5 py-1 rounded-sm outline-none"
+                                      style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                    />
+                                    <input
+                                      type="number"
+                                      value={it.valorUnitario}
+                                      onChange={(e) => handleUpdateCustoItemCampo(it.id, "valorUnitario", e.target.value)}
+                                      onBlur={handlePersistCustosBlur}
+                                      className="text-xs px-1.5 py-1 rounded-sm outline-none"
+                                      style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                    />
+                                    <span
+                                      className="text-xs"
+                                      style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+                                    >
+                                      {orcadoItem !== null ? formatBRLShort(orcadoItem) : "—"}
+                                    </span>
+                                    {it.gastoRealVinculado ? (
+                                      <span
+                                        className="text-xs font-semibold"
+                                        style={{ color: "#3D6E8C", fontFamily: "'IBM Plex Mono', monospace" }}
+                                        title="Vinculado a parcelas pagas em Contas a pagar — não editável aqui"
+                                      >
+                                        🔗 {formatBRLShort(it.gastoReal)}
+                                      </span>
+                                    ) : (
+                                      <input
+                                        type="number"
+                                        value={it.gastoReal}
+                                        onChange={(e) => handleUpdateCustoItemCampo(it.id, "gastoReal", e.target.value)}
+                                        onBlur={handlePersistCustosBlur}
+                                        className="text-xs px-1.5 py-1 rounded-sm outline-none"
+                                        style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                      />
+                                    )}
+                                    <span
+                                      className="text-xs"
+                                      style={{
+                                        color: saldoItem !== null && saldoItem < 0 ? "#B23A2E" : "#22252A",
+                                        fontFamily: "'IBM Plex Mono', monospace",
+                                      }}
+                                    >
+                                      {saldoItem !== null ? formatBRLShort(saldoItem) : "—"}
+                                    </span>
+                                    <span
+                                      className="text-xs font-semibold"
+                                      style={{
+                                        color:
+                                          pctItem === null
+                                            ? "#8A8D93"
+                                            : pctItem > 1
+                                            ? "#B23A2E"
+                                            : pctItem > 0.9
+                                            ? "#B4590C"
+                                            : "#4F7A5B",
+                                      }}
+                                    >
+                                      {pctItem !== null ? `${Math.round(pctItem * 100)}%` : "—"}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+
+                              <div
+                                className="grid grid-cols-2 sm:grid-cols-[1.7fr_0.4fr_0.6fr_0.8fr_0.8fr_0.8fr_0.8fr_0.5fr] gap-1.5 sm:gap-2 items-center rounded-sm px-1.5 py-2 mt-1"
+                                style={{ background: "#F5F3EC" }}
+                              >
+                                <span className="text-xs font-semibold sm:col-span-4" style={{ color: "#22252A" }}>
+                                  Subtotal — {etapa}
+                                </span>
+                                <span
+                                  className="text-xs font-semibold hidden sm:block"
+                                  style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+                                >
+                                  {formatBRLShort(resumo.orcado)}
+                                </span>
+                                <span
+                                  className="text-xs font-semibold"
+                                  style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+                                >
+                                  {formatBRLShort(resumo.gasto)}
+                                </span>
+                                <span
+                                  className="text-xs font-semibold"
+                                  style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+                                >
+                                  {formatBRLShort(resumo.saldo)}
+                                </span>
+                                <span className="text-xs font-semibold" style={{ color: "#22252A" }}>
+                                  {resumo.pct !== null ? `${Math.round(resumo.pct * 100)}%` : "—"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              O orçamento é por obra — troque no seletor do topo para ver ou preencher o de outra obra.
+              Quantidade, Valor Unitário e Gasto Real ficam salvos automaticamente ao sair do campo.
+            </p>
+          </>
+        )}
+
+        {activeTab === "unidades" && (
+          <>
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => {
+                  setTipoRelatorio(null);
+                  setModoRelatorio(true);
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
+              >
+                📄 GERAR RELATÓRIO
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-3 mb-4">
+              <KpiCard eyebrow="VGV potencial" value={formatBRLShort(totalVGVPotencial)} sub={formatBRL(totalVGVPotencial)} />
+              <KpiCard eyebrow="VGV vendido" value={formatBRLShort(totalVGVVendido)} sub={formatBRL(totalVGVVendido)} accent="#3D6E8C" />
+              <KpiCard eyebrow="Disponíveis" value={`${unidadesDisponiveis}`} sub="prontas para vender" accent="#4F7A5B" />
+              <KpiCard eyebrow="Reservadas" value={`${unidadesReservadas}`} sub="aguardando fechamento" accent="#B4590C" />
+              <KpiCard eyebrow="Vendidas" value={`${unidadesVendidas}`} sub="com contrato" accent="#3D6E8C" />
+            </div>
+
+            <div className="mb-4 flex items-center gap-2 flex-wrap">
+              <label
+                className="text-xs font-semibold uppercase tracking-wide"
+                style={{ color: "#8A8D93", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Filtrar por obra:
+              </label>
+              <select
+                value={filtroObraUnidades}
+                onChange={(e) => setFiltroObraUnidades(e.target.value)}
+                className="text-sm px-3 py-1.5 rounded-sm outline-none"
+                style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
+              >
+                <option value="">Todas as obras</option>
+                {NOMES_OBRAS.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+              <label
+                className="text-xs font-semibold uppercase tracking-wide ml-2"
+                style={{ color: "#8A8D93", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Status:
+              </label>
+              <select
+                value={filtroStatusUnidades}
+                onChange={(e) => setFiltroStatusUnidades(e.target.value)}
+                className="text-sm px-3 py-1.5 rounded-sm outline-none"
+                style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
+              >
+                <option value="">Todos</option>
+                <option value="disponivel">Disponível</option>
+                <option value="reservada">Reservada</option>
+                <option value="vendida">Vendida</option>
+              </select>
+            </div>
+
+            <section
+              className="rounded-md p-5 border"
+              style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+            >
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2
+                  className="text-sm uppercase tracking-[0.12em] font-semibold"
+                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Unidades e tabela de vendas
+                </h2>
+                <button
+                  onClick={() => setShowFormUnidade((s) => !s)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                  style={{
+                    fontFamily: "'Oswald', sans-serif",
+                    letterSpacing: "0.03em",
+                    color: "#F5F3EC",
+                    background: "#3D6E8C",
+                  }}
+                >
+                  {showFormUnidade ? "CANCELAR" : "+ NOVA UNIDADE"}
+                </button>
+              </div>
+
+              {saveErrorUnidades && (
+                <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                  {saveErrorUnidades}
+                </div>
+              )}
+
+              {showFormUnidade && (
+                <form
+                  onSubmit={handleAddUnidade}
+                  className="mb-5 p-4 rounded-sm grid grid-cols-1 sm:grid-cols-3 gap-3"
+                  style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                >
+                  <select
+                    value={formUnidade.obra}
+                    onChange={(e) => setFormUnidade({ ...formUnidade, obra: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  >
+                    {NOMES_OBRAS.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                  <input
+                    required
+                    placeholder="Unidade (ex: Unidade 703)"
+                    value={formUnidade.unidade}
+                    onChange={(e) => setFormUnidade({ ...formUnidade, unidade: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    placeholder="Andar (ex: 7º)"
+                    value={formUnidade.andar}
+                    onChange={(e) => setFormUnidade({ ...formUnidade, andar: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    placeholder="Tipo (ex: 3 quartos, Cobertura)"
+                    value={formUnidade.tipo}
+                    onChange={(e) => setFormUnidade({ ...formUnidade, tipo: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="number"
+                    placeholder="Metragem (m²)"
+                    value={formUnidade.metragem}
+                    onChange={(e) => setFormUnidade({ ...formUnidade, metragem: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    required
+                    type="number"
+                    placeholder="Valor de venda (R$)"
+                    value={formUnidade.valorVenda}
+                    onChange={(e) => setFormUnidade({ ...formUnidade, valorVenda: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    placeholder="Observações (opcional)"
+                    value={formUnidade.observacoes}
+                    onChange={(e) => setFormUnidade({ ...formUnidade, observacoes: e.target.value })}
+                    className="sm:col-span-3 text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+
+                  <button
+                    type="submit"
+                    className="sm:col-span-3 text-xs font-semibold px-3 py-2.5 rounded-sm"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: "#F5F3EC",
+                      background: "#E1590C",
+                    }}
+                  >
+                    SALVAR UNIDADE
+                  </button>
+                </form>
+              )}
+
+              {loadingUnidades ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Carregando unidades…
+                </div>
+              ) : unidadesFiltradas.length === 0 ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Nenhuma unidade cadastrada para esse filtro ainda.
+                </div>
+              ) : (
+                <>
+                  <div className="hidden sm:grid grid-cols-[1fr_0.6fr_1fr_0.8fr_1fr_1fr_1.1fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <span>Unidade</span>
+                    <span>Andar</span>
+                    <span>Tipo</span>
+                    <span>Metragem</span>
+                    <span>Valor de venda</span>
+                    <span>Status</span>
+                    <span>Comprador</span>
+                    <span></span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {unidadesFiltradas
+                      .slice()
+                      .sort((a, b) => a.unidade.localeCompare(b.unidade, "pt-BR", { numeric: true }))
+                      .map((u) => {
+                        const cfg = statusUnidadeConfig[u.statusEfetivo];
+                        return (
+                          <div
+                            key={u.id}
+                            className="grid grid-cols-2 sm:grid-cols-[1fr_0.6fr_1fr_0.8fr_1fr_1fr_1.1fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                          >
+                            <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{u.unidade}</span>
+                            <span className="text-xs" style={{ color: "#6B6F76" }}>{u.andar || "—"}</span>
+                            <span className="text-xs" style={{ color: "#6B6F76" }}>{u.tipo || "—"}</span>
+                            <span className="text-xs" style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}>
+                              {u.metragem ? `${u.metragem} m²` : "—"}
+                            </span>
+                            <input
+                              type="number"
+                              value={u.valorVenda}
+                              onChange={(e) => handleUpdateUnidadeCampo(u.id, "valorVenda", Number(e.target.value) || 0)}
+                              onBlur={handlePersistUnidadesBlur}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                            />
+                            <span
+                              className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
+                              style={{ color: cfg.color, background: cfg.bg }}
+                            >
+                              {cfg.label}
+                            </span>
+                            <span className="text-xs truncate" style={{ color: "#6B6F76" }}>
+                              {u.contratoVinculado ? u.contratoVinculado.comprador : "—"}
+                            </span>
+                            <div className="flex items-center gap-3">
+                              {u.statusEfetivo !== "vendida" && (
+                                <button
+                                  onClick={() => handleToggleStatusManualUnidade(u.id)}
+                                  className="text-xs w-fit font-semibold"
+                                  style={{ color: u.statusManual === "reservada" ? "#4F7A5B" : "#B4590C" }}
+                                >
+                                  {u.statusManual === "reservada" ? "Disponibilizar" : "Reservar"}
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleDeleteUnidade(u.id)}
+                                className="text-xs w-fit"
+                                style={{ color: "#B23A2E" }}
+                                title="Excluir unidade"
+                              >
+                                Excluir
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </>
+              )}
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              O status "Vendida" é automático: quando existe um contrato em Contratos de compra e venda com
+              o mesmo nome de unidade, ela aparece aqui como vendida (com o comprador do contrato) — não
+              precisa marcar na mão. Para vender uma unidade, cadastre o contrato na outra aba usando o
+              mesmo nome de unidade que está aqui.
+            </p>
+          </>
+        )}
+
+        {activeTab === "cv" && (
+          <>
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => {
+                  setTipoRelatorio(null);
+                  setModoRelatorio(true);
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
+              >
+                📄 GERAR RELATÓRIO
+              </button>
+            </div>
+
+            {/* KPI row — compra e venda */}
+            <div className="flex flex-wrap gap-3 mb-8">
+              <KpiCard eyebrow="VGV total" value={formatBRLShort(totalVGV)} sub={formatBRL(totalVGV)} />
+              <KpiCard
+                eyebrow="Recebido até agora"
+                value={formatBRLShort(totalRecebidoCV)}
+                sub={totalVGV > 0 ? `${Math.round((totalRecebidoCV / totalVGV) * 100)}% do VGV` : "—"}
+                accent="#3D6E8C"
+              />
+              <KpiCard eyebrow="Unidades vendidas" value={`${contratosCV.length}`} sub="Isla Catalina" />
+              <KpiCard
+                eyebrow="Pagamentos atrasados"
+                value={`${unidadesAtrasadas}`}
+                sub="unidades com atraso"
+                accent={unidadesAtrasadas > 0 ? "#B23A2E" : "#22252A"}
+              />
+            </div>
+
+            <section
+              className="rounded-md p-5 border"
+              style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+            >
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2
+                  className="text-sm uppercase tracking-[0.12em] font-semibold"
+                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Contratos de compra e venda
+                </h2>
+                <button
+                  onClick={() => setShowForm((s) => !s)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                  style={{
+                    fontFamily: "'Oswald', sans-serif",
+                    letterSpacing: "0.03em",
+                    color: "#F5F3EC",
+                    background: "#3D6E8C",
+                  }}
+                >
+                  {showForm ? "CANCELAR" : "+ NOVO CONTRATO"}
+                </button>
+              </div>
+
+              {saveError && (
+                <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                  {saveError}
+                </div>
+              )}
+
+              {showForm && (
+                <form
+                  onSubmit={handleAddContrato}
+                  className="mb-5 p-4 rounded-sm grid grid-cols-1 sm:grid-cols-3 gap-3"
+                  style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                >
+                  <div className="sm:col-span-3 flex items-center gap-3 flex-wrap">
+                    <label
+                      className="text-xs font-semibold px-3 py-1.5 rounded-sm cursor-pointer"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: "#22252A",
+                        background: "#E4E0D6",
+                      }}
+                    >
+                      {pdfImporting ? "LENDO PDF…" : "📄 IMPORTAR PDF"}
+                      <input
+                        type="file"
+                        accept="application/pdf"
+                        onChange={handlePdfImport}
+                        disabled={pdfImporting}
+                        className="hidden"
+                      />
+                    </label>
+                    <span className="text-xs" style={{ color: "#8A8D93" }}>
+                      Extração automática por padrão de texto — confira os campos antes de salvar.
+                    </span>
+                  </div>
+
+                  {pdfImportError && (
+                    <div className="sm:col-span-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                      {pdfImportError}
+                    </div>
+                  )}
+                  {pdfImportedFields.length > 0 && (
+                    <div className="sm:col-span-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#4F7A5B", background: "#E8EEE8" }}>
+                      Preenchido automaticamente: {pdfImportedFields.join(", ")}. Revise os demais campos.
+                    </div>
+                  )}
+
+                  <input
+                    required
+                    placeholder="Unidade (ex: Unidade 610)"
+                    value={form.unidade}
+                    onChange={(e) => setForm({ ...form, unidade: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    required
+                    placeholder="Comprador"
+                    value={form.comprador}
+                    onChange={(e) => setForm({ ...form, comprador: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    required
+                    type="number"
+                    placeholder="Valor (R$)"
+                    value={form.valor}
+                    onChange={(e) => setForm({ ...form, valor: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    placeholder="% pago"
+                    value={form.percentualPago}
+                    onChange={(e) => setForm({ ...form, percentualPago: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="date"
+                    title="Data de assinatura"
+                    value={dataBRparaISO(form.dataAssinatura)}
+                    onChange={(e) => setForm({ ...form, dataAssinatura: dataISOparaBR(e.target.value) })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <select
+                    value={form.statusPagamento}
+                    onChange={(e) => setForm({ ...form, statusPagamento: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  >
+                    <option value="em_dia">Em dia</option>
+                    <option value="quitado">Quitado</option>
+                    <option value="atrasado">Atrasado</option>
+                  </select>
+                  <input
+                    type="number"
+                    min="1"
+                    max="60"
+                    placeholder="Nº de parcelas a receber"
+                    value={form.numeroParcelas}
+                    onChange={(e) => {
+                      setForm({ ...form, numeroParcelas: e.target.value });
+                      if (personalizarParcelasCV) setPersonalizarParcelasCV(false);
+                    }}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <button
+                    type="button"
+                    onClick={
+                      personalizarParcelasCV
+                        ? () => setPersonalizarParcelasCV(false)
+                        : handleAtivarPersonalizarParcelasCV
+                    }
+                    className="text-xs font-semibold px-3 py-2 rounded-sm"
+                    style={{
+                      border: "1px solid #DCD7C9",
+                      color: personalizarParcelasCV ? "#B23A2E" : "#3D6E8C",
+                      background: "#FFFFFF",
+                    }}
+                  >
+                    {personalizarParcelasCV ? "Usar divisão igual" : "Personalizar valores das parcelas"}
+                  </button>
+
+                  {personalizarParcelasCV && (
+                    <div
+                      className="sm:col-span-3 grid grid-cols-2 sm:grid-cols-4 gap-2 p-3 rounded-sm"
+                      style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                    >
+                      {valoresParcelasCV.map((v, i) => (
+                        <label key={i} className="text-xs flex flex-col gap-1" style={{ color: "#8A8D93" }}>
+                          Parcela {i + 1}
+                          <input
+                            type="number"
+                            value={v}
+                            onChange={(e) => handleAtualizarValorParcelaCV(i, e.target.value)}
+                            className="text-sm px-2 py-1.5 rounded-sm outline-none"
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                          />
+                        </label>
+                      ))}
+                      <div className="col-span-full text-xs" style={{ color: "#8A8D93" }}>
+                        Soma das parcelas: {formatBRLShort(valoresParcelasCV.reduce((s, v) => s + (Number(v) || 0), 0))}
+                        {" "}— valor do contrato: {formatBRLShort(Number(form.valor) || 0)}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="sm:col-span-2 text-xs flex items-center" style={{ color: "#8A8D93" }}>
+                    As parcelas são lançadas automaticamente em Valores a receber.
+                  </div>
+                  <button
+                    type="submit"
+                    className="sm:col-span-3 text-xs font-semibold px-3 py-2.5 rounded-sm"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: "#F5F3EC",
+                      background: "#E1590C",
+                    }}
+                  >
+                    SALVAR CONTRATO
+                  </button>
+                </form>
+              )}
+
+              {loadingCV ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Carregando contratos…
+                </div>
+              ) : contratosCV.length === 0 ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Nenhum contrato cadastrado ainda.
+                </div>
+              ) : (
+                <>
+                  <div className="hidden sm:grid grid-cols-[1.2fr_1fr_1fr_1.3fr_0.8fr_0.8fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <span>Unidade</span>
+                    <span>Comprador</span>
+                    <span>Valor</span>
+                    <span>Pago</span>
+                    <span>Assinatura</span>
+                    <span>Status</span>
+                    <span></span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {contratosCV.map((c) => {
+                      const cfg = statusPagamentoConfig[c.statusPagamento];
+                      return (
+                        <div
+                          key={c.id}
+                          className="grid grid-cols-2 sm:grid-cols-[1.2fr_1fr_1fr_1.3fr_0.8fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                          style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                        >
+                          <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{c.unidade}</span>
+                          <span className="text-sm" style={{ color: "#22252A" }}>{c.comprador}</span>
+                          <span
+                            className="text-sm"
+                            style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+                          >
+                            {formatBRLShort(c.valor)}
+                          </span>
+                          <div className="col-span-2 sm:col-span-1">
+                            <RulerBar
+                              pct={c.percentualPago}
+                              colorFrom={c.statusPagamento === "atrasado" ? "#B23A2E" : "#3D6E8C"}
+                            />
+                          </div>
+                          <span
+                            className="text-xs"
+                            style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                          >
+                            {c.dataAssinatura}
+                          </span>
+                          <span
+                            className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
+                            style={{ color: cfg.color, background: cfg.bg }}
+                          >
+                            {cfg.label}
+                          </span>
+                          <button
+                            onClick={() => handleDeleteContrato(c.id)}
+                            className="text-xs w-fit"
+                            style={{ color: "#B23A2E" }}
+                            title="Excluir contrato"
+                          >
+                            Excluir
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              Os contratos ficam salvos automaticamente e visíveis só para você ao reabrir este painel.
+            </p>
+          </>
+        )}
+
+        {activeTab === "receber" && (
+          <>
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => {
+                  setTipoRelatorio(null);
+                  setModoRelatorio(true);
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
+              >
+                📄 GERAR RELATÓRIO
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-3 mb-8">
+              <KpiCard eyebrow="Total a receber" value={formatBRLShort(totalAReceber)} sub={formatBRL(totalAReceber)} accent="#B4590C" />
+              <KpiCard eyebrow="Total recebido" value={formatBRLShort(totalRecebidoParcelas)} sub={formatBRL(totalRecebidoParcelas)} accent="#4F7A5B" />
+              <KpiCard
+                eyebrow="Parcelas vencidas"
+                value={`${parcelasReceberVencidas}`}
+                sub="precisam de atenção"
+                accent={parcelasReceberVencidas > 0 ? "#B23A2E" : "#22252A"}
+              />
+              <KpiCard eyebrow="Parcelas cadastradas" value={`${valoresReceber.length}`} sub="no total" />
+            </div>
+
+            <section
+              className="rounded-md p-5 border"
+              style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+            >
+              <h2
+                className="text-sm uppercase tracking-[0.12em] font-semibold mb-1"
+                style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Valores a receber
+              </h2>
+              <p className="text-xs mb-4" style={{ color: "#8A8D93" }}>
+                Uma linha por parcela pendente ou vencida, ordenada por data de vencimento.
+              </p>
+
+              {loadingCV ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Carregando parcelas…
+                </div>
+              ) : (() => {
+                const parcelasPendentes = valoresReceber
+                  .filter((v) => statusReceberDisplay(v) !== "pago")
+                  .slice()
+                  .sort((a, b) => (parseDateBR(a.vencimento) || 0) - (parseDateBR(b.vencimento) || 0));
+                return parcelasPendentes.length === 0 ? (
+                  <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                    Nenhuma parcela a receber pendente. Cadastre um contrato de compra e venda para gerar parcelas.
+                  </div>
+                ) : (
+                  <>
+                    <div className="hidden sm:grid grid-cols-[1.2fr_1fr_0.7fr_1fr_1fr_0.9fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                      <span>Cliente</span>
+                      <span>Unidade</span>
+                      <span>Parcela</span>
+                      <span>Valor</span>
+                      <span>Data a receber</span>
+                      <span>Status</span>
+                      <span></span>
+                    </div>
+                    <div className="space-y-2">
+                      {parcelasPendentes.map((v) => {
+                        const display = statusReceberDisplay(v);
+                        const cfg = statusReceberConfig[display];
+                        return (
+                          <div
+                            key={v.id}
+                            className="grid grid-cols-2 sm:grid-cols-[1.2fr_1fr_0.7fr_1fr_1fr_0.9fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                          >
+                            <span className="text-sm font-semibold truncate" style={{ color: "#22252A" }}>
+                              {v.comprador}
+                            </span>
+                            <span className="text-sm" style={{ color: "#22252A" }}>{v.unidade}</span>
+                            <span
+                              className="text-xs"
+                              style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {v.parcela}
+                            </span>
+                            <span
+                              className="text-sm font-semibold"
+                              style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {formatBRLShort(v.valor)}
+                            </span>
+                            <span
+                              className="text-sm"
+                              style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {v.vencimento}
+                            </span>
+                            <span
+                              className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
+                              style={{ color: cfg.color, background: cfg.bg }}
+                            >
+                              {cfg.label}
+                            </span>
+                            <button
+                              onClick={() => handleToggleParcelaRecebida(v.id)}
+                              className="text-xs w-fit font-semibold"
+                              style={{ color: "#4F7A5B" }}
+                            >
+                              Marcar recebido
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                );
+              })()}
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              As parcelas são geradas automaticamente a partir do número de parcelas de cada contrato de
+              compra e venda. Marcar uma parcela como recebida aqui não altera o campo "% pago" do contrato
+              — são dois controles independentes, assim como notas de compra não recalculam contas a pagar
+              já geradas.
+            </p>
+          </>
+        )}
+
+        {activeTab === "notas" && (
+          <>
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => {
+                  setTipoRelatorio(null);
+                  setModoRelatorio(true);
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
+              >
+                📄 GERAR RELATÓRIO
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-3 mb-4">
+              <KpiCard eyebrow="Total em notas" value={formatBRLShort(totalNotasCompra)} sub={formatBRL(totalNotasCompra)} />
+              <KpiCard eyebrow="Notas cadastradas" value={`${notasFiltradas.length}`} sub={filtroObraNotas || "todas as obras"} />
+              <KpiCard
+                eyebrow="Parcelas geradas"
+                value={`${contasPagar.filter((c) => !filtroObraNotas || c.obra === filtroObraNotas).length}`}
+                sub="em contas a pagar"
+                accent="#3D6E8C"
+              />
+              <KpiCard
+                eyebrow="Ticket médio"
+                value={notasFiltradas.length > 0 ? formatBRLShort(totalNotasCompra / notasFiltradas.length) : "—"}
+                sub="por nota"
+              />
+            </div>
+
+            <div className="mb-4 flex items-center gap-2 flex-wrap">
+              <label
+                className="text-xs font-semibold uppercase tracking-wide"
+                style={{ color: "#8A8D93", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Filtrar por obra:
+              </label>
+              <select
+                value={filtroObraNotas}
+                onChange={(e) => setFiltroObraNotas(e.target.value)}
+                className="text-sm px-3 py-1.5 rounded-sm outline-none"
+                style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
+              >
+                <option value="">Todas as obras</option>
+                {NOMES_OBRAS.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </div>
+
+            <section
+              className="rounded-md p-5 border"
+              style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+            >
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2
+                  className="text-sm uppercase tracking-[0.12em] font-semibold"
+                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Notas de compras
+                </h2>
+                <button
+                  onClick={() => setShowFormNota((s) => !s)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                  style={{
+                    fontFamily: "'Oswald', sans-serif",
+                    letterSpacing: "0.03em",
+                    color: "#F5F3EC",
+                    background: "#3D6E8C",
+                  }}
+                >
+                  {showFormNota ? "CANCELAR" : "+ NOVA NOTA"}
+                </button>
+              </div>
+
+              {saveErrorNotas && (
+                <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                  {saveErrorNotas}
+                </div>
+              )}
+
+              {showFormNota && (
+                <form
+                  onSubmit={handleAddNota}
+                  className="mb-5 p-4 rounded-sm grid grid-cols-1 sm:grid-cols-3 gap-3"
+                  style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                >
+                  <div className="sm:col-span-3 flex items-center gap-3 flex-wrap">
+                    <label
+                      className="text-xs font-semibold px-3 py-1.5 rounded-sm cursor-pointer"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: "#22252A",
+                        background: "#E4E0D6",
+                      }}
+                    >
+                      {pdfImportingNota ? "LENDO PDF…" : "📄 IMPORTAR PDF"}
+                      <input
+                        type="file"
+                        accept="application/pdf"
+                        onChange={handlePdfImportNota}
+                        disabled={pdfImportingNota}
+                        className="hidden"
+                      />
+                    </label>
+                    <span className="text-xs" style={{ color: "#8A8D93" }}>
+                      Extração automática por padrão de texto — confira os campos antes de salvar.
+                    </span>
+                  </div>
+
+                  {pdfImportErrorNota && (
+                    <div className="sm:col-span-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                      {pdfImportErrorNota}
+                    </div>
+                  )}
+                  {pdfImportedFieldsNota.length > 0 && (
+                    <div className="sm:col-span-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#4F7A5B", background: "#E8EEE8" }}>
+                      Preenchido automaticamente: {pdfImportedFieldsNota.join(", ")}. Revise os demais campos.
+                    </div>
+                  )}
+                  {duplicataNota && (
+                    <div className="sm:col-span-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B4590C", background: "#FBEBDB" }}>
+                      ⚠ Possível duplicidade: já existe uma nota de <strong>{duplicataNota.fornecedor}</strong> no
+                      valor de {formatBRLShort(duplicataNota.valorTotal)}, emitida em {duplicataNota.dataEmissao}.
+                      Confira antes de salvar.
+                    </div>
+                  )}
+
+                  <input
+                    required
+                    placeholder="Fornecedor"
+                    value={formNota.fornecedor}
+                    onChange={(e) => setFormNota({ ...formNota, fornecedor: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <select
+                    value={formNota.obra}
+                    onChange={(e) => setFormNota({ ...formNota, obra: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  >
+                    {NOMES_OBRAS.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                  <input
+                    required
+                    type="number"
+                    placeholder="Valor total (R$)"
+                    value={formNota.valorTotal}
+                    onChange={(e) => setFormNota({ ...formNota, valorTotal: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="date"
+                    title="Data de emissão"
+                    value={dataBRparaISO(formNota.dataEmissao)}
+                    onChange={(e) => setFormNota({ ...formNota, dataEmissao: dataISOparaBR(e.target.value) })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    max="24"
+                    placeholder="Nº de parcelas"
+                    value={formNota.numeroParcelas}
+                    onChange={(e) => setFormNota({ ...formNota, numeroParcelas: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <div className="text-xs flex items-center" style={{ color: "#8A8D93" }}>
+                    As parcelas são lançadas automaticamente em Contas a pagar.
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="sm:col-span-3 text-xs font-semibold px-3 py-2.5 rounded-sm"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: "#F5F3EC",
+                      background: duplicataNota ? "#B4590C" : "#E1590C",
+                    }}
+                  >
+                    {duplicataNota ? "SALVAR MESMO ASSIM (duplicidade)" : "SALVAR NOTA"}
+                  </button>
+                </form>
+              )}
+
+              {loadingNotas ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Carregando notas…
+                </div>
+              ) : notasFiltradas.length === 0 ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  {filtroObraNotas ? "Nenhuma nota cadastrada para esta obra." : "Nenhuma nota cadastrada ainda."}
+                </div>
+              ) : (
+                <>
+                  <div className="hidden sm:grid grid-cols-[1.4fr_1fr_1fr_1fr_0.8fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <span>Fornecedor</span>
+                    <span>Obra</span>
+                    <span>Valor total</span>
+                    <span>Emissão</span>
+                    <span>Parcelas</span>
+                    <span></span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {notasFiltradas
+                      .slice()
+                      .reverse()
+                      .map((n) => (
+                        <div
+                          key={n.id}
+                          className="grid grid-cols-2 sm:grid-cols-[1.4fr_1fr_1fr_1fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                          style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                        >
+                          <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{n.fornecedor}</span>
+                          <span className="text-sm" style={{ color: "#22252A" }}>{n.obra}</span>
+                          <span
+                            className="text-sm"
+                            style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+                          >
+                            {formatBRLShort(n.valorTotal)}
+                          </span>
+                          <span
+                            className="text-xs"
+                            style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                          >
+                            {n.dataEmissao}
+                          </span>
+                          <span className="text-xs" style={{ color: "#6B6F76" }}>{n.numeroParcelas}x</span>
+                          <button
+                            onClick={() => handleDeleteNota(n.id)}
+                            className="text-xs w-fit"
+                            style={{ color: "#B23A2E" }}
+                            title="Excluir nota"
+                          >
+                            Excluir
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                </>
+              )}
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              Ao salvar uma nota, as parcelas são geradas automaticamente na aba Contas a pagar.
+            </p>
+          </>
+        )}
+
+        {activeTab === "pagar" && (
+          <>
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => {
+                  setTipoRelatorio(null);
+                  setModoRelatorio(true);
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
+              >
+                📄 GERAR RELATÓRIO
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-3 mb-4">
+              <KpiCard eyebrow="Total a pagar" value={formatBRLShort(totalAPagar)} sub={formatBRL(totalAPagar)} accent="#B4590C" />
+              <KpiCard eyebrow="Total pago" value={formatBRLShort(totalPago)} sub={formatBRL(totalPago)} accent="#4F7A5B" />
+              <KpiCard
+                eyebrow="Parcelas vencidas"
+                value={`${parcelasVencidas}`}
+                sub="precisam de atenção"
+                accent={parcelasVencidas > 0 ? "#B23A2E" : "#22252A"}
+              />
+              <KpiCard eyebrow="Parcelas cadastradas" value={`${contasPagarFiltradas.length}`} sub={filtroObraPagar || "todas as obras"} />
+            </div>
+
+            <div className="mb-4 flex items-center gap-2 flex-wrap">
+              <label
+                className="text-xs font-semibold uppercase tracking-wide"
+                style={{ color: "#8A8D93", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Filtrar por obra:
+              </label>
+              <select
+                value={filtroObraPagar}
+                onChange={(e) => setFiltroObraPagar(e.target.value)}
+                className="text-sm px-3 py-1.5 rounded-sm outline-none"
+                style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
+              >
+                <option value="">Todas as obras</option>
+                {NOMES_OBRAS.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </div>
+
+            <section
+              className="rounded-md p-5 border"
+              style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+            >
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2
+                  className="text-sm uppercase tracking-[0.12em] font-semibold"
+                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Contas a pagar
+                </h2>
+                <button
+                  onClick={() => setShowFormDespesa((s) => !s)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                  style={{
+                    fontFamily: "'Oswald', sans-serif",
+                    letterSpacing: "0.03em",
+                    color: "#F5F3EC",
+                    background: "#3D6E8C",
+                  }}
+                >
+                  {showFormDespesa ? "CANCELAR" : "+ NOVA DESPESA"}
+                </button>
+              </div>
+
+              {showFormDespesa && (
+                <form
+                  onSubmit={handleAddDespesaAvulsa}
+                  className="mb-5 p-4 rounded-sm grid grid-cols-1 sm:grid-cols-3 gap-3"
+                  style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                >
+                  <input
+                    required
+                    placeholder="Fornecedor / descrição da despesa"
+                    value={formDespesa.fornecedor}
+                    onChange={(e) => setFormDespesa({ ...formDespesa, fornecedor: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <select
+                    value={formDespesa.obra}
+                    onChange={(e) => setFormDespesa({ ...formDespesa, obra: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  >
+                    {NOMES_OBRAS.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                  <input
+                    required
+                    type="number"
+                    placeholder="Valor (R$)"
+                    value={formDespesa.valor}
+                    onChange={(e) => setFormDespesa({ ...formDespesa, valor: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="date"
+                    title="Data de vencimento"
+                    value={dataBRparaISO(formDespesa.dataVencimento)}
+                    onChange={(e) => setFormDespesa({ ...formDespesa, dataVencimento: dataISOparaBR(e.target.value) })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    max="60"
+                    placeholder="Nº de parcelas (opcional)"
+                    value={formDespesa.numeroParcelas}
+                    onChange={(e) => setFormDespesa({ ...formDespesa, numeroParcelas: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <div className="text-xs flex items-center" style={{ color: "#8A8D93" }}>
+                    Use para gastos avulsos que não vieram de uma nota de compra ou contrato.
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="sm:col-span-3 text-xs font-semibold px-3 py-2.5 rounded-sm"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: "#F5F3EC",
+                      background: "#E1590C",
+                    }}
+                  >
+                    SALVAR DESPESA
+                  </button>
+                </form>
+              )}
+
+              {loadingNotas ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Carregando contas…
+                </div>
+              ) : contasPagarFiltradas.length === 0 ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  {filtroObraPagar
+                    ? "Nenhuma conta a pagar para esta obra."
+                    : "Nenhuma conta a pagar ainda. Cadastre uma nota de compra para gerar parcelas."}
+                </div>
+              ) : (
+                <>
+                  <div className="hidden sm:grid grid-cols-[1.1fr_0.8fr_0.6fr_0.9fr_0.9fr_0.8fr_1.3fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <span>Fornecedor</span>
+                    <span>Obra</span>
+                    <span>Parcela</span>
+                    <span>Valor</span>
+                    <span>Vencimento</span>
+                    <span>Status</span>
+                    <span>Item de custo</span>
+                    <span></span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {contasPagarFiltradas
+                      .slice()
+                      .sort((a, b) => (parseDateBR(a.vencimento) || 0) - (parseDateBR(b.vencimento) || 0))
+                      .map((c) => {
+                        const display = statusPagarDisplay(c);
+                        const cfg = statusPagarConfig[display];
+                        const opcoesCusto = custosItens.filter((it) => it.obra === c.obra);
+                        return (
+                          <div
+                            key={c.id}
+                            className="grid grid-cols-2 sm:grid-cols-[1.1fr_0.8fr_0.6fr_0.9fr_0.9fr_0.8fr_1.3fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                          >
+                            <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{c.fornecedor}</span>
+                            <span className="text-sm" style={{ color: "#22252A" }}>{c.obra}</span>
+                            <span
+                              className="text-xs"
+                              style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {c.parcela}
+                            </span>
+                            <span
+                              className="text-sm"
+                              style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {formatBRLShort(c.valor)}
+                            </span>
+                            <span
+                              className="text-xs"
+                              style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {c.vencimento}
+                            </span>
+                            <span
+                              className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
+                              style={{ color: cfg.color, background: cfg.bg }}
+                            >
+                              {cfg.label}
+                            </span>
+                            <select
+                              value={c.custoItemId || ""}
+                              onChange={(e) => handleVincularCustoItem(c.id, e.target.value)}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              title="Vincule a um item do orçamento para que o valor pago componha o Gasto Real automaticamente"
+                            >
+                              <option value="">— nenhum —</option>
+                              {opcoesCusto.map((it) => (
+                                <option key={it.id} value={it.id}>
+                                  {it.etapa.replace(/^\d+\.\s*/, "")} → {it.item}
+                                </option>
+                              ))}
+                            </select>
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => handleToggleParcelaPaga(c.id)}
+                                className="text-xs w-fit font-semibold"
+                                style={{ color: c.status === "pago" ? "#8A8D93" : "#4F7A5B" }}
+                              >
+                                {c.status === "pago" ? "Reabrir" : "Marcar pago"}
+                              </button>
+                              <button
+                                onClick={() => handleDeleteContaPagar(c.id)}
+                                className="text-xs w-fit"
+                                style={{ color: "#B23A2E" }}
+                                title="Excluir lançamento"
+                              >
+                                Excluir
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </>
+              )}
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              Parcelas geradas automaticamente a partir das notas de compras cadastradas. Vincule uma
+              parcela paga a um item do orçamento (coluna "Item de custo") para que o valor componha o
+              Gasto Real dele automaticamente em Custos das obras.
+            </p>
+          </>
+        )}
+
+        {activeTab === "extrato" && (
+          <>
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => {
+                  setTipoRelatorio(null);
+                  setModoRelatorio(true);
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
+              >
+                📄 GERAR RELATÓRIO
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-3 mb-8">
+              <KpiCard
+                eyebrow="Saldo do extrato"
+                value={formatBRLShort(saldoExtrato)}
+                sub={formatBRL(saldoExtrato)}
+                accent={saldoExtrato >= 0 ? "#4F7A5B" : "#B23A2E"}
+              />
+              <KpiCard eyebrow="Total de créditos" value={formatBRLShort(totalCreditosExtrato)} sub={formatBRL(totalCreditosExtrato)} accent="#4F7A5B" />
+              <KpiCard eyebrow="Total de débitos" value={formatBRLShort(totalDebitosExtrato)} sub={formatBRL(totalDebitosExtrato)} accent="#B23A2E" />
+              <KpiCard eyebrow="Lançamentos" value={`${extrato.length}`} sub="no extrato" />
+            </div>
+
+            <section
+              className="rounded-md p-5 border"
+              style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+            >
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2
+                  className="text-sm uppercase tracking-[0.12em] font-semibold"
+                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Extrato bancário
+                </h2>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <label
+                    className="text-xs font-semibold px-3 py-1.5 rounded-sm cursor-pointer"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: "#22252A",
+                      background: "#E4E0D6",
+                    }}
+                  >
+                    {pdfImportingExtrato ? "LENDO PDF…" : "📄 IMPORTAR PDF"}
+                    <input
+                      type="file"
+                      accept="application/pdf"
+                      onChange={handlePdfImportExtrato}
+                      disabled={pdfImportingExtrato}
+                      className="hidden"
+                    />
+                  </label>
+                  <button
+                    onClick={() => setShowFormExtrato((s) => !s)}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: "#F5F3EC",
+                      background: "#3D6E8C",
+                    }}
+                  >
+                    {showFormExtrato ? "CANCELAR" : "+ NOVO LANÇAMENTO"}
+                  </button>
+                </div>
+              </div>
+
+              {saveErrorExtrato && (
+                <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                  {saveErrorExtrato}
+                </div>
+              )}
+
+              {pdfImportErrorExtrato && (
+                <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                  {pdfImportErrorExtrato}
+                </div>
+              )}
+
+              {extratoPreview.length > 0 && (
+                <div className="mb-5 p-4 rounded-sm" style={{ background: "#FFFFFF", border: "1px solid #3D6E8C" }}>
+                  <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                    <span className="text-xs font-semibold" style={{ color: "#22252A" }}>
+                      {extratoPreview.length} lançamento(s) encontrados no PDF — revise antes de confirmar
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleDiscardPreviewExtrato}
+                        className="text-xs px-3 py-1.5 rounded-sm"
+                        style={{ color: "#22252A", background: "#E4E0D6" }}
+                      >
+                        Descartar
+                      </button>
+                      <button
+                        onClick={handleConfirmImportExtrato}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                        style={{ color: "#F5F3EC", background: "#E1590C" }}
+                      >
+                        Confirmar importação
+                      </button>
+                    </div>
+                  </div>
+                  <div className="hidden sm:grid grid-cols-[0.8fr_1.4fr_0.8fr_0.6fr_1fr_auto] gap-2 px-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <span>Data</span>
+                    <span>Descrição</span>
+                    <span>Valor</span>
+                    <span>Tipo</span>
+                    <span>Sócio</span>
+                    <span></span>
+                  </div>
+                  <div className="space-y-2">
+                    {extratoPreview.map((l) => {
+                      const cfg = tipoExtratoConfig(l.valor);
+                      return (
+                        <div
+                          key={l.id}
+                          className="grid grid-cols-2 sm:grid-cols-[0.8fr_1.4fr_0.8fr_0.6fr_1fr_auto] gap-2 items-center rounded-sm px-2 py-2"
+                          style={{ border: "1px solid #E4E0D6" }}
+                        >
+                          <input
+                            value={l.data}
+                            onChange={(e) => handleUpdatePreviewRow(l.id, "data", e.target.value)}
+                            className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                          />
+                          <input
+                            value={l.descricao}
+                            onChange={(e) => handleUpdatePreviewRow(l.id, "descricao", e.target.value)}
+                            className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                          />
+                          <input
+                            type="number"
+                            value={Math.abs(l.valor)}
+                            onChange={(e) =>
+                              handleUpdatePreviewRow(
+                                l.id,
+                                "valor",
+                                l.valor < 0 ? -Math.abs(Number(e.target.value)) : Math.abs(Number(e.target.value))
+                              )
+                            }
+                            className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                          />
+                          <button
+                            onClick={() => handleTogglePreviewTipo(l.id)}
+                            className="text-[10px] uppercase font-semibold px-2 py-1 rounded-full w-fit"
+                            style={{ color: cfg.color, background: cfg.bg }}
+                            title="Clique para alternar entre crédito e débito"
+                          >
+                            {cfg.label}
+                          </button>
+                          <input
+                            placeholder="Sócio (opcional)"
+                            value={l.socio || ""}
+                            onChange={(e) => handleUpdatePreviewRow(l.id, "socio", e.target.value)}
+                            className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                          />
+                          <button
+                            onClick={() => handleRemovePreviewRow(l.id)}
+                            className="text-xs w-fit"
+                            style={{ color: "#B23A2E" }}
+                          >
+                            Remover
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {showFormExtrato && (
+                <form
+                  onSubmit={handleAddLancamento}
+                  className="mb-5 p-4 rounded-sm grid grid-cols-1 sm:grid-cols-4 gap-3"
+                  style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                >
+                  <input
+                    required
+                    type="date"
+                    title="Data"
+                    value={dataBRparaISO(formExtrato.data)}
+                    onChange={(e) => setFormExtrato({ ...formExtrato, data: dataISOparaBR(e.target.value) })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    required
+                    placeholder="Descrição"
+                    value={formExtrato.descricao}
+                    onChange={(e) => setFormExtrato({ ...formExtrato, descricao: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    required
+                    type="number"
+                    placeholder="Valor (R$)"
+                    value={formExtrato.valor}
+                    onChange={(e) => setFormExtrato({ ...formExtrato, valor: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <select
+                    value={formExtrato.tipo}
+                    onChange={(e) => setFormExtrato({ ...formExtrato, tipo: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  >
+                    <option value="credito">Crédito (entrada)</option>
+                    <option value="debito">Débito (saída)</option>
+                  </select>
+                  <input
+                    placeholder="Sócio (se for aporte/devolução — opcional)"
+                    value={formExtrato.socio}
+                    onChange={(e) => setFormExtrato({ ...formExtrato, socio: e.target.value })}
+                    className="sm:col-span-3 text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <button
+                    type="submit"
+                    className="sm:col-span-4 text-xs font-semibold px-3 py-2.5 rounded-sm"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: "#F5F3EC",
+                      background: "#E1590C",
+                    }}
+                  >
+                    SALVAR LANÇAMENTO
+                  </button>
+                </form>
+              )}
+
+              {loadingExtrato ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Carregando extrato…
+                </div>
+              ) : extrato.length === 0 ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Nenhum lançamento ainda. Importe um PDF ou adicione manualmente.
+                </div>
+              ) : (
+                <>
+                  <div className="hidden sm:grid grid-cols-[0.7fr_1.2fr_0.7fr_0.55fr_0.8fr_1.3fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <span>Data</span>
+                    <span>Descrição</span>
+                    <span>Valor</span>
+                    <span>Tipo</span>
+                    <span>Sócio</span>
+                    <span>Parcela a receber</span>
+                    <span></span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {extrato
+                      .slice()
+                      .sort((a, b) => (parseDateBR(b.data) || 0) - (parseDateBR(a.data) || 0))
+                      .map((l) => {
+                        const cfg = tipoExtratoConfig(l.valor);
+                        const opcoesParcela = opcoesParcelaReceberPara(l.id, l.parcelaReceberId);
+                        return (
+                          <div
+                            key={l.id}
+                            className="grid grid-cols-2 sm:grid-cols-[0.7fr_1.2fr_0.7fr_0.55fr_0.8fr_1.3fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                          >
+                            <span
+                              className="text-xs"
+                              style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {l.data}
+                            </span>
+                            <span className="text-sm" style={{ color: "#22252A" }}>{l.descricao}</span>
+                            <span
+                              className="text-sm"
+                              style={{ color: l.valor >= 0 ? "#4F7A5B" : "#B23A2E", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {l.valor >= 0 ? "+" : "−"}
+                              {formatBRLShort(Math.abs(l.valor))}
+                            </span>
+                            <span
+                              className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
+                              style={{ color: cfg.color, background: cfg.bg }}
+                            >
+                              {cfg.label}
+                            </span>
+                            <input
+                              placeholder="Sócio (opcional)"
+                              value={l.socio || ""}
+                              onChange={(e) => handleUpdateExtratoSocio(l.id, e.target.value)}
+                              onBlur={handlePersistExtratoSocio}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              title="Preencha se este lançamento for um aporte ou devolução de sócio — ele passa a contar em Empréstimos de sócios"
+                            />
+                            <select
+                              value={l.parcelaReceberId || ""}
+                              onChange={(e) => handleVincularParcelaReceber(l.id, e.target.value)}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              title="Vincule a uma parcela de Valores a receber para marcá-la como recebida automaticamente"
+                            >
+                              <option value="">— nenhuma —</option>
+                              {opcoesParcela.map((v) => (
+                                <option key={v.id} value={v.id}>
+                                  {v.unidade} · {v.comprador} · {v.parcela} · {formatBRLShort(v.valor)}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => handleDeleteLancamento(l.id)}
+                              className="text-xs w-fit"
+                              style={{ color: "#B23A2E" }}
+                              title="Excluir lançamento"
+                            >
+                              Excluir
+                            </button>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </>
+              )}
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              Extração heurística por padrão de texto — funciona melhor com extratos simples e tabulares;
+              revise os lançamentos antes de confirmar a importação. O saldo do extrato entra
+              automaticamente no fluxo de caixa da Visão geral. Preencha o campo "Sócio" num lançamento
+              (crédito = aporte, débito = devolução) para que ele apareça também na aba Empréstimos de
+              sócios, sem duplicar o valor. Vincule um lançamento a uma "Parcela a receber" para marcá-la
+              como recebida automaticamente na aba Valores a receber — desvincular reabre a parcela.
+            </p>
+          </>
+        )}
+
+        {activeTab === "socios" && (
+          <>
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => {
+                  setTipoRelatorio(null);
+                  setModoRelatorio(true);
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
+              >
+                📄 GERAR RELATÓRIO
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-3 mb-8">
+              <KpiCard
+                eyebrow="Saldo com sócios"
+                value={formatBRLShort(saldoComSocios)}
+                sub={saldoComSocios > 0 ? "a empresa deve aos sócios" : "quitado ou a favor da empresa"}
+                accent={saldoComSocios > 0 ? "#B4590C" : "#22252A"}
+              />
+              <KpiCard eyebrow="Total aportado" value={formatBRLShort(totalAportado)} sub={formatBRL(totalAportado)} accent="#4F7A5B" />
+              <KpiCard eyebrow="Total devolvido" value={formatBRLShort(totalDevolvido)} sub={formatBRL(totalDevolvido)} accent="#3D6E8C" />
+              <KpiCard eyebrow="Sócios no controle" value={`${saldoPorSocio.length}`} sub="com movimentação" />
+            </div>
+
+            <div className="mb-4 flex items-center gap-2 flex-wrap">
+              <label
+                className="text-xs font-semibold uppercase tracking-wide"
+                style={{ color: "#8A8D93", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Filtrar por obra:
+              </label>
+              <select
+                value={filtroObraSocios}
+                onChange={(e) => setFiltroObraSocios(e.target.value)}
+                className="text-sm px-3 py-1.5 rounded-sm outline-none"
+                style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
+              >
+                <option value="">Todas as obras</option>
+                {NOMES_OBRAS.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+              {filtroObraSocios && (
+                <span className="text-xs" style={{ color: "#8A8D93" }}>
+                  Lançamentos vindos do extrato bancário (sem obra definida) não aparecem com um filtro ativo.
+                </span>
+              )}
+            </div>
+
+            {saldoPorSocio.length > 0 && (
+              <section
+                className="mb-5 rounded-md p-5 border"
+                style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+              >
+                <h2
+                  className="text-sm uppercase tracking-[0.12em] font-semibold mb-4"
+                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Saldo por sócio
+                </h2>
+                <div className="space-y-2">
+                  {saldoPorSocio.map(({ socio, saldo }) => (
+                    <div
+                      key={socio}
+                      className="flex items-center justify-between rounded-sm px-3 py-2.5 flex-wrap gap-1"
+                      style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                    >
+                      <span className="text-sm font-medium" style={{ color: "#22252A" }}>{socio}</span>
+                      <span
+                        className="text-sm"
+                        style={{
+                          color: saldo > 0 ? "#B4590C" : saldo < 0 ? "#3D6E8C" : "#8A8D93",
+                          fontFamily: "'IBM Plex Mono', monospace",
+                        }}
+                      >
+                        {saldo > 0
+                          ? `Empresa deve ${formatBRLShort(saldo)}`
+                          : saldo < 0
+                          ? `Sócio deve ${formatBRLShort(Math.abs(saldo))}`
+                          : "Quitado"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <section
+              className="rounded-md p-5 border"
+              style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+            >
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2
+                  className="text-sm uppercase tracking-[0.12em] font-semibold"
+                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Empréstimos de sócios
+                </h2>
+                <button
+                  onClick={() => setShowFormSocio((s) => !s)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                  style={{
+                    fontFamily: "'Oswald', sans-serif",
+                    letterSpacing: "0.03em",
+                    color: "#F5F3EC",
+                    background: "#3D6E8C",
+                  }}
+                >
+                  {showFormSocio ? "CANCELAR" : "+ NOVO LANÇAMENTO"}
+                </button>
+              </div>
+
+              {saveErrorSocios && (
+                <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                  {saveErrorSocios}
+                </div>
+              )}
+
+              {showFormSocio && (
+                <form
+                  onSubmit={handleAddEmprestimo}
+                  className="mb-5 p-4 rounded-sm grid grid-cols-1 sm:grid-cols-3 gap-3"
+                  style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                >
+                  <input
+                    required
+                    placeholder="Nome do sócio"
+                    value={formSocio.socio}
+                    onChange={(e) => setFormSocio({ ...formSocio, socio: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <select
+                    value={formSocio.tipo}
+                    onChange={(e) => setFormSocio({ ...formSocio, tipo: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  >
+                    <option value="aporte">Aporte (empréstimo ao caixa)</option>
+                    <option value="devolucao">Devolução ao sócio</option>
+                  </select>
+                  <input
+                    required
+                    type="number"
+                    placeholder="Valor (R$)"
+                    value={formSocio.valor}
+                    onChange={(e) => setFormSocio({ ...formSocio, valor: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="date"
+                    title="Data"
+                    value={dataBRparaISO(formSocio.data)}
+                    onChange={(e) => setFormSocio({ ...formSocio, data: dataISOparaBR(e.target.value) })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <select
+                    value={formSocio.obra}
+                    onChange={(e) => setFormSocio({ ...formSocio, obra: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  >
+                    {NOMES_OBRAS.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                  <input
+                    placeholder="Observação (opcional)"
+                    value={formSocio.observacao}
+                    onChange={(e) => setFormSocio({ ...formSocio, observacao: e.target.value })}
+                    className="sm:col-span-3 text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <button
+                    type="submit"
+                    className="sm:col-span-3 text-xs font-semibold px-3 py-2.5 rounded-sm"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: "#F5F3EC",
+                      background: "#E1590C",
+                    }}
+                  >
+                    SALVAR LANÇAMENTO
+                  </button>
+                </form>
+              )}
+
+              {loadingSocios || loadingExtrato ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Carregando empréstimos…
+                </div>
+              ) : movimentosSociosFiltrados.length === 0 ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  {filtroObraSocios
+                    ? "Nenhum empréstimo de sócio registrado para esta obra."
+                    : "Nenhum empréstimo de sócio registrado ainda."}
+                </div>
+              ) : (
+                <>
+                  <div className="hidden sm:grid grid-cols-[1fr_1.1fr_0.8fr_0.7fr_0.9fr_1fr_0.8fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <span>Sócio</span>
+                    <span>Tipo</span>
+                    <span>Valor</span>
+                    <span>Data</span>
+                    <span>Obra</span>
+                    <span>Observação</span>
+                    <span>Origem</span>
+                    <span></span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {movimentosSociosFiltrados
+                      .slice()
+                      .sort((a, b) => (parseDateBR(b.data) || 0) - (parseDateBR(a.data) || 0))
+                      .map((e) => {
+                        const cfg = tipoSocioConfig[e.tipo];
+                        return (
+                          <div
+                            key={e.id}
+                            className="grid grid-cols-2 sm:grid-cols-[1fr_1.1fr_0.8fr_0.7fr_0.9fr_1fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                          >
+                            <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{e.socio}</span>
+                            <span
+                              className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
+                              style={{ color: cfg.color, background: cfg.bg }}
+                            >
+                              {cfg.label}
+                            </span>
+                            <span
+                              className="text-sm"
+                              style={{
+                                color: e.tipo === "aporte" ? "#4F7A5B" : "#B23A2E",
+                                fontFamily: "'IBM Plex Mono', monospace",
+                              }}
+                            >
+                              {e.tipo === "aporte" ? "+" : "−"}
+                              {formatBRLShort(e.valor)}
+                            </span>
+                            <span
+                              className="text-xs"
+                              style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {e.data}
+                            </span>
+                            <span className="text-xs" style={{ color: "#6B6F76" }}>{e.obra || "—"}</span>
+                            <span className="text-xs truncate" style={{ color: "#8A8D93" }}>{e.observacao}</span>
+                            <span className="text-xs" style={{ color: "#8A8D93" }}>
+                              {e.origem === "extrato" ? "Extrato bancário" : "Manual"}
+                            </span>
+                            {e.origem === "manual" ? (
+                              <button
+                                onClick={() => handleDeleteEmprestimo(e.id)}
+                                className="text-xs w-fit"
+                                style={{ color: "#B23A2E" }}
+                                title="Excluir lançamento"
+                              >
+                                Excluir
+                              </button>
+                            ) : (
+                              <span className="text-xs" style={{ color: "#8A8D93" }} title="Para remover, edite o campo Sócio deste lançamento na aba Extrato bancário">
+                                —
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                </>
+              )}
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              Aportes entram como entrada e devoluções como saída no fluxo de caixa da Visão geral, no mês
+              da data informada. Lançamentos com origem "Extrato bancário" vêm de itens marcados com um
+              sócio na aba Extrato — para removê-los, apague a marcação lá (evita contar o valor em dobro).
+            </p>
+          </>
+        )}
+
+        {activeTab === "documentos" && (
+          <>
+            <div className="flex flex-wrap gap-3 mb-8">
+              <KpiCard eyebrow="Documentos anexados" value={`${documentos.length}`} sub="no total" />
+              <KpiCard
+                eyebrow="Vencidos"
+                value={`${documentosVencidos}`}
+                sub="precisam de atenção"
+                accent={documentosVencidos > 0 ? "#B23A2E" : "#22252A"}
+              />
+              <KpiCard
+                eyebrow="Vencendo em 30 dias"
+                value={`${documentosVencendo}`}
+                sub="renovar em breve"
+                accent={documentosVencendo > 0 ? "#B4590C" : "#22252A"}
+              />
+              <KpiCard
+                eyebrow="Documentos pendentes"
+                value={`${essenciaisPendentes.length}`}
+                sub={essenciaisPendentes.length > 0 ? essenciaisPendentes.join(", ") : "todos anexados"}
+                accent={essenciaisPendentes.length > 0 ? "#B4590C" : "#4F7A5B"}
+              />
+            </div>
+
+            {saveErrorDocumentos && (
+              <div className="mb-4 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                {saveErrorDocumentos}
+              </div>
+            )}
+            {uploadErrorDocumento && (
+              <div className="mb-4 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                {uploadErrorDocumento}
+              </div>
+            )}
+
+            {DOCUMENTOS_ESSENCIAIS.map((categoria) => {
+              const docsCategoria = documentos.filter((d) => d.categoria === categoria);
+              return (
+                <section
+                  key={categoria}
+                  className="mb-4 rounded-md p-5 border"
+                  style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+                >
+                  <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                    <h2
+                      className="text-sm uppercase tracking-[0.12em] font-semibold"
+                      style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                    >
+                      {categoria}
+                    </h2>
+                    <label
+                      className="text-xs font-semibold px-3 py-1.5 rounded-sm cursor-pointer"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: "#F5F3EC",
+                        background: "#3D6E8C",
+                      }}
+                    >
+                      {uploadingCategoria === categoria ? "ANEXANDO…" : "📎 ANEXAR ARQUIVO"}
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={(e) => {
+                          const file = e.target.files[0];
+                          e.target.value = "";
+                          handleAnexarDocumentoCategoria(categoria, file);
+                        }}
+                        disabled={uploadingCategoria !== null}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+
+                  {docsCategoria.length === 0 ? (
+                    <div
+                      className="text-xs px-3 py-2 rounded-sm w-fit"
+                      style={{ color: "#B4590C", background: "#FBEBDB" }}
+                    >
+                      Pendente — nenhum documento anexado
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {docsCategoria.map((d) => {
+                        const status = statusDocumentoDisplay(d);
+                        const cfg = statusDocumentoConfig[status];
+                        return (
+                          <div
+                            key={d.id}
+                            className="grid grid-cols-2 sm:grid-cols-[1.2fr_0.9fr_0.8fr_0.8fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-2.5"
+                            style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                          >
+                            <input
+                              value={d.nome}
+                              onChange={(e) => handleUpdateDocumentoCampo(d.id, "nome", e.target.value)}
+                              onBlur={handlePersistDocumentosBlur}
+                              className="text-sm px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                            />
+                            <input
+                              placeholder="Número"
+                              value={d.numero}
+                              onChange={(e) => handleUpdateDocumentoCampo(d.id, "numero", e.target.value)}
+                              onBlur={handlePersistDocumentosBlur}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                            />
+                            <input
+                              type="date"
+                              title="Emissão"
+                              value={dataBRparaISO(d.dataEmissao)}
+                              onChange={(e) => handleUpdateDocumentoCampo(d.id, "dataEmissao", dataISOparaBR(e.target.value))}
+                              onBlur={handlePersistDocumentosBlur}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                            />
+                            <input
+                              type="date"
+                              title="Validade"
+                              value={dataBRparaISO(d.validade)}
+                              onChange={(e) => handleUpdateDocumentoCampo(d.id, "validade", dataISOparaBR(e.target.value))}
+                              onBlur={handlePersistDocumentosBlur}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                            />
+                            <span
+                              className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
+                              style={{ color: cfg.color, background: cfg.bg }}
+                            >
+                              {cfg.label}
+                            </span>
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => handleAbrirDocumento(d)}
+                                className="text-xs w-fit font-semibold"
+                                style={{ color: "#3D6E8C" }}
+                                title={d.arquivoNome}
+                              >
+                                {abrindoDocumentoId === d.id ? "Abrindo…" : "Abrir"}
+                              </button>
+                              <button
+                                onClick={() => handleEnviarWhatsapp(d)}
+                                className="text-xs w-fit font-semibold"
+                                style={{ color: "#4F7A5B" }}
+                                title="Enviar este documento pelo WhatsApp"
+                              >
+                                {enviandoWhatsappId === d.id ? "Enviando…" : "WhatsApp"}
+                              </button>
+                              <button
+                                onClick={() => handleDeleteDocumento(d.id)}
+                                className="text-xs w-fit"
+                                style={{ color: "#B23A2E" }}
+                                title="Excluir documento"
+                              >
+                                Excluir
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+
+            <section
+              className="rounded-md p-5 border"
+              style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+            >
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2
+                  className="text-sm uppercase tracking-[0.12em] font-semibold"
+                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Outros documentos
+                </h2>
+                <button
+                  onClick={() => setShowFormDocumento((s) => !s)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                  style={{
+                    fontFamily: "'Oswald', sans-serif",
+                    letterSpacing: "0.03em",
+                    color: "#F5F3EC",
+                    background: "#3D6E8C",
+                  }}
+                >
+                  {showFormDocumento ? "CANCELAR" : "+ NOVO DOCUMENTO"}
+                </button>
+              </div>
+
+              {showFormDocumento && (
+                <form
+                  onSubmit={handleAddDocumento}
+                  className="mb-5 p-4 rounded-sm grid grid-cols-1 sm:grid-cols-3 gap-3"
+                  style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                >
+                  <div className="sm:col-span-3 flex items-center gap-3 flex-wrap">
+                    <label
+                      className="text-xs font-semibold px-3 py-1.5 rounded-sm cursor-pointer truncate max-w-full"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: "#22252A",
+                        background: "#E4E0D6",
+                      }}
+                      title={formDocumento.arquivo ? formDocumento.arquivo.name : "Anexar arquivo (PDF ou imagem)"}
+                    >
+                      {pdfReadingDocumento
+                        ? "LENDO PDF…"
+                        : formDocumento.arquivo
+                        ? `📎 ${formDocumento.arquivo.name}`
+                        : "📎 ANEXAR ARQUIVO (PDF/IMAGEM)"}
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={handleFormDocumentoFile}
+                        disabled={pdfReadingDocumento}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+
+                  {pdfImportedFieldsDocumento.length > 0 && (
+                    <div className="sm:col-span-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#4F7A5B", background: "#E8EEE8" }}>
+                      Preenchido automaticamente: {pdfImportedFieldsDocumento.join(", ")}. Revise os demais campos.
+                    </div>
+                  )}
+
+                  <input
+                    required
+                    placeholder="Nome do documento"
+                    value={formDocumento.nome}
+                    onChange={(e) => setFormDocumento({ ...formDocumento, nome: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    placeholder="Número (opcional)"
+                    value={formDocumento.numero}
+                    onChange={(e) => setFormDocumento({ ...formDocumento, numero: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="date"
+                    title="Data de emissão (opcional)"
+                    value={dataBRparaISO(formDocumento.dataEmissao)}
+                    onChange={(e) => setFormDocumento({ ...formDocumento, dataEmissao: dataISOparaBR(e.target.value) })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <label className="flex flex-col gap-1">
+                    <input
+                      type="date"
+                      title="Validade (em branco se não expira)"
+                      value={dataBRparaISO(formDocumento.validade)}
+                      onChange={(e) => setFormDocumento({ ...formDocumento, validade: dataISOparaBR(e.target.value) })}
+                      className="text-sm px-3 py-2 rounded-sm outline-none"
+                      style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    />
+                    <span className="text-[10px]" style={{ color: "#8A8D93" }}>Validade — deixe em branco se não expira</span>
+                  </label>
+                  <input
+                    placeholder="Observação (opcional)"
+                    value={formDocumento.observacao}
+                    onChange={(e) => setFormDocumento({ ...formDocumento, observacao: e.target.value })}
+                    className="sm:col-span-2 text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+
+                  <button
+                    type="submit"
+                    disabled={uploadingDocumento}
+                    className="sm:col-span-3 text-xs font-semibold px-3 py-2.5 rounded-sm"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: "#F5F3EC",
+                      background: "#E1590C",
+                      opacity: uploadingDocumento ? 0.7 : 1,
+                    }}
+                  >
+                    {uploadingDocumento ? "SALVANDO…" : "SALVAR DOCUMENTO"}
+                  </button>
+                </form>
+              )}
+
+              {loadingDocumentos ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Carregando documentos…
+                </div>
+              ) : documentos.filter((d) => d.categoria === "Outro").length === 0 ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Nenhum outro documento anexado ainda.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {documentos
+                    .filter((d) => d.categoria === "Outro")
+                    .map((d) => {
+                      const status = statusDocumentoDisplay(d);
+                      const cfg = statusDocumentoConfig[status];
+                      return (
+                        <div
+                          key={d.id}
+                          className="grid grid-cols-2 sm:grid-cols-[1.3fr_0.9fr_0.8fr_0.8fr_0.9fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                          style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                        >
+                          <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{d.nome}</span>
+                          <span
+                            className="text-xs"
+                            style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                          >
+                            {d.numero || "—"}
+                          </span>
+                          <span
+                            className="text-xs"
+                            style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                          >
+                            {d.dataEmissao || "—"}
+                          </span>
+                          <span
+                            className="text-xs"
+                            style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                          >
+                            {d.validade || "—"}
+                          </span>
+                          <span
+                            className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
+                            style={{ color: cfg.color, background: cfg.bg }}
+                          >
+                            {cfg.label}
+                          </span>
+                          <div className="flex items-center gap-3">
+                            {d.arquivoNome ? (
+                              <>
+                                <button
+                                  onClick={() => handleAbrirDocumento(d)}
+                                  className="text-xs w-fit font-semibold"
+                                  style={{ color: "#3D6E8C" }}
+                                  title={d.arquivoNome}
+                                >
+                                  {abrindoDocumentoId === d.id ? "Abrindo…" : "Abrir"}
+                                </button>
+                                <button
+                                  onClick={() => handleEnviarWhatsapp(d)}
+                                  className="text-xs w-fit font-semibold"
+                                  style={{ color: "#4F7A5B" }}
+                                  title="Enviar este documento pelo WhatsApp"
+                                >
+                                  {enviandoWhatsappId === d.id ? "Enviando…" : "WhatsApp"}
+                                </button>
+                              </>
+                            ) : (
+                              <span className="text-xs" style={{ color: "#8A8D93" }}>Sem arquivo</span>
+                            )}
+                            <button
+                              onClick={() => handleDeleteDocumento(d.id)}
+                              className="text-xs w-fit"
+                              style={{ color: "#B23A2E" }}
+                              title="Excluir documento"
+                            >
+                              Excluir
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              Os arquivos ficam salvos no armazenamento deste painel (visível só para você), com limite
+              recomendado de 3 MB por documento. Para arquivos maiores, mantenha o original em outro lugar
+              e registre aqui apenas os dados (número, datas, observação). O botão "WhatsApp" tenta abrir o
+              menu de compartilhar do aparelho com o arquivo já anexado (funciona melhor no celular); quando
+              isso não é possível, ele baixa o arquivo e abre o WhatsApp para você anexar manualmente.
+            </p>
+          </>
+        )}
+
+        {activeTab === "fornecedores" && (
+          <>
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => {
+                  setTipoRelatorio(null);
+                  setModoRelatorio(true);
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
+              >
+                📄 GERAR RELATÓRIO
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-3 mb-4">
+              <KpiCard eyebrow="Total contratado" value={formatBRLShort(totalContratadoFornecedores)} sub={formatBRL(totalContratadoFornecedores)} />
+              <KpiCard
+                eyebrow="Vencendo em 30 dias"
+                value={`${contratosFornecedoresVencendo}`}
+                sub="renovar em breve"
+                accent={contratosFornecedoresVencendo > 0 ? "#B4590C" : "#22252A"}
+              />
+              <KpiCard
+                eyebrow="Vencidos"
+                value={`${contratosFornecedoresVencidos}`}
+                sub="precisam de atenção"
+                accent={contratosFornecedoresVencidos > 0 ? "#B23A2E" : "#22252A"}
+              />
+              <KpiCard eyebrow="Ativos" value={`${contratosFornecedoresAtivos}`} sub="dentro do prazo" accent="#4F7A5B" />
+            </div>
+
+            <div className="mb-4 flex items-center gap-2 flex-wrap">
+              <label
+                className="text-xs font-semibold uppercase tracking-wide"
+                style={{ color: "#8A8D93", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Filtrar por obra:
+              </label>
+              <select
+                value={filtroObraFornecedores}
+                onChange={(e) => setFiltroObraFornecedores(e.target.value)}
+                className="text-sm px-3 py-1.5 rounded-sm outline-none"
+                style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
+              >
+                <option value="">Todas as obras</option>
+                {NOMES_OBRAS.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </div>
+
+            <section
+              className="rounded-md p-5 border"
+              style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+            >
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2
+                  className="text-sm uppercase tracking-[0.12em] font-semibold"
+                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Contratos de fornecedores
+                </h2>
+                <button
+                  onClick={() => setShowFormFornecedor((s) => !s)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                  style={{
+                    fontFamily: "'Oswald', sans-serif",
+                    letterSpacing: "0.03em",
+                    color: "#F5F3EC",
+                    background: "#3D6E8C",
+                  }}
+                >
+                  {showFormFornecedor ? "CANCELAR" : "+ NOVO CONTRATO"}
+                </button>
+              </div>
+
+              {saveErrorFornecedores && (
+                <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                  {saveErrorFornecedores}
+                </div>
+              )}
+
+              {showFormFornecedor && (
+                <form
+                  onSubmit={handleAddContratoFornecedor}
+                  className="mb-5 p-4 rounded-sm grid grid-cols-1 sm:grid-cols-3 gap-3"
+                  style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                >
+                  <div className="sm:col-span-3 flex items-center gap-3 flex-wrap">
+                    <label
+                      className="text-xs font-semibold px-3 py-1.5 rounded-sm cursor-pointer truncate max-w-full"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: "#22252A",
+                        background: "#E4E0D6",
+                      }}
+                    >
+                      {pdfImportingFornecedor
+                        ? "LENDO PDF…"
+                        : formFornecedor.arquivo
+                        ? `📎 ${formFornecedor.arquivo.name}`
+                        : "📎 ANEXAR CONTRATO (PDF/IMAGEM)"}
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={handleFormFornecedorFile}
+                        disabled={pdfImportingFornecedor}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+
+                  {pdfImportErrorFornecedor && (
+                    <div className="sm:col-span-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                      {pdfImportErrorFornecedor}
+                    </div>
+                  )}
+                  {pdfImportedFieldsFornecedor.length > 0 && (
+                    <div className="sm:col-span-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#4F7A5B", background: "#E8EEE8" }}>
+                      Preenchido automaticamente: {pdfImportedFieldsFornecedor.join(", ")}. Revise os demais campos.
+                    </div>
+                  )}
+
+                  <input
+                    required
+                    placeholder="Fornecedor / subempreiteiro"
+                    value={formFornecedor.fornecedor}
+                    onChange={(e) => setFormFornecedor({ ...formFornecedor, fornecedor: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    placeholder="CNPJ (opcional)"
+                    value={formFornecedor.cnpj}
+                    onChange={(e) => setFormFornecedor({ ...formFornecedor, cnpj: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <select
+                    value={formFornecedor.obra}
+                    onChange={(e) => setFormFornecedor({ ...formFornecedor, obra: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  >
+                    {NOMES_OBRAS.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={formFornecedor.tipo}
+                    onChange={(e) => setFormFornecedor({ ...formFornecedor, tipo: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  >
+                    {TIPOS_FORNECEDOR.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                  <input
+                    required
+                    type="number"
+                    placeholder="Valor do contrato (R$)"
+                    value={formFornecedor.valor}
+                    onChange={(e) => setFormFornecedor({ ...formFornecedor, valor: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    max="60"
+                    placeholder="Nº de parcelas a pagar"
+                    value={formFornecedor.numeroParcelas}
+                    onChange={(e) => setFormFornecedor({ ...formFornecedor, numeroParcelas: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="date"
+                    title="Data de início"
+                    value={dataBRparaISO(formFornecedor.dataInicio)}
+                    onChange={(e) => setFormFornecedor({ ...formFornecedor, dataInicio: dataISOparaBR(e.target.value) })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="date"
+                    title="Data de término/prazo"
+                    value={dataBRparaISO(formFornecedor.dataTermino)}
+                    onChange={(e) => setFormFornecedor({ ...formFornecedor, dataTermino: dataISOparaBR(e.target.value) })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <div className="text-xs flex items-center" style={{ color: "#8A8D93" }}>
+                    As parcelas são lançadas automaticamente em Contas a pagar.
+                  </div>
+                  <input
+                    placeholder="Objeto / escopo do contrato"
+                    value={formFornecedor.objeto}
+                    onChange={(e) => setFormFornecedor({ ...formFornecedor, objeto: e.target.value })}
+                    className="sm:col-span-2 text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    placeholder="Observações (opcional)"
+                    value={formFornecedor.observacoes}
+                    onChange={(e) => setFormFornecedor({ ...formFornecedor, observacoes: e.target.value })}
+                    className="sm:col-span-3 text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+
+                  <button
+                    type="submit"
+                    className="sm:col-span-3 text-xs font-semibold px-3 py-2.5 rounded-sm"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: "#F5F3EC",
+                      background: "#E1590C",
+                    }}
+                  >
+                    SALVAR CONTRATO
+                  </button>
+                </form>
+              )}
+
+              {loadingFornecedores ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Carregando contratos…
+                </div>
+              ) : contratosFornecedoresFiltrados.length === 0 ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  {filtroObraFornecedores
+                    ? "Nenhum contrato de fornecedor para esta obra."
+                    : "Nenhum contrato de fornecedor cadastrado ainda."}
+                </div>
+              ) : (
+                <>
+                  <div className="hidden sm:grid grid-cols-[1.2fr_1fr_1fr_0.9fr_0.9fr_0.9fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <span>Fornecedor</span>
+                    <span>Tipo</span>
+                    <span>Obra</span>
+                    <span>Valor</span>
+                    <span>Término</span>
+                    <span>Status</span>
+                    <span></span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {contratosFornecedoresFiltrados
+                      .slice()
+                      .sort((a, b) => {
+                        const da = diasRestantesContrato(a);
+                        const db = diasRestantesContrato(b);
+                        if (da === null) return 1;
+                        if (db === null) return -1;
+                        return da - db;
+                      })
+                      .map((c) => {
+                        const status = statusContratoFornecedorDisplay(c);
+                        const cfg = statusConfig[status];
+                        return (
+                          <div
+                            key={c.id}
+                            className="grid grid-cols-2 sm:grid-cols-[1.2fr_1fr_1fr_0.9fr_0.9fr_0.9fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                          >
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold truncate" style={{ color: "#22252A" }}>{c.fornecedor}</div>
+                              {c.objeto && (
+                                <div className="text-xs truncate" style={{ color: "#8A8D93" }}>{c.objeto}</div>
+                              )}
+                            </div>
+                            <span className="text-xs" style={{ color: "#6B6F76" }}>{c.tipo}</span>
+                            <span className="text-sm" style={{ color: "#22252A" }}>{c.obra}</span>
+                            <span
+                              className="text-sm"
+                              style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {formatBRLShort(c.valor)}
+                            </span>
+                            <span
+                              className="text-xs"
+                              style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {c.dataTermino || "—"}
+                            </span>
+                            <span
+                              className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
+                              style={{ color: cfg.color, background: cfg.bg }}
+                            >
+                              {cfg.label}
+                            </span>
+                            <div className="flex items-center gap-3">
+                              {c.arquivoNome && (
+                                <button
+                                  onClick={() => handleAbrirAnexoFornecedor(c)}
+                                  className="text-xs w-fit font-semibold"
+                                  style={{ color: "#3D6E8C" }}
+                                  title={c.arquivoNome}
+                                >
+                                  Abrir
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleToggleEncerradoFornecedor(c.id)}
+                                className="text-xs w-fit font-semibold"
+                                style={{ color: c.encerrado ? "#8A8D93" : "#4F7A5B" }}
+                              >
+                                {c.encerrado ? "Reabrir" : "Encerrar"}
+                              </button>
+                              <button
+                                onClick={() => handleDeleteContratoFornecedor(c.id)}
+                                className="text-xs w-fit"
+                                style={{ color: "#B23A2E" }}
+                                title="Excluir contrato"
+                              >
+                                Excluir
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </>
+              )}
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              O painel "Contratos de fornecedores e serviços — atenção a vencimentos" na Visão geral e o
+              KPI "Contratos vencendo" são alimentados por esta aba e pela de Contratos de prestação de
+              serviços. A extração automática do PDF é heurística — confira CNPJ, valor e datas antes de
+              salvar.
+            </p>
+          </>
+        )}
+
+        {activeTab === "servicos" && (
+          <>
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => {
+                  setTipoRelatorio(null);
+                  setModoRelatorio(true);
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
+              >
+                📄 GERAR RELATÓRIO
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-3 mb-4">
+              <KpiCard eyebrow="Total contratado" value={formatBRLShort(totalContratadoServicos)} sub={formatBRL(totalContratadoServicos)} />
+              <KpiCard
+                eyebrow="Vencendo em 30 dias"
+                value={`${contratosServicosVencendo}`}
+                sub="renovar em breve"
+                accent={contratosServicosVencendo > 0 ? "#B4590C" : "#22252A"}
+              />
+              <KpiCard
+                eyebrow="Vencidos"
+                value={`${contratosServicosVencidos}`}
+                sub="precisam de atenção"
+                accent={contratosServicosVencidos > 0 ? "#B23A2E" : "#22252A"}
+              />
+              <KpiCard eyebrow="Ativos" value={`${contratosServicosAtivos}`} sub="dentro do prazo" accent="#4F7A5B" />
+            </div>
+
+            <div className="mb-4 flex items-center gap-2 flex-wrap">
+              <label
+                className="text-xs font-semibold uppercase tracking-wide"
+                style={{ color: "#8A8D93", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Filtrar por obra:
+              </label>
+              <select
+                value={filtroObraServicos}
+                onChange={(e) => setFiltroObraServicos(e.target.value)}
+                className="text-sm px-3 py-1.5 rounded-sm outline-none"
+                style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
+              >
+                <option value="">Todas as obras</option>
+                {NOMES_OBRAS.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+            </div>
+
+            <section
+              className="rounded-md p-5 border"
+              style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+            >
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2
+                  className="text-sm uppercase tracking-[0.12em] font-semibold"
+                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Contratos de prestação de serviços
+                </h2>
+                <button
+                  onClick={() => setShowFormServico((s) => !s)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                  style={{
+                    fontFamily: "'Oswald', sans-serif",
+                    letterSpacing: "0.03em",
+                    color: "#F5F3EC",
+                    background: "#3D6E8C",
+                  }}
+                >
+                  {showFormServico ? "CANCELAR" : "+ NOVO CONTRATO"}
+                </button>
+              </div>
+
+              {saveErrorServicos && (
+                <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                  {saveErrorServicos}
+                </div>
+              )}
+
+              {showFormServico && (
+                <form
+                  onSubmit={handleAddContratoServico}
+                  className="mb-5 p-4 rounded-sm grid grid-cols-1 sm:grid-cols-3 gap-3"
+                  style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                >
+                  <div className="sm:col-span-3 flex items-center gap-3 flex-wrap">
+                    <label
+                      className="text-xs font-semibold px-3 py-1.5 rounded-sm cursor-pointer truncate max-w-full"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: "#22252A",
+                        background: "#E4E0D6",
+                      }}
+                    >
+                      {pdfImportingServico
+                        ? "LENDO PDF…"
+                        : formServico.arquivo
+                        ? `📎 ${formServico.arquivo.name}`
+                        : "📎 ANEXAR CONTRATO (PDF/IMAGEM)"}
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={handleFormServicoFile}
+                        disabled={pdfImportingServico}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+
+                  {pdfImportErrorServico && (
+                    <div className="sm:col-span-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                      {pdfImportErrorServico}
+                    </div>
+                  )}
+                  {pdfImportedFieldsServico.length > 0 && (
+                    <div className="sm:col-span-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#4F7A5B", background: "#E8EEE8" }}>
+                      Preenchido automaticamente: {pdfImportedFieldsServico.join(", ")}. Revise os demais campos.
+                    </div>
+                  )}
+
+                  <input
+                    required
+                    placeholder="Prestador de serviço"
+                    value={formServico.fornecedor}
+                    onChange={(e) => setFormServico({ ...formServico, fornecedor: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    placeholder="CNPJ/CPF (opcional)"
+                    value={formServico.cnpj}
+                    onChange={(e) => setFormServico({ ...formServico, cnpj: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <select
+                    value={formServico.obra}
+                    onChange={(e) => setFormServico({ ...formServico, obra: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  >
+                    {NOMES_OBRAS.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                  <input
+                    required
+                    type="number"
+                    placeholder="Valor do contrato (R$)"
+                    value={formServico.valor}
+                    onChange={(e) => setFormServico({ ...formServico, valor: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    max="60"
+                    placeholder="Nº de parcelas a pagar"
+                    value={formServico.numeroParcelas}
+                    onChange={(e) => setFormServico({ ...formServico, numeroParcelas: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="date"
+                    title="Data de início"
+                    value={dataBRparaISO(formServico.dataInicio)}
+                    onChange={(e) => setFormServico({ ...formServico, dataInicio: dataISOparaBR(e.target.value) })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    type="date"
+                    title="Data de término/prazo"
+                    value={dataBRparaISO(formServico.dataTermino)}
+                    onChange={(e) => setFormServico({ ...formServico, dataTermino: dataISOparaBR(e.target.value) })}
+                    className="text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <div className="text-xs flex items-center" style={{ color: "#8A8D93" }}>
+                    As parcelas são lançadas automaticamente em Contas a pagar.
+                  </div>
+                  <input
+                    placeholder="Objeto / escopo do serviço"
+                    value={formServico.objeto}
+                    onChange={(e) => setFormServico({ ...formServico, objeto: e.target.value })}
+                    className="sm:col-span-2 text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+                  <input
+                    placeholder="Observações (opcional)"
+                    value={formServico.observacoes}
+                    onChange={(e) => setFormServico({ ...formServico, observacoes: e.target.value })}
+                    className="sm:col-span-3 text-sm px-3 py-2 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                  />
+
+                  <button
+                    type="submit"
+                    className="sm:col-span-3 text-xs font-semibold px-3 py-2.5 rounded-sm"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: "#F5F3EC",
+                      background: "#E1590C",
+                    }}
+                  >
+                    SALVAR CONTRATO
+                  </button>
+                </form>
+              )}
+
+              {loadingServicos ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  Carregando contratos…
+                </div>
+              ) : contratosServicosFiltrados.length === 0 ? (
+                <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                  {filtroObraServicos
+                    ? "Nenhum contrato de serviço para esta obra."
+                    : "Nenhum contrato de prestação de serviços cadastrado ainda."}
+                </div>
+              ) : (
+                <>
+                  <div className="hidden sm:grid grid-cols-[1.3fr_1fr_0.9fr_0.9fr_0.9fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <span>Prestador</span>
+                    <span>Obra</span>
+                    <span>Valor</span>
+                    <span>Término</span>
+                    <span>Status</span>
+                    <span></span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {contratosServicosFiltrados
+                      .slice()
+                      .sort((a, b) => {
+                        const da = diasRestantesContrato(a);
+                        const db = diasRestantesContrato(b);
+                        if (da === null) return 1;
+                        if (db === null) return -1;
+                        return da - db;
+                      })
+                      .map((c) => {
+                        const status = statusContratoFornecedorDisplay(c);
+                        const cfg = statusConfig[status];
+                        return (
+                          <div
+                            key={c.id}
+                            className="grid grid-cols-2 sm:grid-cols-[1.3fr_1fr_0.9fr_0.9fr_0.9fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                          >
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold truncate" style={{ color: "#22252A" }}>{c.fornecedor}</div>
+                              {c.objeto && (
+                                <div className="text-xs truncate" style={{ color: "#8A8D93" }}>{c.objeto}</div>
+                              )}
+                            </div>
+                            <span className="text-sm" style={{ color: "#22252A" }}>{c.obra}</span>
+                            <span
+                              className="text-sm"
+                              style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {formatBRLShort(c.valor)}
+                            </span>
+                            <span
+                              className="text-xs"
+                              style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                            >
+                              {c.dataTermino || "—"}
+                            </span>
+                            <span
+                              className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
+                              style={{ color: cfg.color, background: cfg.bg }}
+                            >
+                              {cfg.label}
+                            </span>
+                            <div className="flex items-center gap-3">
+                              {c.arquivoNome && (
+                                <button
+                                  onClick={() => handleAbrirAnexoServico(c)}
+                                  className="text-xs w-fit font-semibold"
+                                  style={{ color: "#3D6E8C" }}
+                                  title={c.arquivoNome}
+                                >
+                                  Abrir
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleToggleEncerradoServico(c.id)}
+                                className="text-xs w-fit font-semibold"
+                                style={{ color: c.encerrado ? "#8A8D93" : "#4F7A5B" }}
+                              >
+                                {c.encerrado ? "Reabrir" : "Encerrar"}
+                              </button>
+                              <button
+                                onClick={() => handleDeleteContratoServico(c.id)}
+                                className="text-xs w-fit"
+                                style={{ color: "#B23A2E" }}
+                                title="Excluir contrato"
+                              >
+                                Excluir
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </>
+              )}
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              Contratos de assessoria, consultoria e outros serviços prestados à empresa ou à obra (ex:
+              contabilidade, jurídico, SESMT). Também alimenta o painel de vencimentos da Visão geral.
+            </p>
+          </>
+        )}
+        </>
+        )}
+      </div>
+    </div>
+  );
+}
