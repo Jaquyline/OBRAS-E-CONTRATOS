@@ -215,6 +215,133 @@ function parseLancamentosExtrato(linhas) {
   return resultado;
 }
 
+const MESES_ABREV_EXTRATO = {
+  JAN: "01", FEV: "02", MAR: "03", ABR: "04", MAI: "05", JUN: "06",
+  JUL: "07", AGO: "08", SET: "09", OUT: "10", NOV: "11", DEZ: "12",
+};
+
+// Extração alternativa para extratos em formato "lista vertical" — comum em
+// extratos exportados direto do aplicativo do banco no celular (em vez de
+// uma tabela com data/descrição/valor lado a lado, cada lançamento aparece
+// em várias linhas empilhadas: uma ou mais linhas de descrição, o valor
+// — ex: "-R$ 324,63" — e por fim um marcador curto de dia+mês — ex:
+// "26AGO"). O ano vem de um cabeçalho "DD de Mês de AAAA" encontrado em
+// qualquer lugar do documento (assume um único ano no extrato). Linhas de
+// saldo ("Saldo do dia", "Saldo Anterior") são ignoradas. Usado como
+// segunda tentativa quando parseLancamentosExtrato não encontra nada.
+function parseLancamentosExtratoVertical(linhas) {
+  let ano = String(new Date().getFullYear());
+  for (const linha of linhas) {
+    const m = linha.match(/\bde\s+[a-zçã]+\s+de\s+(\d{4})\b/i);
+    if (m) {
+      ano = m[1];
+      break;
+    }
+  }
+
+  const resultado = [];
+  let bufferDescricao = [];
+
+  linhas.forEach((linhaOriginal) => {
+    const linha = (linhaOriginal || "").trim();
+    if (!linha) return;
+
+    // Linhas de saldo — não são lançamentos, descarta o que estava acumulado
+    if (/^saldo\s+(do\s+dia|anterior)/i.test(linha)) {
+      bufferDescricao = [];
+      return;
+    }
+
+    // Cabeçalho de data completo ("26 de Agosto de 2026, Quarta-feira")
+    if (/^\d{1,2}\s+de\s+[a-zçã]+\s+de\s+\d{4}/i.test(linha)) {
+      bufferDescricao = [];
+      return;
+    }
+
+    // Textos de interface do app/site que não são lançamentos
+    if (/^(extrato por per[íi]odo|ordenar|compartilhar|voltar)$/i.test(linha)) {
+      return;
+    }
+
+    // Marcador de dia+mês (ex: "26AGO") — fecha o lançamento acumulado
+    const marcadorMatch = linha.match(/^(\d{1,2})([A-Z]{3})$/);
+    if (marcadorMatch) {
+      if (bufferDescricao.length === 0) return; // marcador sem conteúdo antes — ignora
+
+      const [, dia, mesAbrev] = marcadorMatch;
+      const mes = MESES_ABREV_EXTRATO[mesAbrev.toUpperCase()];
+      if (!mes) {
+        bufferDescricao = [];
+        return;
+      }
+
+      // A última linha do buffer traz o valor — sozinha ("-R$ 324,63") ou
+      // junto com uma descrição curta na mesma linha ("Tar Pix -R$ 3,15")
+      const ultimaLinha = bufferDescricao[bufferDescricao.length - 1];
+      const valorMatch = ultimaLinha.match(/^(.*?)\s*(-)?\s?R\$\s?([\d.,]+)\s*$/i);
+      if (!valorMatch) {
+        bufferDescricao = [];
+        return;
+      }
+      const [, descExtra, sinalNeg, valorStr] = valorMatch;
+      const numero = parseFloat(valorStr.replace(/\./g, "").replace(",", "."));
+      if (Number.isNaN(numero)) {
+        bufferDescricao = [];
+        return;
+      }
+      const valor = sinalNeg === "-" ? -Math.abs(numero) : Math.abs(numero);
+
+      const descricaoPartes = bufferDescricao.slice(0, -1);
+      if (descExtra && descExtra.trim()) descricaoPartes.push(descExtra.trim());
+      const descricao = descricaoPartes.join(" ").trim().replace(/\s+/g, " ");
+
+      if (descricao) {
+        resultado.push({
+          id: `tmp-${resultado.length}-${Date.now()}`,
+          data: `${dia.padStart(2, "0")}/${mes}/${ano}`,
+          descricao,
+          valor,
+          socio: "",
+        });
+      }
+      bufferDescricao = [];
+      return;
+    }
+
+    // Linha comum — acumula como parte da descrição (ou descrição+valor)
+    bufferDescricao.push(linha);
+  });
+
+  return resultado;
+}
+
+// Compara uma lista de lançamentos recém-lidos do PDF com o que já está
+// salvo no Extrato bancário e marca como "já lançado" os que baterem
+// exatamente em data + descrição + valor — útil quando o período de um
+// novo extrato se sobrepõe ao de um já importado antes (ex: exportar
+// "últimos 30 dias" todo mês). Não remove nada sozinho: só marca a linha
+// na prévia, o usuário decide se pula ou inclui mesmo assim.
+function normalizarDescricaoExtrato(texto) {
+  return (texto || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function marcarDuplicadosExtrato(lancamentosNovos, extratoExistente) {
+  const existentesChaves = new Set(
+    extratoExistente.map(
+      (l) => `${l.data}|${normalizarDescricaoExtrato(l.descricao)}|${Number(l.valor).toFixed(2)}`
+    )
+  );
+  return lancamentosNovos.map((l) => {
+    const chave = `${l.data}|${normalizarDescricaoExtrato(l.descricao)}|${Number(l.valor).toFixed(2)}`;
+    return { ...l, jaLancado: existentesChaves.has(chave), incluirMesmoAssim: false };
+  });
+}
+
 // Extração heurística de número, data de emissão e validade a partir do
 // texto de um PDF de documento da empresa — funciona melhor como ponto de
 // partida; confira e complete os campos antes de salvar.
@@ -2574,13 +2701,16 @@ export default function DashboardConstrutora() {
     setPdfImportErrorExtrato(null);
     try {
       const linhas = await extractLinesFromPdf(file);
-      const lancamentos = parseLancamentosExtrato(linhas);
+      let lancamentos = parseLancamentosExtrato(linhas);
+      if (lancamentos.length === 0) {
+        lancamentos = parseLancamentosExtratoVertical(linhas);
+      }
       if (lancamentos.length === 0) {
         setPdfImportErrorExtrato(
           "Não consegui reconhecer lançamentos neste PDF. O formato deste extrato pode ser diferente do esperado — tente adicionar manualmente."
         );
       } else {
-        setExtratoPreview(lancamentos);
+        setExtratoPreview(marcarDuplicadosExtrato(lancamentos, extrato));
       }
     } catch (err) {
       setPdfImportErrorExtrato("Não foi possível ler esse PDF.");
@@ -2601,8 +2731,18 @@ export default function DashboardConstrutora() {
     setExtratoPreview((prev) => prev.filter((l) => l.id !== id));
   }
 
+  // Alterna se um lançamento marcado como "já lançado" deve ser incluído
+  // mesmo assim (caso a coincidência de data+descrição+valor seja mesmo
+  // uma coincidência, e não uma duplicata de verdade).
+  function handleToggleIncluirDuplicado(id) {
+    setExtratoPreview((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, incluirMesmoAssim: !l.incluirMesmoAssim } : l))
+    );
+  }
+
   function handleConfirmImportExtrato() {
-    const confirmados = extratoPreview.map((l, i) => ({
+    const paraImportar = extratoPreview.filter((l) => !l.jaLancado || l.incluirMesmoAssim);
+    const confirmados = paraImportar.map((l, i) => ({
       id: Date.now() + i,
       data: l.data,
       descricao: l.descricao,
@@ -3410,51 +3550,6 @@ export default function DashboardConstrutora() {
     .map((g) => ({ ...g, saldoAReceber: g.valorTotal - g.recebido }))
     .sort((a, b) => b.saldoAReceber - a.saldoAReceber);
 
-  // Apaga todos os dados salvos neste painel (inclusive o que já estiver
-  // gravado no armazenamento do navegador — mudar os dados padrão no código
-  // não limpa o que já foi salvo antes) e volta tudo ao estado vazio.
-  async function handleLimparTodosDados() {
-    const confirmado = window.confirm(
-      "Isso apaga TODOS os dados salvos neste painel (contratos, notas, contas a pagar, extrato, sócios, documentos, custos, unidades, fornecedores e serviços) e não pode ser desfeito. Continuar?"
-    );
-    if (!confirmado) return;
-
-    const chaves = [
-      STORAGE_KEY,
-      STORAGE_KEY_RECEBER,
-      STORAGE_KEY_NOTAS,
-      STORAGE_KEY_PAGAR,
-      STORAGE_KEY_EXTRATO,
-      STORAGE_KEY_SOCIOS,
-      STORAGE_KEY_DOCUMENTOS,
-      STORAGE_KEY_OBRAS,
-      STORAGE_KEY_CUSTOS,
-      STORAGE_KEY_FORNECEDORES,
-      STORAGE_KEY_SERVICOS,
-      STORAGE_KEY_UNIDADES,
-    ];
-    for (const chave of chaves) {
-      try {
-        await window.storage.delete(chave, false);
-      } catch (err) {
-        // chave pode já não existir — segue normalmente
-      }
-    }
-
-    setContratosCV([]);
-    setValoresReceber([]);
-    setNotasCompra([]);
-    setContasPagar([]);
-    setExtrato([]);
-    setEmprestimosSocios([]);
-    setDocumentos([]);
-    setObrasState(obrasIniciais);
-    setCustosItens(defaultCustosItens);
-    setContratosFornecedores([]);
-    setContratosServicos([]);
-    setUnidadesObra([]);
-  }
-
   return (
     <div
       id="painel-obras-contratos"
@@ -3509,14 +3604,6 @@ export default function DashboardConstrutora() {
               }}
             >
               📄 GERAR RELATÓRIO
-            </button>
-            <button
-              onClick={handleLimparTodosDados}
-              className="text-xs px-2 py-1.5 rounded-sm"
-              style={{ color: "#9BA0A6", background: "transparent", border: "1px solid #3A3E45" }}
-              title="Apaga todos os dados salvos neste painel, inclusive o que já estiver gravado no armazenamento"
-            >
-              🗑 Limpar dados
             </button>
           </div>
         </header>
@@ -5653,11 +5740,17 @@ export default function DashboardConstrutora() {
                 </div>
               )}
 
-              {extratoPreview.length > 0 && (
+              {extratoPreview.length > 0 && (() => {
+                const qtdDuplicados = extratoPreview.filter((l) => l.jaLancado && !l.incluirMesmoAssim).length;
+                return (
                 <div className="mb-5 p-4 rounded-sm" style={{ background: "#FFFFFF", border: "1px solid #3D6E8C" }}>
                   <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                     <span className="text-xs font-semibold" style={{ color: "#22252A" }}>
-                      {extratoPreview.length} lançamento(s) encontrados no PDF — revise antes de confirmar
+                      {extratoPreview.length} lançamento(s) encontrados no PDF
+                      {qtdDuplicados > 0
+                        ? ` — ${qtdDuplicados} já lançado(s) antes (serão pulados)`
+                        : ""}{" "}
+                      — revise antes de confirmar
                     </span>
                     <div className="flex gap-2">
                       <button
@@ -5676,22 +5769,28 @@ export default function DashboardConstrutora() {
                       </button>
                     </div>
                   </div>
-                  <div className="hidden sm:grid grid-cols-[0.8fr_1.4fr_0.8fr_0.6fr_1fr_auto] gap-2 px-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[0.8fr_1.2fr_0.7fr_0.6fr_0.9fr_0.9fr_auto] gap-2 px-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Data</span>
                     <span>Descrição</span>
                     <span>Valor</span>
                     <span>Tipo</span>
+                    <span>Status</span>
                     <span>Sócio</span>
                     <span></span>
                   </div>
                   <div className="space-y-2">
                     {extratoPreview.map((l) => {
                       const cfg = tipoExtratoConfig(l.valor);
+                      const pulandoDuplicado = l.jaLancado && !l.incluirMesmoAssim;
                       return (
                         <div
                           key={l.id}
-                          className="grid grid-cols-2 sm:grid-cols-[0.8fr_1.4fr_0.8fr_0.6fr_1fr_auto] gap-2 items-center rounded-sm px-2 py-2"
-                          style={{ border: "1px solid #E4E0D6" }}
+                          className="grid grid-cols-2 sm:grid-cols-[0.8fr_1.2fr_0.7fr_0.6fr_0.9fr_0.9fr_auto] gap-2 items-center rounded-sm px-2 py-2"
+                          style={{
+                            border: pulandoDuplicado ? "1px solid #E4C9A8" : "1px solid #E4E0D6",
+                            background: pulandoDuplicado ? "#FBF6ED" : "transparent",
+                            opacity: pulandoDuplicado ? 0.7 : 1,
+                          }}
                         >
                           <input
                             value={l.data}
@@ -5726,6 +5825,28 @@ export default function DashboardConstrutora() {
                           >
                             {cfg.label}
                           </button>
+                          <div className="flex flex-col items-start gap-1">
+                            {l.jaLancado && (
+                              <span
+                                className="text-[9.5px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded-full w-fit"
+                                style={{
+                                  color: pulandoDuplicado ? "#8A6A3E" : "#4F7A5B",
+                                  background: pulandoDuplicado ? "#F3E4C8" : "#E8EEE8",
+                                }}
+                              >
+                                {pulandoDuplicado ? "Já lançado" : "Incluindo mesmo assim"}
+                              </span>
+                            )}
+                            {l.jaLancado && (
+                              <button
+                                onClick={() => handleToggleIncluirDuplicado(l.id)}
+                                className="text-[10px] font-semibold"
+                                style={{ color: "#3D6E8C" }}
+                              >
+                                {pulandoDuplicado ? "Validar e incluir" : "Pular esse"}
+                              </button>
+                            )}
+                          </div>
                           <input
                             placeholder="Sócio (opcional)"
                             value={l.socio || ""}
@@ -5745,7 +5866,8 @@ export default function DashboardConstrutora() {
                     })}
                   </div>
                 </div>
-              )}
+                );
+              })()}
 
               {showFormExtrato && (
                 <form
