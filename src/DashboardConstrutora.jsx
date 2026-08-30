@@ -5007,21 +5007,21 @@ export default function DashboardConstrutora() {
                               onChange={(e) => handleUpdateUnidadeCampo(u.id, "unidade", e.target.value)}
                               onBlur={handlePersistUnidadesBlur}
                               className="text-sm font-semibold px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0, width: "100%" }}
                             />
                             <input
                               value={u.andar}
                               onChange={(e) => handleUpdateUnidadeCampo(u.id, "andar", e.target.value)}
                               onBlur={handlePersistUnidadesBlur}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0, width: "100%" }}
                             />
                             <input
                               value={u.tipo}
                               onChange={(e) => handleUpdateUnidadeCampo(u.id, "tipo", e.target.value)}
                               onBlur={handlePersistUnidadesBlur}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0, width: "100%" }}
                             />
                             <input
                               type="number"
@@ -5029,7 +5029,7 @@ export default function DashboardConstrutora() {
                               onChange={(e) => handleUpdateUnidadeCampo(u.id, "metragem", Number(e.target.value) || 0)}
                               onBlur={handlePersistUnidadesBlur}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", fontFamily: "'IBM Plex Mono', monospace", minWidth: 0, width: "100%" }}
                             />
                             <input
                               type="number"
@@ -5037,7 +5037,7 @@ export default function DashboardConstrutora() {
                               onChange={(e) => handleUpdateUnidadeCampo(u.id, "valorVenda", Number(e.target.value) || 0)}
                               onBlur={handlePersistUnidadesBlur}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0, width: "100%" }}
                             />
                             <span
                               className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
