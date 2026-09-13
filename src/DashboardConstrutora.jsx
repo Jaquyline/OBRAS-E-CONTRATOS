@@ -5083,7 +5083,7 @@ export default function DashboardConstrutora() {
                 </div>
               ) : (
                 <>
-                  <div className="hidden sm:grid grid-cols-[1fr_0.6fr_1fr_0.8fr_1fr_1fr_1.1fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[1fr_0.6fr_1fr_0.8fr_1fr_1fr_1.6fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Unidade</span>
                     <span>Andar</span>
                     <span>Tipo</span>
@@ -5104,7 +5104,7 @@ export default function DashboardConstrutora() {
                         return (
                           <div
                             key={u.id}
-                            className="grid grid-cols-2 sm:grid-cols-[1fr_0.6fr_1fr_0.8fr_1fr_1fr_1.1fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            className="grid grid-cols-2 sm:grid-cols-[1fr_0.6fr_1fr_0.8fr_1fr_1fr_1.6fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
                             {editando ? (
@@ -5149,9 +5149,9 @@ export default function DashboardConstrutora() {
                               </>
                             ) : (
                               <>
-                                <span className="text-sm font-semibold truncate" style={{ color: "#22252A" }}>{u.unidade}</span>
-                                <span className="text-xs truncate" style={{ color: "#6B6F76" }}>{u.andar || "—"}</span>
-                                <span className="text-xs truncate" style={{ color: "#6B6F76" }}>{u.tipo || "—"}</span>
+                                <span className="text-sm font-semibold truncate min-w-0" style={{ color: "#22252A" }}>{u.unidade}</span>
+                                <span className="text-xs truncate min-w-0" style={{ color: "#6B6F76" }}>{u.andar || "—"}</span>
+                                <span className="text-xs truncate min-w-0" style={{ color: "#6B6F76" }}>{u.tipo || "—"}</span>
                                 <span className="text-xs" style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}>
                                   {u.metragem ? `${u.metragem} m²` : "—"}
                                 </span>
@@ -5166,7 +5166,7 @@ export default function DashboardConstrutora() {
                             >
                               {cfg.label}
                             </span>
-                            <span className="text-xs truncate" style={{ color: "#6B6F76" }}>
+                            <span className="text-xs min-w-0" style={{ color: "#6B6F76" }}>
                               {u.contratoVinculado ? u.contratoVinculado.comprador : "—"}
                             </span>
                             <div className="flex items-center gap-3 flex-wrap">
@@ -5479,7 +5479,7 @@ export default function DashboardConstrutora() {
                 </div>
               ) : (
                 <>
-                  <div className="hidden sm:grid grid-cols-[1.2fr_1fr_1fr_1.3fr_0.8fr_0.8fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[1.2fr_1.8fr_1fr_1.3fr_0.8fr_0.8fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Unidade</span>
                     <span>Comprador</span>
                     <span>Valor</span>
@@ -5495,11 +5495,11 @@ export default function DashboardConstrutora() {
                       return (
                         <div
                           key={c.id}
-                          className="grid grid-cols-2 sm:grid-cols-[1.2fr_1fr_1fr_1.3fr_0.8fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                          className="grid grid-cols-2 sm:grid-cols-[1.2fr_1.8fr_1fr_1.3fr_0.8fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                           style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                         >
                           <span className="text-sm font-semibold truncate min-w-0" title={c.unidade} style={{ color: "#22252A" }}>{c.unidade}</span>
-                          <span className="text-sm truncate min-w-0" title={c.comprador} style={{ color: "#22252A" }}>{c.comprador}</span>
+                          <span className="text-sm min-w-0" style={{ color: "#22252A" }}>{c.comprador}</span>
                           <span
                             className="text-sm"
                             style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
@@ -5602,7 +5602,7 @@ export default function DashboardConstrutora() {
                   </div>
                 ) : (
                   <>
-                    <div className="hidden sm:grid grid-cols-[1fr_0.8fr_0.5fr_0.7fr_0.5fr_0.5fr_0.75fr_0.8fr_0.75fr_auto] gap-2 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <div className="hidden sm:grid grid-cols-[1.6fr_0.8fr_0.5fr_0.7fr_0.5fr_0.5fr_0.75fr_0.8fr_0.75fr_auto] gap-2 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                       <span>Cliente</span>
                       <span>Unidade</span>
                       <span>Parcela</span>
@@ -5621,10 +5621,10 @@ export default function DashboardConstrutora() {
                         return (
                           <div
                             key={v.id}
-                            className="grid grid-cols-2 sm:grid-cols-[1fr_0.8fr_0.5fr_0.7fr_0.5fr_0.5fr_0.75fr_0.8fr_0.75fr_auto] gap-2 items-center rounded-sm px-3 py-3"
+                            className="grid grid-cols-2 sm:grid-cols-[1.6fr_0.8fr_0.5fr_0.7fr_0.5fr_0.5fr_0.75fr_0.8fr_0.75fr_auto] gap-2 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
-                            <span className="text-sm font-semibold truncate" style={{ color: "#22252A" }}>
+                            <span className="text-sm font-semibold min-w-0" style={{ color: "#22252A" }}>
                               {v.comprador}
                             </span>
                             <span className="text-sm" style={{ color: "#22252A" }}>{v.unidade}</span>
@@ -5909,7 +5909,7 @@ export default function DashboardConstrutora() {
                 </div>
               ) : (
                 <>
-                  <div className="hidden sm:grid grid-cols-[1.4fr_1fr_1fr_1fr_0.8fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[2.2fr_1fr_1fr_1fr_0.8fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Fornecedor</span>
                     <span>Obra</span>
                     <span>Valor total</span>
@@ -5925,10 +5925,10 @@ export default function DashboardConstrutora() {
                       .map((n) => (
                         <div
                           key={n.id}
-                          className="grid grid-cols-2 sm:grid-cols-[1.4fr_1fr_1fr_1fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                          className="grid grid-cols-2 sm:grid-cols-[2.2fr_1fr_1fr_1fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                           style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                         >
-                          <span className="text-sm font-semibold truncate min-w-0" title={n.fornecedor} style={{ color: "#22252A" }}>{n.fornecedor}</span>
+                          <span className="text-sm font-semibold min-w-0" style={{ color: "#22252A" }}>{n.fornecedor}</span>
                           <span className="text-sm truncate min-w-0" title={n.obra} style={{ color: "#22252A" }}>{n.obra}</span>
                           <span
                             className="text-sm"
@@ -6118,7 +6118,7 @@ export default function DashboardConstrutora() {
                 </div>
               ) : (
                 <>
-                  <div className="hidden sm:grid grid-cols-[0.9fr_0.7fr_0.5fr_0.65fr_0.45fr_0.45fr_0.7fr_0.75fr_0.7fr_1.1fr_auto] gap-2 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[2.2fr_0.7fr_0.5fr_0.65fr_0.45fr_0.45fr_0.7fr_0.75fr_0.7fr_1.1fr_auto] gap-2 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Fornecedor</span>
                     <span>Obra</span>
                     <span>Parcela</span>
@@ -6143,10 +6143,10 @@ export default function DashboardConstrutora() {
                         return (
                           <div
                             key={c.id}
-                            className="grid grid-cols-2 sm:grid-cols-[0.9fr_0.7fr_0.5fr_0.65fr_0.45fr_0.45fr_0.7fr_0.75fr_0.7fr_1.1fr_auto] gap-2 items-center rounded-sm px-3 py-3"
+                            className="grid grid-cols-2 sm:grid-cols-[2.2fr_0.7fr_0.5fr_0.65fr_0.45fr_0.45fr_0.7fr_0.75fr_0.7fr_1.1fr_auto] gap-2 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
-                            <span className="text-sm font-semibold truncate min-w-0" title={c.fornecedor} style={{ color: "#22252A" }}>{c.fornecedor}</span>
+                            <span className="text-sm font-semibold min-w-0" style={{ color: "#22252A" }}>{c.fornecedor}</span>
                             <span className="text-sm truncate min-w-0" title={c.obra} style={{ color: "#22252A" }}>{c.obra}</span>
                             <span
                               className="text-xs"
@@ -6580,7 +6580,7 @@ export default function DashboardConstrutora() {
                 </div>
               ) : (
                 <>
-                  <div className="hidden sm:grid grid-cols-[0.7fr_1.2fr_0.7fr_0.55fr_0.8fr_1.3fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[0.7fr_2.2fr_0.7fr_0.55fr_0.8fr_1.3fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Data</span>
                     <span>Descrição</span>
                     <span>Valor</span>
@@ -6601,7 +6601,7 @@ export default function DashboardConstrutora() {
                         return (
                           <div
                             key={l.id}
-                            className="grid grid-cols-2 sm:grid-cols-[0.7fr_1.2fr_0.7fr_0.55fr_0.8fr_1.3fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            className="grid grid-cols-2 sm:grid-cols-[0.7fr_2.2fr_0.7fr_0.55fr_0.8fr_1.3fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
                             <span
@@ -6610,7 +6610,7 @@ export default function DashboardConstrutora() {
                             >
                               {l.data}
                             </span>
-                            <span className="text-sm truncate min-w-0" title={l.descricao} style={{ color: "#22252A" }}>{l.descricao}</span>
+                            <span className="text-sm min-w-0" style={{ color: "#22252A" }}>{l.descricao}</span>
                             <span
                               className="text-sm"
                               style={{ color: l.valor >= 0 ? "#4F7A5B" : "#B23A2E", fontFamily: "'IBM Plex Mono', monospace" }}
@@ -6904,7 +6904,7 @@ export default function DashboardConstrutora() {
                 </div>
               ) : (
                 <>
-                  <div className="hidden sm:grid grid-cols-[1fr_1.1fr_0.8fr_0.7fr_0.9fr_1fr_0.8fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[1fr_1.1fr_0.8fr_0.7fr_0.9fr_1.8fr_0.8fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Sócio</span>
                     <span>Tipo</span>
                     <span>Valor</span>
@@ -6924,7 +6924,7 @@ export default function DashboardConstrutora() {
                         return (
                           <div
                             key={e.id}
-                            className="grid grid-cols-2 sm:grid-cols-[1fr_1.1fr_0.8fr_0.7fr_0.9fr_1fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            className="grid grid-cols-2 sm:grid-cols-[1fr_1.1fr_0.8fr_0.7fr_0.9fr_1.8fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
                             <span className="text-sm font-semibold truncate min-w-0" title={e.socio} style={{ color: "#22252A" }}>{e.socio}</span>
@@ -6951,7 +6951,7 @@ export default function DashboardConstrutora() {
                               {e.data}
                             </span>
                             <span className="text-xs" style={{ color: "#6B6F76" }}>{e.obra || "—"}</span>
-                            <span className="text-xs truncate" style={{ color: "#8A8D93" }}>{e.observacao}</span>
+                            <span className="text-xs min-w-0" style={{ color: "#8A8D93" }}>{e.observacao}</span>
                             <span className="text-xs" style={{ color: "#8A8D93" }}>
                               {e.origem === "extrato" ? "Extrato bancário" : "Manual"}
                             </span>
@@ -7180,7 +7180,7 @@ export default function DashboardConstrutora() {
                 </div>
               ) : (
                 <>
-                  <div className="hidden sm:grid grid-cols-[1fr_0.8fr_0.9fr_0.9fr_0.6fr_0.8fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[1.6fr_0.8fr_0.9fr_0.9fr_0.6fr_0.8fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Banco</span>
                     <span>Obra</span>
                     <span>Valor contratado</span>
@@ -7193,10 +7193,10 @@ export default function DashboardConstrutora() {
                     {emprestimosBancariosFiltrados.map((e) => (
                       <div
                         key={e.id}
-                        className="grid grid-cols-2 sm:grid-cols-[1fr_0.8fr_0.9fr_0.9fr_0.6fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                        className="grid grid-cols-2 sm:grid-cols-[1.6fr_0.8fr_0.9fr_0.9fr_0.6fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                         style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                       >
-                        <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{e.banco}</span>
+                        <span className="text-sm font-semibold min-w-0" style={{ color: "#22252A" }}>{e.banco}</span>
                         <span className="text-xs" style={{ color: "#6B6F76" }}>{e.obra}</span>
                         <span className="text-xs" style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}>
                           {formatBRLShort(e.valorContratado)}
@@ -7535,10 +7535,10 @@ export default function DashboardConstrutora() {
                       return (
                         <div
                           key={d.id}
-                          className="grid grid-cols-2 sm:grid-cols-[1.3fr_0.9fr_0.8fr_0.8fr_0.9fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                          className="grid grid-cols-2 sm:grid-cols-[2fr_0.9fr_0.8fr_0.8fr_0.9fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                           style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                         >
-                          <span className="text-sm font-semibold truncate min-w-0" title={d.nome} style={{ color: "#22252A" }}>{d.nome}</span>
+                          <span className="text-sm font-semibold min-w-0" style={{ color: "#22252A" }}>{d.nome}</span>
                           <span
                             className="text-xs"
                             style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
@@ -7852,7 +7852,7 @@ export default function DashboardConstrutora() {
                 </div>
               ) : (
                 <>
-                  <div className="hidden sm:grid grid-cols-[1.2fr_1fr_1fr_0.9fr_0.9fr_0.9fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr_0.9fr_0.9fr_0.9fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Fornecedor</span>
                     <span>Tipo</span>
                     <span>Obra</span>
@@ -7878,13 +7878,13 @@ export default function DashboardConstrutora() {
                         return (
                           <div
                             key={c.id}
-                            className="grid grid-cols-2 sm:grid-cols-[1.2fr_1fr_1fr_0.9fr_0.9fr_0.9fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            className="grid grid-cols-2 sm:grid-cols-[2fr_1fr_1fr_0.9fr_0.9fr_0.9fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
                             <div className="min-w-0">
-                              <div className="text-sm font-semibold truncate" style={{ color: "#22252A" }}>{c.fornecedor}</div>
+                              <div className="text-sm font-semibold" style={{ color: "#22252A" }}>{c.fornecedor}</div>
                               {c.objeto && (
-                                <div className="text-xs truncate" style={{ color: "#8A8D93" }}>{c.objeto}</div>
+                                <div className="text-xs" style={{ color: "#8A8D93" }}>{c.objeto}</div>
                               )}
                             </div>
                             <span className="text-xs" style={{ color: "#6B6F76" }}>{c.tipo}</span>
@@ -8181,7 +8181,7 @@ export default function DashboardConstrutora() {
                 </div>
               ) : (
                 <>
-                  <div className="hidden sm:grid grid-cols-[1.3fr_1fr_0.9fr_0.9fr_0.9fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[2.1fr_1fr_0.9fr_0.9fr_0.9fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Prestador</span>
                     <span>Obra</span>
                     <span>Valor</span>
@@ -8206,13 +8206,13 @@ export default function DashboardConstrutora() {
                         return (
                           <div
                             key={c.id}
-                            className="grid grid-cols-2 sm:grid-cols-[1.3fr_1fr_0.9fr_0.9fr_0.9fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            className="grid grid-cols-2 sm:grid-cols-[2.1fr_1fr_0.9fr_0.9fr_0.9fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
                             <div className="min-w-0">
-                              <div className="text-sm font-semibold truncate" style={{ color: "#22252A" }}>{c.fornecedor}</div>
+                              <div className="text-sm font-semibold" style={{ color: "#22252A" }}>{c.fornecedor}</div>
                               {c.objeto && (
-                                <div className="text-xs truncate" style={{ color: "#8A8D93" }}>{c.objeto}</div>
+                                <div className="text-xs" style={{ color: "#8A8D93" }}>{c.objeto}</div>
                               )}
                             </div>
                             <span className="text-sm" style={{ color: "#22252A" }}>{c.obra}</span>
