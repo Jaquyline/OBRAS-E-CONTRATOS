@@ -2886,6 +2886,16 @@ export default function DashboardConstrutora() {
   const [selecionadosLancamentos, setSelecionadosLancamentos] = useState(() => new Set());
   const [lancamentosDesbloqueados, setLancamentosDesbloqueados] = useState(() => new Set());
 
+  // Filtros da aba Lançamentos, no mesmo estilo da Nibo (Buscar por, Data,
+  // Valor, Tipo, Status) — só filtram a visualização, nada é salvo.
+  const [filtroLancBusca, setFiltroLancBusca] = useState("");
+  const [filtroLancDataDe, setFiltroLancDataDe] = useState("");
+  const [filtroLancDataAte, setFiltroLancDataAte] = useState("");
+  const [filtroLancValorMin, setFiltroLancValorMin] = useState("");
+  const [filtroLancValorMax, setFiltroLancValorMax] = useState("");
+  const [filtroLancTipo, setFiltroLancTipo] = useState("");
+  const [filtroLancStatus, setFiltroLancStatus] = useState("");
+
   // Plano de contas (contabilidade) — editável pelo usuário na aba própria;
   // começa com o plano de contas padrão só na primeira vez (nada salvo ainda).
   const [planoContas, setPlanoContas] = useState([]);
@@ -4036,6 +4046,18 @@ export default function DashboardConstrutora() {
     const ids = selecionadosLancamentos;
     persistExtrato(extrato.filter((l) => !ids.has(l.id)));
     limparSelecaoLancamentos();
+  }
+
+  // Limpa os filtros da aba Lançamentos (Buscar por/Data/Valor/Tipo/Status),
+  // no mesmo estilo do botão de filtros da Nibo.
+  function limparFiltrosLancamentos() {
+    setFiltroLancBusca("");
+    setFiltroLancDataDe("");
+    setFiltroLancDataAte("");
+    setFiltroLancValorMin("");
+    setFiltroLancValorMax("");
+    setFiltroLancTipo("");
+    setFiltroLancStatus("");
   }
 
   // Exporta os lançamentos do extrato (com a classificação de Débito/Crédito
@@ -7841,6 +7863,121 @@ export default function DashboardConstrutora() {
                 </form>
               )}
 
+              {!loadingExtrato && extrato.length > 0 && (
+                <div
+                  className="mb-4 p-3 rounded-sm flex flex-wrap items-end gap-3"
+                  style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                >
+                  <div style={{ minWidth: 170 }}>
+                    <label className="block text-[10px] uppercase tracking-wide font-semibold mb-1" style={{ color: "#8A8D93" }}>
+                      Buscar por
+                    </label>
+                    <input
+                      value={filtroLancBusca}
+                      onChange={(e) => setFiltroLancBusca(e.target.value)}
+                      placeholder="Descrição..."
+                      className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                      style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                    />
+                  </div>
+                  <div style={{ minWidth: 135 }}>
+                    <label className="block text-[10px] uppercase tracking-wide font-semibold mb-1" style={{ color: "#8A8D93" }}>
+                      Data de
+                    </label>
+                    <input
+                      type="date"
+                      value={filtroLancDataDe}
+                      onChange={(e) => setFiltroLancDataDe(e.target.value)}
+                      className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                      style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                    />
+                  </div>
+                  <div style={{ minWidth: 135 }}>
+                    <label className="block text-[10px] uppercase tracking-wide font-semibold mb-1" style={{ color: "#8A8D93" }}>
+                      Data até
+                    </label>
+                    <input
+                      type="date"
+                      value={filtroLancDataAte}
+                      onChange={(e) => setFiltroLancDataAte(e.target.value)}
+                      className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                      style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                    />
+                  </div>
+                  <div style={{ minWidth: 90 }}>
+                    <label className="block text-[10px] uppercase tracking-wide font-semibold mb-1" style={{ color: "#8A8D93" }}>
+                      Valor mín.
+                    </label>
+                    <input
+                      type="number"
+                      placeholder="Min"
+                      value={filtroLancValorMin}
+                      onChange={(e) => setFiltroLancValorMin(e.target.value)}
+                      className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                      style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                    />
+                  </div>
+                  <div style={{ minWidth: 90 }}>
+                    <label className="block text-[10px] uppercase tracking-wide font-semibold mb-1" style={{ color: "#8A8D93" }}>
+                      Valor máx.
+                    </label>
+                    <input
+                      type="number"
+                      placeholder="Max"
+                      value={filtroLancValorMax}
+                      onChange={(e) => setFiltroLancValorMax(e.target.value)}
+                      className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                      style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                    />
+                  </div>
+                  <div style={{ minWidth: 115 }}>
+                    <label className="block text-[10px] uppercase tracking-wide font-semibold mb-1" style={{ color: "#8A8D93" }}>
+                      Tipo
+                    </label>
+                    <select
+                      value={filtroLancTipo}
+                      onChange={(e) => setFiltroLancTipo(e.target.value)}
+                      className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                      style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                    >
+                      <option value="">Todos</option>
+                      <option value="credito">Crédito</option>
+                      <option value="debito">Débito</option>
+                    </select>
+                  </div>
+                  <div style={{ minWidth: 115 }}>
+                    <label className="block text-[10px] uppercase tracking-wide font-semibold mb-1" style={{ color: "#8A8D93" }}>
+                      Status
+                    </label>
+                    <select
+                      value={filtroLancStatus}
+                      onChange={(e) => setFiltroLancStatus(e.target.value)}
+                      className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                      style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                    >
+                      <option value="">Todos</option>
+                      <option value="lancado">Lançado</option>
+                      <option value="pendente">Pendente</option>
+                    </select>
+                  </div>
+                  {(filtroLancBusca ||
+                    filtroLancDataDe ||
+                    filtroLancDataAte ||
+                    filtroLancValorMin !== "" ||
+                    filtroLancValorMax !== "" ||
+                    filtroLancTipo ||
+                    filtroLancStatus) && (
+                    <button
+                      onClick={limparFiltrosLancamentos}
+                      className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                      style={{ color: "#3D6E8C" }}
+                    >
+                      Limpar filtros
+                    </button>
+                  )}
+                </div>
+              )}
+
               {loadingExtrato ? (
                 <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
                   Carregando extrato…
@@ -7850,7 +7987,33 @@ export default function DashboardConstrutora() {
                   Nenhum lançamento ainda. Importe um PDF ou adicione manualmente.
                 </div>
               ) : (() => {
-                const extratoOrdenado = extrato
+                const buscaLancNormalizada = normalizarDescricaoExtrato(filtroLancBusca);
+                const filtroDataDeObj = filtroLancDataDe ? new Date(filtroLancDataDe + "T00:00:00") : null;
+                const filtroDataAteObj = filtroLancDataAte ? new Date(filtroLancDataAte + "T23:59:59") : null;
+                const extratoFiltrado = extrato.filter((l) => {
+                  if (buscaLancNormalizada && !normalizarDescricaoExtrato(l.descricao).includes(buscaLancNormalizada)) {
+                    return false;
+                  }
+                  const dataLanc = parseDateBR(l.data);
+                  if (filtroDataDeObj && (!dataLanc || dataLanc < filtroDataDeObj)) return false;
+                  if (filtroDataAteObj && (!dataLanc || dataLanc > filtroDataAteObj)) return false;
+                  if (filtroLancValorMin !== "" && Math.abs(l.valor) < Number(filtroLancValorMin)) return false;
+                  if (filtroLancValorMax !== "" && Math.abs(l.valor) > Number(filtroLancValorMax)) return false;
+                  if (filtroLancTipo === "credito" && l.valor < 0) return false;
+                  if (filtroLancTipo === "debito" && l.valor >= 0) return false;
+                  if (filtroLancStatus && statusClassificacaoContabil(l) !== filtroLancStatus) return false;
+                  return true;
+                });
+
+                if (extratoFiltrado.length === 0) {
+                  return (
+                    <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+                      Nenhum lançamento encontrado com esse filtro.
+                    </div>
+                  );
+                }
+
+                const extratoOrdenado = extratoFiltrado
                   .slice()
                   .sort((a, b) => (parseDateBR(b.data) || 0) - (parseDateBR(a.data) || 0));
                 const todosSelecionados =
