@@ -83,6 +83,328 @@ const MESES = {
   outubro: "10", novembro: "11", dezembro: "12",
 };
 
+// Plano de contas padrão (semente inicial) — copiado do plano de contas real
+// da J & G Incorporadora Ltda (fornecido pelo usuário), contendo apenas as
+// contas analíticas (que recebem lançamento). Usado só na primeira vez que o
+// painel carrega, se ainda não houver nada salvo — a partir daí o usuário edita
+// livremente pela aba "Plano de contas" (adicionar, renomear, remover conta).
+const PLANO_CONTAS_PADRAO = [
+  { id: "conta-1.1.10.101", codigo: "1.1.10.101", nome: "CAIXA GERAL", tipo: "ativo" },
+  { id: "conta-1.1.10.200.1", codigo: "1.1.10.200.1", nome: "BANCO COOP CREDCREA, 085 AILOS, AG: 0106, CONTA: 33.355-7", tipo: "ativo" },
+  { id: "conta-1.1.10.200.2", codigo: "1.1.10.200.2", nome: "BANCO CEF CONTA: 669-5 AG: 547 OP:003", tipo: "ativo" },
+  { id: "conta-1.1.10.300.1", codigo: "1.1.10.300.1", nome: "APLICAÇOES CEF AG: 547 CONTA: 669-5 OP: 003", tipo: "ativo" },
+  { id: "conta-1.1.10.300.2", codigo: "1.1.10.300.2", nome: "APLICAÇOES CREDCREA AG: 0106-6 CONTA: 333557", tipo: "ativo" },
+  { id: "conta-1.1.20.101", codigo: "1.1.20.101", nome: "ALLONDA AMBIENTAL S.A", tipo: "ativo" },
+  { id: "conta-1.1.20.103", codigo: "1.1.20.103", nome: "APTO 203", tipo: "ativo" },
+  { id: "conta-1.1.20.107", codigo: "1.1.20.107", nome: "APTO 201", tipo: "ativo" },
+  { id: "conta-1.1.20.108", codigo: "1.1.20.108", nome: "APTO 202", tipo: "ativo" },
+  { id: "conta-1.1.20.109", codigo: "1.1.20.109", nome: "APTO 301", tipo: "ativo" },
+  { id: "conta-1.1.20.110", codigo: "1.1.20.110", nome: "APTO 303", tipo: "ativo" },
+  { id: "conta-1.1.20.111", codigo: "1.1.20.111", nome: "APTO 401", tipo: "ativo" },
+  { id: "conta-1.1.20.112", codigo: "1.1.20.112", nome: "APTO 402", tipo: "ativo" },
+  { id: "conta-1.1.20.113", codigo: "1.1.20.113", nome: "APTO 403", tipo: "ativo" },
+  { id: "conta-1.1.20.114", codigo: "1.1.20.114", nome: "DF + ENGENHARIA GEOTÉCNICA E RECURSOS LTDA", tipo: "ativo" },
+  { id: "conta-1.1.20.115", codigo: "1.1.20.115", nome: "ECONSERVATION ESTUDOS E PROJETOS AMBIENTAIS LTDA", tipo: "ativo" },
+  { id: "conta-1.1.20.117", codigo: "1.1.20.117", nome: "MIND ESTUDOS E PROJETOS DE ENGENHARIA LTDA", tipo: "ativo" },
+  { id: "conta-1.1.20.118", codigo: "1.1.20.118", nome: "MIND ESTUDOS E PROJETOS DE ENGENHARIA LTDA (2)", tipo: "ativo" },
+  { id: "conta-1.1.20.119", codigo: "1.1.20.119", nome: "ULTRAFERTIL S/A", tipo: "ativo" },
+  { id: "conta-1.1.20.200.1", codigo: "1.1.20.200.1", nome: "CLIENTES DIVERSOS", tipo: "ativo" },
+  { id: "conta-1.1.30.201", codigo: "1.1.30.201", nome: "ADIANTAMENTO A FORNECEDORES", tipo: "ativo" },
+  { id: "conta-1.1.30.202", codigo: "1.1.30.202", nome: "LUCROS A RECEBER", tipo: "ativo" },
+  { id: "conta-1.1.30.300.1", codigo: "1.1.30.300.1", nome: "ADIANTAMENTO DE SALARIO", tipo: "ativo" },
+  { id: "conta-1.1.30.300.2", codigo: "1.1.30.300.2", nome: "ADIANTAMENTO DE 13º SALARIO", tipo: "ativo" },
+  { id: "conta-1.1.30.300.3", codigo: "1.1.30.300.3", nome: "SALARIO MATERNIDADE A RECUPERAR", tipo: "ativo" },
+  { id: "conta-1.1.30.400.1", codigo: "1.1.30.400.1", nome: "CHEQUES DEVOLVIDOS", tipo: "ativo" },
+  { id: "conta-1.1.40.101", codigo: "1.1.40.101", nome: "COFINS A RECUPERAR", tipo: "ativo" },
+  { id: "conta-1.1.40.102", codigo: "1.1.40.102", nome: "CONTR SOCIAL A RECUPERAR", tipo: "ativo" },
+  { id: "conta-1.1.40.103", codigo: "1.1.40.103", nome: "INSS A RECUPERAR", tipo: "ativo" },
+  { id: "conta-1.1.40.104", codigo: "1.1.40.104", nome: "IRPJ A RECUPERAR", tipo: "ativo" },
+  { id: "conta-1.1.40.105", codigo: "1.1.40.105", nome: "IRRF S/ PRESTAÇAO DE SERVIÇOS", tipo: "ativo" },
+  { id: "conta-1.1.40.106", codigo: "1.1.40.106", nome: "IRRF/ APLICAÇOES FINANCEIRAS", tipo: "ativo" },
+  { id: "conta-1.1.40.107", codigo: "1.1.40.107", nome: "ISS A RECUPERAR", tipo: "ativo" },
+  { id: "conta-1.1.40.108", codigo: "1.1.40.108", nome: "PIS A RECUPERAR", tipo: "ativo" },
+  { id: "conta-1.1.60.102", codigo: "1.1.60.102", nome: "MERCADORIAS PARA USO NA PRESTAÇAO DE SERVIÇOS", tipo: "ativo" },
+  { id: "conta-1.1.60.103", codigo: "1.1.60.103", nome: "PRODUTOS EM CONSTRUÇAO", tipo: "ativo" },
+  { id: "conta-1.1.60.104", codigo: "1.1.60.104", nome: "TERRENOS A COMERCIALIZAR", tipo: "ativo" },
+  { id: "conta-1.1.60.105", codigo: "1.1.60.105", nome: "TERRENOS A COMERCIALIZAR - ISLA PROVIDENCIA", tipo: "ativo" },
+  { id: "conta-1.1.60.106", codigo: "1.1.60.106", nome: "TERRENOS A COMERCIALIZAR - NAVEGANTES OBRA 1", tipo: "ativo" },
+  { id: "conta-1.1.60.301", codigo: "1.1.60.301", nome: "IMÓVEIS A COMERCIALIZAR - APARTAMENTO 101", tipo: "ativo" },
+  { id: "conta-1.1.60.302", codigo: "1.1.60.302", nome: "IMÓVEIS A COMERCIALIZAR - APARTAMENTO 201", tipo: "ativo" },
+  { id: "conta-1.1.60.303", codigo: "1.1.60.303", nome: "IMÓVEIS A COMERCIALIZAR - APARTAMENTO 202", tipo: "ativo" },
+  { id: "conta-1.1.60.304", codigo: "1.1.60.304", nome: "IMÓVEIS A COMERCIALIZAR - APARTAMENTO 302", tipo: "ativo" },
+  { id: "conta-1.1.60.305", codigo: "1.1.60.305", nome: "IMÓVEIS A COMERCIALIZAR - APARTAMENTO 203", tipo: "ativo" },
+  { id: "conta-1.1.60.306", codigo: "1.1.60.306", nome: "IMÓVEIS A COMERCIALIZAR - APARTAMENTO 303", tipo: "ativo" },
+  { id: "conta-1.1.60.307", codigo: "1.1.60.307", nome: "IMÓVEIS A COMERCIALIZAR - APARTAMENTO 401", tipo: "ativo" },
+  { id: "conta-1.1.60.308", codigo: "1.1.60.308", nome: "IMÓVEIS A COMERCIALIZAR - APARTAMENTO 402", tipo: "ativo" },
+  { id: "conta-1.1.60.309", codigo: "1.1.60.309", nome: "IMÓVEIS A COMERCIALIZAR - APARTAMENTO 403", tipo: "ativo" },
+  { id: "conta-1.2.10.101", codigo: "1.2.10.101", nome: "EMPRESTIMOS A SÓCIA JULIANA JACOMINI MENEGUCCI", tipo: "ativo" },
+  { id: "conta-1.2.10.102", codigo: "1.2.10.102", nome: "EMPRESTIMOS A TERCEIROS", tipo: "ativo" },
+  { id: "conta-1.2.10.103", codigo: "1.2.10.103", nome: "EMPRESTIMOS AO SÓCIO JOAO GABRIEL", tipo: "ativo" },
+  { id: "conta-1.2.10.104", codigo: "1.2.10.104", nome: "PARTICIPAÇAO EM COOPERATIVA - COTAS", tipo: "ativo" },
+  { id: "conta-1.2.20.100.1", codigo: "1.2.20.100.1", nome: "ESTOQUE DE IMÓVEIS ACABADOS", tipo: "ativo" },
+  { id: "conta-1.2.30.101", codigo: "1.2.30.101", nome: "COMPUTADORES E PERIFERICOS", tipo: "ativo" },
+  { id: "conta-1.2.30.102", codigo: "1.2.30.102", nome: "IMÓVEIS", tipo: "ativo" },
+  { id: "conta-1.2.30.103", codigo: "1.2.30.103", nome: "INSTALAÇOES", tipo: "ativo" },
+  { id: "conta-1.2.30.104", codigo: "1.2.30.104", nome: "MAQUINAS E EQUIPAMENTOS", tipo: "ativo" },
+  { id: "conta-1.2.30.105", codigo: "1.2.30.105", nome: "MOVEIS E UTENSILIOS", tipo: "ativo" },
+  { id: "conta-1.2.30.107", codigo: "1.2.30.107", nome: "TERRENOS", tipo: "ativo" },
+  { id: "conta-1.2.30.108", codigo: "1.2.30.108", nome: "VEICULOS", tipo: "ativo" },
+  { id: "conta-1.2.30.201", codigo: "1.2.30.201", nome: "(-) DEPRECIAÇAO COMPUTADORES E PERIFERICOS", tipo: "ativo" },
+  { id: "conta-1.2.30.202", codigo: "1.2.30.202", nome: "(-) DEPRECIAÇAO IMOVEIS", tipo: "ativo" },
+  { id: "conta-1.2.30.203", codigo: "1.2.30.203", nome: "(-) DEPRECIAÇAO INSTALAÇÕES", tipo: "ativo" },
+  { id: "conta-1.2.30.204", codigo: "1.2.30.204", nome: "(-) DEPRECIAÇAO MAQUINAS E EQUIPAMENTOS", tipo: "ativo" },
+  { id: "conta-1.2.30.205", codigo: "1.2.30.205", nome: "(-) DEPRECIAÇAO VEICULOS", tipo: "ativo" },
+  { id: "conta-1.4.10.101", codigo: "1.4.10.101", nome: "MERCADORIAS EM CONSIGNAÇAO", tipo: "ativo" },
+  { id: "conta-1.5.10.100.1", codigo: "1.5.10.100.1", nome: "APLICAÇÕES BANCO ITAU", tipo: "ativo" },
+  { id: "conta-2.1.10.101", codigo: "2.1.10.101", nome: "3Z INJETADOS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.102", codigo: "2.1.10.102", nome: "40 409 366 RAFAEL PEREIRA DA ROSA", tipo: "passivo" },
+  { id: "conta-2.1.10.103", codigo: "2.1.10.103", nome: "ARLETE TRANSPORTES LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.104", codigo: "2.1.10.104", nome: "BENICIO PAGANI (MADEREIRA ALBIPINUS)", tipo: "passivo" },
+  { id: "conta-2.1.10.105", codigo: "2.1.10.105", nome: "BRUNO GERALDI REGINALDO 07471933984", tipo: "passivo" },
+  { id: "conta-2.1.10.107", codigo: "2.1.10.107", nome: "CASAS DA AGUA MATERIAIS DE CONSTRUÇAO LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.108", codigo: "2.1.10.108", nome: "CASAS DA AGUA MATERIAIS P/ CONSTR. - LOJA 04", tipo: "passivo" },
+  { id: "conta-2.1.10.111", codigo: "2.1.10.111", nome: "CASSOL MATERIAIS DE CONSTRUÇAO LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.112", codigo: "2.1.10.112", nome: "CASSOL MATERIAIS DE CONSTRUÇAO LTDA (2)", tipo: "passivo" },
+  { id: "conta-2.1.10.114", codigo: "2.1.10.114", nome: "CASSOL SJ", tipo: "passivo" },
+  { id: "conta-2.1.10.115", codigo: "2.1.10.115", nome: "CASSOL", tipo: "passivo" },
+  { id: "conta-2.1.10.116", codigo: "2.1.10.116", nome: "CERAMICA MONALLISA LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.117", codigo: "2.1.10.117", nome: "COMANDO PAINEIS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.118", codigo: "2.1.10.118", nome: "COMERCIO DE FERRAGENS LEANDRO LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.119", codigo: "2.1.10.119", nome: "COMERCIO DE GESSO JSX LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.120", codigo: "2.1.10.120", nome: "CONCORDIA DO BRASIL PARTICIPACOES LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.121", codigo: "2.1.10.121", nome: "CONCREPEN IND COM ART CIMENTO LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.122", codigo: "2.1.10.122", nome: "CORREA MATERIAIS ELETRICOS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.123", codigo: "2.1.10.123", nome: "DARCI DE BORTOLDI", tipo: "passivo" },
+  { id: "conta-2.1.10.125", codigo: "2.1.10.125", nome: "DECOR COLORS COMERCIO DE PINTURAS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.126", codigo: "2.1.10.126", nome: "DELTA INDUSTRIA CERAMICA LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.127", codigo: "2.1.10.127", nome: "DINALVA COELHO DE JESUS ME", tipo: "passivo" },
+  { id: "conta-2.1.10.128", codigo: "2.1.10.128", nome: "DINALVA COELHO DE JESUS ME (2)", tipo: "passivo" },
+  { id: "conta-2.1.10.129", codigo: "2.1.10.129", nome: "DLV SERVIÇOS DE PINTURA LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.130", codigo: "2.1.10.130", nome: "DOEGE TERRAPLANAGEM", tipo: "passivo" },
+  { id: "conta-2.1.10.131", codigo: "2.1.10.131", nome: "ELETROPRED INSTALACOES ELETRICAS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.132", codigo: "2.1.10.132", nome: "ER CONCRETO REGUADO", tipo: "passivo" },
+  { id: "conta-2.1.10.133", codigo: "2.1.10.133", nome: "ESATTA LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.134", codigo: "2.1.10.134", nome: "EVOLUTION GERADORES LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.135", codigo: "2.1.10.135", nome: "FACILFER LTDA - ME", tipo: "passivo" },
+  { id: "conta-2.1.10.136", codigo: "2.1.10.136", nome: "FC COMERCIO DE MATERIAIS DE CONSTRUCAO LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.137", codigo: "2.1.10.137", nome: "FECHA FORTE CHAVES E FECHADURAS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.138", codigo: "2.1.10.138", nome: "FENIX ADMINISTRADORA DE CONDOMINIOS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.139", codigo: "2.1.10.139", nome: "FRACARO E CALIARI CONSTR E INCORPORADORA LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.140", codigo: "2.1.10.140", nome: "FUNDAÇAO CHRISTIANO OTTONI", tipo: "passivo" },
+  { id: "conta-2.1.10.141", codigo: "2.1.10.141", nome: "GERDAU ACOS LONGOS S.A.", tipo: "passivo" },
+  { id: "conta-2.1.10.142", codigo: "2.1.10.142", nome: "ILHA TINTAS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.144", codigo: "2.1.10.144", nome: "IMOBILIARIA ATLANTICO LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.145", codigo: "2.1.10.145", nome: "ISOMOL INDUSTRIA E COMERCIO LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.146", codigo: "2.1.10.146", nome: "J & S CONSTRUTORA LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.147", codigo: "2.1.10.147", nome: "J & S EMPREITEIRA", tipo: "passivo" },
+  { id: "conta-2.1.10.148", codigo: "2.1.10.148", nome: "J. SERRAO OLTRAMARI SERVICOS CONTABEIS, CONSULTORIA E AUDITORIA", tipo: "passivo" },
+  { id: "conta-2.1.10.149", codigo: "2.1.10.149", nome: "KALLEO ESQUADRIAS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.150", codigo: "2.1.10.150", nome: "LAO INDUSTRIA LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.151", codigo: "2.1.10.151", nome: "LEANDRO E LEANDRO LTDA EPP", tipo: "passivo" },
+  { id: "conta-2.1.10.152", codigo: "2.1.10.152", nome: "LIMA ENTULHOS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.153", codigo: "2.1.10.153", nome: "LOJA DO GUARDA PÓ", tipo: "passivo" },
+  { id: "conta-2.1.10.154", codigo: "2.1.10.154", nome: "MADEIREIRA GARDINI", tipo: "passivo" },
+  { id: "conta-2.1.10.155", codigo: "2.1.10.155", nome: "MAIRA DA ROCHA BRESSANINI 03999524979", tipo: "passivo" },
+  { id: "conta-2.1.10.156", codigo: "2.1.10.156", nome: "MARIO LUIZ MASCAGNI", tipo: "passivo" },
+  { id: "conta-2.1.10.158", codigo: "2.1.10.158", nome: "MARQUES FERROS E AÇOS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.159", codigo: "2.1.10.159", nome: "MATHEUS DE CARVALHO COELHO GRANDO BMS", tipo: "passivo" },
+  { id: "conta-2.1.10.160", codigo: "2.1.10.160", nome: "MAX MOHR FILHO CIA LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.162", codigo: "2.1.10.162", nome: "MAX MOHR FILHO E CIA LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.163", codigo: "2.1.10.163", nome: "MF COMERCIO DE MATERIAIS DE CONSTRUCAO L", tipo: "passivo" },
+  { id: "conta-2.1.10.164", codigo: "2.1.10.164", nome: "MF COMERCIO DE MATERIAIS DE CONSTRUCAO LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.165", codigo: "2.1.10.165", nome: "MIE.MIDAS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.166", codigo: "2.1.10.166", nome: "MORETTI VIDROS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.167", codigo: "2.1.10.167", nome: "NP SONDAGENS", tipo: "passivo" },
+  { id: "conta-2.1.10.168", codigo: "2.1.10.168", nome: "PELLIZZARI ADVOGADOS ASSOCIADOS", tipo: "passivo" },
+  { id: "conta-2.1.10.169", codigo: "2.1.10.169", nome: "POLIMIX CONCRETO LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.170", codigo: "2.1.10.170", nome: "PORTO & PORTO COM. DE TINTAS EIRELI EPP", tipo: "passivo" },
+  { id: "conta-2.1.10.171", codigo: "2.1.10.171", nome: "PORTO E PORTO COMERCIO DE TINTAS EIRELI", tipo: "passivo" },
+  { id: "conta-2.1.10.173", codigo: "2.1.10.173", nome: "REIS TERRAPLANAGEM LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.174", codigo: "2.1.10.174", nome: "REQUINT INOX ARTIGOS DE INOX LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.175", codigo: "2.1.10.175", nome: "RONALDO POSTES LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.176", codigo: "2.1.10.176", nome: "RONY MATERIAIS PARA CONSTRUCAO LTDA ME", tipo: "passivo" },
+  { id: "conta-2.1.10.177", codigo: "2.1.10.177", nome: "ROSSI MATERIAIS ELETRICOS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.178", codigo: "2.1.10.178", nome: "ROSSI MATERIAIS ELETRICOS LTDA (CD)", tipo: "passivo" },
+  { id: "conta-2.1.10.179", codigo: "2.1.10.179", nome: "RUBIN RIGOTTI & CIA LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.180", codigo: "2.1.10.180", nome: "SCHAEFFER GLASS ESQUADRIAS ALUMINIO LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.181", codigo: "2.1.10.181", nome: "SERRAO SOCIEDADE INDIVIDUAL DE ADVOCACIA", tipo: "passivo" },
+  { id: "conta-2.1.10.182", codigo: "2.1.10.182", nome: "SERVICO SOCIAL DA CONSTRUCAO CIVIL DO ESTADO DE SAO PAULO - SECONCI-SP", tipo: "passivo" },
+  { id: "conta-2.1.10.183", codigo: "2.1.10.183", nome: "SOLO SONDAGEM E CONSTRUCOES LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.184", codigo: "2.1.10.184", nome: "SPERANDIO ARTEFATOS PLASTICOS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.185", codigo: "2.1.10.185", nome: "SUPERBETON CONCRETO LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.186", codigo: "2.1.10.186", nome: "SUZANA REGINA SCHMIDT 07933201946", tipo: "passivo" },
+  { id: "conta-2.1.10.187", codigo: "2.1.10.187", nome: "TIGRAO IMOVEIS LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.188", codigo: "2.1.10.188", nome: "WERLANG E CIA LTDA ME", tipo: "passivo" },
+  { id: "conta-2.1.10.189", codigo: "2.1.10.189", nome: "ZEUS DO BRASIL LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.190", codigo: "2.1.10.190", nome: "ZICO AUTO PEÇAS E SERVIÇOS DE GUINCHO LTDA", tipo: "passivo" },
+  { id: "conta-2.1.10.201", codigo: "2.1.10.201", nome: "13º SALARIO A PAGAR", tipo: "passivo" },
+  { id: "conta-2.1.10.202", codigo: "2.1.10.202", nome: "FERIAS A PAGAR", tipo: "passivo" },
+  { id: "conta-2.1.10.203", codigo: "2.1.10.203", nome: "PENSAO ALIMENTICA A PAGAR", tipo: "passivo" },
+  { id: "conta-2.1.10.204", codigo: "2.1.10.204", nome: "PRO LABORE A PAGAR", tipo: "passivo" },
+  { id: "conta-2.1.10.205", codigo: "2.1.10.205", nome: "RESCISOES CONTRATUAIS A PAGAR", tipo: "passivo" },
+  { id: "conta-2.1.10.206", codigo: "2.1.10.206", nome: "SALARIOS E ORDENADOS A PAGAR", tipo: "passivo" },
+  { id: "conta-2.1.10.207", codigo: "2.1.10.207", nome: "SEGUROS A PAGAR", tipo: "passivo" },
+  { id: "conta-2.1.10.301", codigo: "2.1.10.301", nome: "CONTR. CONFEDERATIVA A RECOLHER", tipo: "passivo" },
+  { id: "conta-2.1.10.302", codigo: "2.1.10.302", nome: "CONTR. SINDICAL A RECOLHER", tipo: "passivo" },
+  { id: "conta-2.1.10.303", codigo: "2.1.10.303", nome: "CONTRIBUIÇAO ASSISTENCIAL", tipo: "passivo" },
+  { id: "conta-2.1.10.304", codigo: "2.1.10.304", nome: "FGTS A RECOLHER", tipo: "passivo" },
+  { id: "conta-2.1.10.305", codigo: "2.1.10.305", nome: "INSS A RECOLHER", tipo: "passivo" },
+  { id: "conta-2.1.10.401", codigo: "2.1.10.401", nome: "PROVISÕES DE 13º SALARIO", tipo: "passivo" },
+  { id: "conta-2.1.10.402", codigo: "2.1.10.402", nome: "PROVISÕES DE FÉRIAS", tipo: "passivo" },
+  { id: "conta-2.1.10.403", codigo: "2.1.10.403", nome: "PROVISÕES FGTS SOBRE 13º SALARIO", tipo: "passivo" },
+  { id: "conta-2.1.10.404", codigo: "2.1.10.404", nome: "PROVISÕES FGTS SOBRE FÉRIAS", tipo: "passivo" },
+  { id: "conta-2.1.10.405", codigo: "2.1.10.405", nome: "PROVISÕES INSS SOBRE 13º SALARIO", tipo: "passivo" },
+  { id: "conta-2.1.10.406", codigo: "2.1.10.406", nome: "PROVISÕES INSS SOBRE FÉRIAS", tipo: "passivo" },
+  { id: "conta-2.1.10.501", codigo: "2.1.10.501", nome: "COFINS A RECOLHER", tipo: "passivo" },
+  { id: "conta-2.1.10.502", codigo: "2.1.10.502", nome: "CONTR SOCIAL A RECOLHER", tipo: "passivo" },
+  { id: "conta-2.1.10.503", codigo: "2.1.10.503", nome: "FGTS A RECOLHER", tipo: "passivo" },
+  { id: "conta-2.1.10.504", codigo: "2.1.10.504", nome: "INSS A RECOLHER", tipo: "passivo" },
+  { id: "conta-2.1.10.505", codigo: "2.1.10.505", nome: "INSS RETIDO NA FONTE", tipo: "passivo" },
+  { id: "conta-2.1.10.506", codigo: "2.1.10.506", nome: "IRPJ A RECOLHER", tipo: "passivo" },
+  { id: "conta-2.1.10.507", codigo: "2.1.10.507", nome: "IRPJ LP A RECOLHER", tipo: "passivo" },
+  { id: "conta-2.1.10.508", codigo: "2.1.10.508", nome: "IRRF A RECOLHER", tipo: "passivo" },
+  { id: "conta-2.1.10.509", codigo: "2.1.10.509", nome: "ISS A RECOLHER", tipo: "passivo" },
+  { id: "conta-2.1.10.510", codigo: "2.1.10.510", nome: "ISS RETIDO NA FONTE", tipo: "passivo" },
+  { id: "conta-2.1.10.511", codigo: "2.1.10.511", nome: "PIS A RECOLHER", tipo: "passivo" },
+  { id: "conta-2.1.10.512", codigo: "2.1.10.512", nome: "SIMPLES A RECOLHER", tipo: "passivo" },
+  { id: "conta-2.1.10.603", codigo: "2.1.10.603", nome: "EMPRESTIMOS BANCARIOS", tipo: "passivo" },
+  { id: "conta-2.1.10.604", codigo: "2.1.10.604", nome: "EMPRESTIMOS DO SOCIO GABRIEL OLTRAMARI NETO", tipo: "passivo" },
+  { id: "conta-2.1.10.701", codigo: "2.1.10.701", nome: "HONORARIOS A PAGAR", tipo: "passivo" },
+  { id: "conta-2.1.10.702", codigo: "2.1.10.702", nome: "LUCROS A DISTRIBUIR - MAURICIO DE CARVALHO TORRONTEGUY", tipo: "passivo" },
+  { id: "conta-2.1.10.703", codigo: "2.1.10.703", nome: "LUCROS A DISTRIBUIR - JULIANA JACOMINI MENEGUCCI", tipo: "passivo" },
+  { id: "conta-2.2.10.101", codigo: "2.2.10.101", nome: "CLIENTES DIVERSOS (LONGO PRAZO)", tipo: "passivo" },
+  { id: "conta-2.2.10.102", codigo: "2.2.10.102", nome: "TECON RIO GRANDE", tipo: "passivo" },
+  { id: "conta-2.2.20.101", codigo: "2.2.20.101", nome: "EMPRESTIMOS - SOCIO GABRIEL", tipo: "passivo" },
+  { id: "conta-2.2.20.102", codigo: "2.2.20.102", nome: "EMPRESTIMOS - SÓCIO JOAO GABRIEL", tipo: "passivo" },
+  { id: "conta-2.2.20.201", codigo: "2.2.20.201", nome: "RECEITA A REALIZAR DE VENDA DE IMÓVEIS", tipo: "passivo" },
+  { id: "conta-2.2.20.301", codigo: "2.2.20.301", nome: "CSLL DIFERIDA", tipo: "passivo" },
+  { id: "conta-2.2.20.302", codigo: "2.2.20.302", nome: "IRPJ DIFERIDO", tipo: "passivo" },
+  { id: "conta-2.4.10.101", codigo: "2.4.10.101", nome: "CAPITAL SOCIAL - GABRIEL", tipo: "passivo" },
+  { id: "conta-2.4.10.102", codigo: "2.4.10.102", nome: "CAPITAL SOCIAL - JOAO GABRIEL", tipo: "passivo" },
+  { id: "conta-2.4.10.200.1", codigo: "2.4.10.200.1", nome: "CAPITAL A INTEGRALIZAR - SÓCIO MAURICIO DE CARVALHO TORRONTTEGUY", tipo: "passivo" },
+  { id: "conta-2.4.20.100.1", codigo: "2.4.20.100.1", nome: "CORREÇAO MONETARIA CAPITAL REALIZAVEL", tipo: "passivo" },
+  { id: "conta-2.4.20.200.1", codigo: "2.4.20.200.1", nome: "RESERVA DE REAVALIÇAO DE BENS", tipo: "passivo" },
+  { id: "conta-2.4.20.300.1", codigo: "2.4.20.300.1", nome: "RESERVA LEGAL", tipo: "passivo" },
+  { id: "conta-2.4.20.300.2", codigo: "2.4.20.300.2", nome: "RESERVA PARA AUMENTO DE CAPITAL", tipo: "passivo" },
+  { id: "conta-2.4.30.101", codigo: "2.4.30.101", nome: "(-) PREJUIZOS ACUMULADOS", tipo: "passivo" },
+  { id: "conta-2.4.30.103", codigo: "2.4.30.103", nome: "LUCROS ACUMULADOS", tipo: "passivo" },
+  { id: "conta-2.4.30.104", codigo: "2.4.30.104", nome: "PREJUIZO DO EXERCICIO", tipo: "passivo" },
+  { id: "conta-2.4.40.101", codigo: "2.4.40.101", nome: "AJUSTE DE EXERCÍCIOS ANTERIORES - ESTOQUES", tipo: "passivo" },
+  { id: "conta-2.4.40.102", codigo: "2.4.40.102", nome: "AJUSTE DE EXERCÍCIOS ANTERIORES - LUCROS ACUMULADOS", tipo: "passivo" },
+  { id: "conta-2.5.10.101", codigo: "2.5.10.101", nome: "CONSIGNAÇAO DE MERCADORIAS", tipo: "passivo" },
+  { id: "conta-3.1.10.101", codigo: "3.1.10.101", nome: "RECEITA DA VENDA DE IMÓVEIS", tipo: "receita" },
+  { id: "conta-3.1.10.201", codigo: "3.1.10.201", nome: "PRESTAÇAO DE SERVIÇOS", tipo: "receita" },
+  { id: "conta-3.1.10.300.1", codigo: "3.1.10.300.1", nome: "DEVOLUÇAO DE VENDAS", tipo: "receita" },
+  { id: "conta-3.1.10.300.2", codigo: "3.1.10.300.2", nome: "ABATIMENTOS CONCEDIDOS", tipo: "receita" },
+  { id: "conta-3.1.10.401", codigo: "3.1.10.401", nome: "(-) COFINS S/ VENDAS", tipo: "receita" },
+  { id: "conta-3.1.10.402", codigo: "3.1.10.402", nome: "(-) CSLL S/ VENDAS", tipo: "receita" },
+  { id: "conta-3.1.10.403", codigo: "3.1.10.403", nome: "(-) IPI S/ VENDAS", tipo: "receita" },
+  { id: "conta-3.1.10.404", codigo: "3.1.10.404", nome: "(-) IRPJ S/ VENDAS", tipo: "receita" },
+  { id: "conta-3.1.10.405", codigo: "3.1.10.405", nome: "(-) PIS S/ VENDAS", tipo: "receita" },
+  { id: "conta-3.1.10.501", codigo: "3.1.10.501", nome: "(-) COFINS S/ SERVIÇOS", tipo: "receita" },
+  { id: "conta-3.1.10.502", codigo: "3.1.10.502", nome: "(-) CONTR SOCIAL S/ SERVIÇOS", tipo: "receita" },
+  { id: "conta-3.1.10.503", codigo: "3.1.10.503", nome: "(-) INSS S/ SERVIÇOS", tipo: "receita" },
+  { id: "conta-3.1.10.504", codigo: "3.1.10.504", nome: "(-) IRPJ LP S/ SERVIÇOS", tipo: "receita" },
+  { id: "conta-3.1.10.505", codigo: "3.1.10.505", nome: "(-) ISS S/ SERVIÇOS", tipo: "receita" },
+  { id: "conta-3.1.10.506", codigo: "3.1.10.506", nome: "(-) PIS S/ SERVIÇOS", tipo: "receita" },
+  { id: "conta-3.1.10.601", codigo: "3.1.10.601", nome: "ATUALIZAÇAO MONETARIA", tipo: "receita" },
+  { id: "conta-3.1.10.602", codigo: "3.1.10.602", nome: "DESCONTOS OBTIDOS", tipo: "receita" },
+  { id: "conta-3.1.10.603", codigo: "3.1.10.603", nome: "JUROS ATIVOS", tipo: "receita" },
+  { id: "conta-3.1.10.604", codigo: "3.1.10.604", nome: "JUROS S/ APLICAÇÕES FINANCEIRAS", tipo: "receita" },
+  { id: "conta-3.1.10.605", codigo: "3.1.10.605", nome: "RENDIMENTOS DE APLICAÇOES FINANCEIRAS", tipo: "receita" },
+  { id: "conta-3.1.10.701", codigo: "3.1.10.701", nome: "RECEITA DE BONIFICAÇAO", tipo: "receita" },
+  { id: "conta-3.1.20.101", codigo: "3.1.20.101", nome: "RECEITA DE ALIENAÇAO DE IMOBILIZADOS", tipo: "receita" },
+  { id: "conta-3.1.20.102", codigo: "3.1.20.102", nome: "RECEITA DE ALIENAÇAO DE INVESTIMENTOS", tipo: "receita" },
+  { id: "conta-3.1.20.201", codigo: "3.1.20.201", nome: "IRPJ S/ GANHO DE CAPITAL", tipo: "receita" },
+  { id: "conta-4.1.10.101", codigo: "4.1.10.101", nome: "13º SALARIO", tipo: "despesa" },
+  { id: "conta-4.1.10.102", codigo: "4.1.10.102", nome: "ADICIONAL DE INSALUBRIDADE", tipo: "despesa" },
+  { id: "conta-4.1.10.103", codigo: "4.1.10.103", nome: "ASSISTENCIA MEDICA", tipo: "despesa" },
+  { id: "conta-4.1.10.104", codigo: "4.1.10.104", nome: "AVISO PREVIO INDENIZADO", tipo: "despesa" },
+  { id: "conta-4.1.10.105", codigo: "4.1.10.105", nome: "CONTRIBUIÇAO PATRONAL", tipo: "despesa" },
+  { id: "conta-4.1.10.106", codigo: "4.1.10.106", nome: "DESPESAS C/ AUXILIO BOLSA ESTAGIO", tipo: "despesa" },
+  { id: "conta-4.1.10.107", codigo: "4.1.10.107", nome: "FERIAS", tipo: "despesa" },
+  { id: "conta-4.1.10.108", codigo: "4.1.10.108", nome: "GRATIFICAÇOES", tipo: "despesa" },
+  { id: "conta-4.1.10.109", codigo: "4.1.10.109", nome: "HORAS EXTRAS", tipo: "despesa" },
+  { id: "conta-4.1.10.110", codigo: "4.1.10.110", nome: "INDENIZAÇOES CONTRATUAIS", tipo: "despesa" },
+  { id: "conta-4.1.10.111", codigo: "4.1.10.111", nome: "PRO-LABORE", tipo: "despesa" },
+  { id: "conta-4.1.10.112", codigo: "4.1.10.112", nome: "REFEITORIO", tipo: "despesa" },
+  { id: "conta-4.1.10.113", codigo: "4.1.10.113", nome: "SALARIOS E ORDENADOS", tipo: "despesa" },
+  { id: "conta-4.1.10.114", codigo: "4.1.10.114", nome: "VALE TRANSPORTES", tipo: "despesa" },
+  { id: "conta-4.1.10.201", codigo: "4.1.10.201", nome: "FGTS", tipo: "despesa" },
+  { id: "conta-4.1.10.202", codigo: "4.1.10.202", nome: "INSS", tipo: "despesa" },
+  { id: "conta-4.1.10.203", codigo: "4.1.10.203", nome: "ISS", tipo: "despesa" },
+  { id: "conta-4.1.10.301", codigo: "4.1.10.301", nome: "COMISSÃO CORRETOR", tipo: "despesa" },
+  { id: "conta-4.1.10.302", codigo: "4.1.10.302", nome: "HONORARIOS CONTABEIS", tipo: "despesa" },
+  { id: "conta-4.1.10.303", codigo: "4.1.10.303", nome: "HONORARIOS JURIDICOS", tipo: "despesa" },
+  { id: "conta-4.1.10.304", codigo: "4.1.10.304", nome: "HOSPEDAGEM/SITES", tipo: "despesa" },
+  { id: "conta-4.1.10.305", codigo: "4.1.10.305", nome: "MANUTENÇAO INFORMATICA", tipo: "despesa" },
+  { id: "conta-4.1.10.306", codigo: "4.1.10.306", nome: "PROCESSAMENTOS DE DADOS/LICENCIAMENTO", tipo: "despesa" },
+  { id: "conta-4.1.10.307", codigo: "4.1.10.307", nome: "SERVIÇOS DE CONSULTORIA", tipo: "despesa" },
+  { id: "conta-4.1.10.308", codigo: "4.1.10.308", nome: "SERVIÇOS DE ENGENHARIA", tipo: "despesa" },
+  { id: "conta-4.1.10.309", codigo: "4.1.10.309", nome: "SERVIÇOS DE LICITAÇÕES", tipo: "despesa" },
+  { id: "conta-4.1.10.310", codigo: "4.1.10.310", nome: "SERVIÇOS DE SEGURANÇA", tipo: "despesa" },
+  { id: "conta-4.1.10.312", codigo: "4.1.10.312", nome: "SERVIÇOS TOMADOS", tipo: "despesa" },
+  { id: "conta-4.1.10.401", codigo: "4.1.10.401", nome: "MANUTENÇAO COMPUTADORES E PERIFERICOS", tipo: "despesa" },
+  { id: "conta-4.1.10.402", codigo: "4.1.10.402", nome: "MANUTENÇAO INSTALAÇOES", tipo: "despesa" },
+  { id: "conta-4.1.10.403", codigo: "4.1.10.403", nome: "MANUTENÇAO MAQUINAS E EQUIPAMENTOS", tipo: "despesa" },
+  { id: "conta-4.1.10.404", codigo: "4.1.10.404", nome: "MANUTENÇAO VEICULOS", tipo: "despesa" },
+  { id: "conta-4.1.10.501", codigo: "4.1.10.501", nome: "AGUA", tipo: "despesa" },
+  { id: "conta-4.1.10.502", codigo: "4.1.10.502", nome: "ALUGUEL/COWORKING", tipo: "despesa" },
+  { id: "conta-4.1.10.503", codigo: "4.1.10.503", nome: "ANUIDADE CREA", tipo: "despesa" },
+  { id: "conta-4.1.10.504", codigo: "4.1.10.504", nome: "ASSOCIAÇOES DE CLASSE", tipo: "despesa" },
+  { id: "conta-4.1.10.505", codigo: "4.1.10.505", nome: "BENS DE PEQUENO VALOR", tipo: "despesa" },
+  { id: "conta-4.1.10.506", codigo: "4.1.10.506", nome: "COMBUSTIVEIS E LUBRIFICANTES", tipo: "despesa" },
+  { id: "conta-4.1.10.507", codigo: "4.1.10.507", nome: "CONDOMINIO", tipo: "despesa" },
+  { id: "conta-4.1.10.508", codigo: "4.1.10.508", nome: "CONFRATERNIZAÇAO", tipo: "despesa" },
+  { id: "conta-4.1.10.509", codigo: "4.1.10.509", nome: "CURSOS E TREINAMENTOS", tipo: "despesa" },
+  { id: "conta-4.1.10.510", codigo: "4.1.10.510", nome: "DEPRECIAÇAO", tipo: "despesa" },
+  { id: "conta-4.1.10.511", codigo: "4.1.10.511", nome: "DESPESA DE VIAGEM", tipo: "despesa" },
+  { id: "conta-4.1.10.512", codigo: "4.1.10.512", nome: "DESPESAS DIVERSAS", tipo: "despesa" },
+  { id: "conta-4.1.10.513", codigo: "4.1.10.513", nome: "DESPESAS LEGAIS E CARTORARIAS", tipo: "despesa" },
+  { id: "conta-4.1.10.514", codigo: "4.1.10.514", nome: "DESPESAS POSTAIS", tipo: "despesa" },
+  { id: "conta-4.1.10.515", codigo: "4.1.10.515", nome: "ENERGIA ELETRICA", tipo: "despesa" },
+  { id: "conta-4.1.10.516", codigo: "4.1.10.516", nome: "EXAMES LABORATORIAIS", tipo: "despesa" },
+  { id: "conta-4.1.10.517", codigo: "4.1.10.517", nome: "FOTOCOPIAS E AUTENTICAÇOES", tipo: "despesa" },
+  { id: "conta-4.1.10.518", codigo: "4.1.10.518", nome: "FRETES", tipo: "despesa" },
+  { id: "conta-4.1.10.519", codigo: "4.1.10.519", nome: "LANCHES E REFEIÇOES", tipo: "despesa" },
+  { id: "conta-4.1.10.520", codigo: "4.1.10.520", nome: "MANUTENÇAO DE VEICULOS", tipo: "despesa" },
+  { id: "conta-4.1.10.521", codigo: "4.1.10.521", nome: "MATERIAIS DE EPI", tipo: "despesa" },
+  { id: "conta-4.1.10.522", codigo: "4.1.10.522", nome: "MATERIAL DE ESCRITORIO", tipo: "despesa" },
+  { id: "conta-4.1.10.523", codigo: "4.1.10.523", nome: "MATERIAL DE LIMPEZA", tipo: "despesa" },
+  { id: "conta-4.1.10.524", codigo: "4.1.10.524", nome: "MATERIAL DE MANUTENÇAO", tipo: "despesa" },
+  { id: "conta-4.1.10.525", codigo: "4.1.10.525", nome: "MATERIAL DE USO E CONSUMO", tipo: "despesa" },
+  { id: "conta-4.1.10.526", codigo: "4.1.10.526", nome: "SEGUROS", tipo: "despesa" },
+  { id: "conta-4.1.10.527", codigo: "4.1.10.527", nome: "TAXAS DE LICITAÇAO", tipo: "despesa" },
+  { id: "conta-4.1.10.528", codigo: "4.1.10.528", nome: "TAXAS DIVERSAS", tipo: "despesa" },
+  { id: "conta-4.1.10.530", codigo: "4.1.10.530", nome: "TELEFONE", tipo: "despesa" },
+  { id: "conta-4.1.10.531", codigo: "4.1.10.531", nome: "UNIFORMES", tipo: "despesa" },
+  { id: "conta-4.1.10.601", codigo: "4.1.10.601", nome: "COMISSOES", tipo: "despesa" },
+  { id: "conta-4.1.10.602", codigo: "4.1.10.602", nome: "OUTRAS DESPESAS", tipo: "despesa" },
+  { id: "conta-4.1.10.603", codigo: "4.1.10.603", nome: "PROPAGANDA E PUBLICIDADE", tipo: "despesa" },
+  { id: "conta-4.1.10.701", codigo: "4.1.10.701", nome: "TAXAS - CREA", tipo: "despesa" },
+  { id: "conta-4.1.10.702", codigo: "4.1.10.702", nome: "TAXAS ESTADUAIS", tipo: "despesa" },
+  { id: "conta-4.1.10.703", codigo: "4.1.10.703", nome: "TAXAS FEDERAIS", tipo: "despesa" },
+  { id: "conta-4.1.10.704", codigo: "4.1.10.704", nome: "TAXAS MUNICIPAIS", tipo: "despesa" },
+  { id: "conta-4.1.10.801", codigo: "4.1.10.801", nome: "CSLL", tipo: "despesa" },
+  { id: "conta-4.1.10.802", codigo: "4.1.10.802", nome: "IPTU", tipo: "despesa" },
+  { id: "conta-4.1.10.803", codigo: "4.1.10.803", nome: "IPVA", tipo: "despesa" },
+  { id: "conta-4.1.10.804", codigo: "4.1.10.804", nome: "IRPJ", tipo: "despesa" },
+  { id: "conta-4.1.10.805", codigo: "4.1.10.805", nome: "IRRF", tipo: "despesa" },
+  { id: "conta-4.1.10.806", codigo: "4.1.10.806", nome: "ISS CUSTO DE OBRA", tipo: "despesa" },
+  { id: "conta-4.1.10.901", codigo: "4.1.10.901", nome: "DESCONTOS CONCEDIDOS", tipo: "despesa" },
+  { id: "conta-4.1.10.902", codigo: "4.1.10.902", nome: "DESPESAS BANCARIAS", tipo: "despesa" },
+  { id: "conta-4.1.10.903", codigo: "4.1.10.903", nome: "DESPESAS COM CARTÕES", tipo: "despesa" },
+  { id: "conta-4.1.10.904", codigo: "4.1.10.904", nome: "IOF", tipo: "despesa" },
+  { id: "conta-4.1.10.905", codigo: "4.1.10.905", nome: "JUROS E FINANCIAMENTOS", tipo: "despesa" },
+  { id: "conta-4.1.10.906", codigo: "4.1.10.906", nome: "JUROS PASSIVOS", tipo: "despesa" },
+  { id: "conta-4.1.10.907", codigo: "4.1.10.907", nome: "JUROS S/ USO DO CHEQUE ESPECIAL", tipo: "despesa" },
+  { id: "conta-4.1.10.908", codigo: "4.1.10.908", nome: "MULTAS DE MORA", tipo: "despesa" },
+  { id: "conta-4.1.10.909", codigo: "4.1.10.909", nome: "PERDA NO RECEBIMENTO DE CREDITOS", tipo: "despesa" },
+  { id: "conta-4.1.11.101", codigo: "4.1.11.101", nome: "CUSTOS DOS IMÓVEIS VENDIDOS", tipo: "despesa" },
+  { id: "conta-5.1.10.101", codigo: "5.1.10.101", nome: "CUSTO DOS IMÓVEIS VENDIDOS", tipo: "apuracao" },
+  { id: "conta-5.1.10.103", codigo: "5.1.10.103", nome: "RESULTADO DO EXERCICIO", tipo: "apuracao" },
+];
+
 // Extração baseada em padrões de texto comuns em contratos de promessa de
 // compra e venda — funciona bem em modelos parecidos, mas pode falhar ou
 // vir incompleta se o contrato seguir outro formato. Sempre revisar antes de salvar.
@@ -413,6 +735,121 @@ function sugerirContasPagar(lancamentosNovos, contasPagarAtuais) {
     usadasNoLote.add(candidatas[0].id);
     return { ...l, contaPagarId: candidatas[0].id };
   });
+}
+
+// Sugere as contas de Débito e Crédito do plano de contas para um lançamento
+// do extrato, no formato de partida dobrada (igual ao que sistemas como o
+// Nibo pedem): o lado do Banco entra automaticamente conforme o sinal do
+// valor (dinheiro entrando → Banco no Débito; saindo → Banco no Crédito) e o
+// outro lado é uma sugestão — a partir do fornecedor/parcela já vinculados
+// (contaPagarId / parcelaReceberId), ou por comparação de texto entre a
+// descrição do lançamento e o nome de cada conta do plano (ex: um Pix para
+// "POLIMIX CONCRETO" casa com a conta de fornecedor "POLIMIX CONCRETO LTDA",
+// se ela existir no plano), ou por um pequeno dicionário de padrões comuns de
+// extrato (tarifa, IOF, água, luz...). É só um ponto de partida — sempre
+// revisável nos campos de Débito/Crédito antes de lançar de fato.
+// Palavras comuns demais em nomes de empresa/obra para, sozinhas, servirem de
+// critério de casamento (ex: "ltda" aparece em dezenas de contas de
+// fornecedor do plano — usá-la isolada gera casamentos aleatórios).
+const PALAVRAS_GENERICAS_CLASSIFICACAO = new Set([
+  "ltda", "eireli", "epp", "comercio", "industria", "industrial",
+  "construcao", "construcoes", "materiais", "servicos", "instalacoes",
+  "participacoes", "associados", "auditoria", "consultoria", "contabeis",
+  "sociedade", "individual", "administradora", "artigos", "produtos",
+]);
+
+function sugerirClassificacaoContabil(lancamento, contexto) {
+  const { planoContas, contaBancoPadraoId, contasPagar, valoresReceber } = contexto;
+  const contaBanco = planoContas.find((c) => c.id === contaBancoPadraoId) || null;
+  const entrada = Number(lancamento.valor) > 0;
+
+  // Compara a descrição do lançamento (ou o nome de um fornecedor/cliente já
+  // vinculado) com o nome de cada conta do plano, por sobreposição de
+  // palavras com 4+ letras — ignorando palavras genéricas demais (ver acima)
+  // — e exige pelo menos 2 pontos de coincidência (ou a única palavra
+  // significativa do texto, quando há só uma) para evitar sugestões por uma
+  // única palavra comum demais coincidir à toa.
+  function buscarPorTexto(texto) {
+    const alvo = normalizarDescricaoExtrato(texto);
+    if (!alvo) return null;
+    const palavras = alvo.split(" ").filter((p) => p.length >= 4 && !PALAVRAS_GENERICAS_CLASSIFICACAO.has(p));
+    if (palavras.length === 0) return null;
+    const minimoPontos = palavras.length === 1 ? 1 : 2;
+    let melhor = null;
+    let melhorPontos = 0;
+    let empate = false;
+    planoContas.forEach((c) => {
+      const nomeConta = normalizarDescricaoExtrato(c.nome);
+      if (!nomeConta) return;
+      let pontos = 0;
+      palavras.forEach((p) => {
+        if (nomeConta.includes(p)) pontos += 1;
+      });
+      if (pontos > melhorPontos) {
+        melhorPontos = pontos;
+        melhor = c;
+        empate = false;
+      } else if (pontos > 0 && pontos === melhorPontos) {
+        empate = true;
+      }
+    });
+    if (melhorPontos < minimoPontos) return null;
+    return empate ? null : melhor;
+  }
+
+  function buscarPorNomeExato(nomeConta) {
+    const alvo = normalizarDescricaoExtrato(nomeConta);
+    return planoContas.find((c) => normalizarDescricaoExtrato(c.nome) === alvo) || null;
+  }
+
+  // Padrões comuns de extrato bancário (tarifas, tributos, concessionárias)
+  // — checados antes do casamento genérico de texto, porque um nome de obra
+  // ou fornecedor pode conter palavras parecidas (ex: cidade "Navegantes" no
+  // nome de um terreno da empresa colidindo com "Pm de Navegantes" — a
+  // prefeitura cobrando IPTU) e o padrão específico é mais confiável aqui.
+  function buscarPorPadraoComum(texto) {
+    const desc = normalizarDescricaoExtrato(texto);
+    const regrasPadrao = [
+      [/\btar(ifa)?\b|manuten[cç][aã]o de conta|\bcesta\b/, "DESPESAS BANCARIAS"],
+      [/\biof\b/, "IOF"],
+      [/juros/, entrada ? "JUROS ATIVOS" : "JUROS PASSIVOS"],
+      [/rend(imento)? pago aplic|resgate automat/, "RENDIMENTOS DE APLICAÇOES FINANCEIRAS"],
+      [/\biptu\b/, "IPTU"],
+      [/condominio/, "CONDOMINIO"],
+      [/energia|\bluz\b|celesc|copel|cpfl|\benel\b/, "ENERGIA ELETRICA"],
+      [/\bagua\b|sanepar|casan|sabesp/, "AGUA"],
+      [/telefone|internet|\bvivo\b|\bclaro\b|\btim\b|\boi\b/, "TELEFONE"],
+    ];
+    for (const [regex, nomeConta] of regrasPadrao) {
+      if (regex.test(desc)) {
+        const achada = buscarPorNomeExato(nomeConta);
+        if (achada) return achada;
+      }
+    }
+    return null;
+  }
+
+  let contraparte = null;
+
+  if (!entrada && lancamento.contaPagarId) {
+    const conta = (contasPagar || []).find((c) => c.id === lancamento.contaPagarId);
+    if (conta && conta.fornecedor) contraparte = buscarPorTexto(conta.fornecedor);
+  }
+  if (entrada && lancamento.parcelaReceberId) {
+    const parcela = (valoresReceber || []).find((v) => v.id === lancamento.parcelaReceberId);
+    if (parcela) contraparte = buscarPorTexto(parcela.comprador) || buscarPorTexto(parcela.unidade);
+  }
+  if (!contraparte) {
+    contraparte = buscarPorPadraoComum(lancamento.descricao);
+  }
+  if (!contraparte) {
+    contraparte = buscarPorTexto(lancamento.descricao);
+  }
+
+  return {
+    contaDebitoId: entrada ? (contaBanco ? contaBanco.id : "") : contraparte ? contraparte.id : "",
+    contaCreditoId: entrada ? (contraparte ? contraparte.id : "") : contaBanco ? contaBanco.id : "",
+  };
 }
 
 // Extração heurística de número, data de emissão e validade a partir do
@@ -2178,6 +2615,20 @@ export default function DashboardConstrutora() {
   const [pdfImportingExtrato, setPdfImportingExtrato] = useState(false);
   const [pdfImportErrorExtrato, setPdfImportErrorExtrato] = useState(null);
   const [extratoPreview, setExtratoPreview] = useState([]);
+
+  // Plano de contas (contabilidade) — editável pelo usuário na aba própria;
+  // começa com o plano de contas padrão só na primeira vez (nada salvo ainda).
+  const [planoContas, setPlanoContas] = useState([]);
+  const [loadingPlanoContas, setLoadingPlanoContas] = useState(true);
+  const [saveErrorPlanoContas, setSaveErrorPlanoContas] = useState(null);
+  const [showFormPlanoContas, setShowFormPlanoContas] = useState(false);
+  const [formPlanoContas, setFormPlanoContas] = useState({ codigo: "", nome: "", tipo: "despesa" });
+  const [buscaPlanoContas, setBuscaPlanoContas] = useState("");
+  // Conta bancária (do plano de contas) usada como padrão para classificar o
+  // lado "Banco" de cada lançamento do extrato — útil quando a empresa tem
+  // mais de uma conta bancária no plano de contas.
+  const [contaBancoPadraoId, setContaBancoPadraoId] = useState("");
+  const [loadingContaBancoPadrao, setLoadingContaBancoPadrao] = useState(true);
   const [formExtrato, setFormExtrato] = useState({
     data: "",
     descricao: "",
@@ -2245,6 +2696,8 @@ export default function DashboardConstrutora() {
   const STORAGE_KEY_SERVICOS = "contratos-servicos";
   const STORAGE_KEY_UNIDADES = "unidades-obra";
   const STORAGE_KEY_EMPRESTIMOS_BANCARIOS = "emprestimos-bancarios";
+  const STORAGE_KEY_PLANO_CONTAS = "plano-contas";
+  const STORAGE_KEY_CONTA_BANCO_PADRAO = "extrato-conta-banco-padrao";
   const chaveArquivoDocumento = (id) => `documento-arquivo-${id}`;
   const chaveArquivoContratoFornecedor = (id) => `contrato-fornecedor-arquivo-${id}`;
   const chaveArquivoContratoServico = (id) => `contrato-servico-arquivo-${id}`;
@@ -2435,6 +2888,46 @@ export default function DashboardConstrutora() {
         if (!cancelled) setExtrato(defaultExtrato);
       } finally {
         if (!cancelled) setLoadingExtrato(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_PLANO_CONTAS, false);
+        if (!cancelled) {
+          setPlanoContas(result ? JSON.parse(result.value) : PLANO_CONTAS_PADRAO);
+        }
+      } catch (err) {
+        if (!cancelled) setPlanoContas(PLANO_CONTAS_PADRAO);
+      } finally {
+        if (!cancelled) setLoadingPlanoContas(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_CONTA_BANCO_PADRAO, false);
+        if (!cancelled) {
+          setContaBancoPadraoId(result ? result.value : "");
+        }
+      } catch (err) {
+        if (!cancelled) setContaBancoPadraoId("");
+      } finally {
+        if (!cancelled) setLoadingContaBancoPadrao(false);
       }
     }
     load();
@@ -3051,7 +3544,12 @@ export default function DashboardConstrutora() {
       } else {
         const comDuplicados = marcarDuplicadosExtrato(lancamentos, extrato);
         const comParcelaReceber = sugerirParcelasReceber(comDuplicados, valoresReceber);
-        setExtratoPreview(sugerirContasPagar(comParcelaReceber, contasPagar));
+        const comContaPagar = sugerirContasPagar(comParcelaReceber, contasPagar);
+        const comClassificacaoContabil = comContaPagar.map((l) => ({
+          ...l,
+          ...sugerirClassificacaoContabil(l, { planoContas, contaBancoPadraoId, contasPagar, valoresReceber }),
+        }));
+        setExtratoPreview(comClassificacaoContabil);
       }
     } catch (err) {
       setPdfImportErrorExtrato("Não foi possível ler esse PDF.");
@@ -3091,6 +3589,8 @@ export default function DashboardConstrutora() {
       socio: (l.socio || "").trim(),
       parcelaReceberId: l.parcelaReceberId || "",
       contaPagarId: l.contaPagarId || "",
+      contaDebitoId: l.contaDebitoId || "",
+      contaCreditoId: l.contaCreditoId || "",
     }));
     const idsParcelasVinculadas = new Set(confirmados.filter((c) => c.parcelaReceberId).map((c) => c.parcelaReceberId));
     const novoValoresReceber = idsParcelasVinculadas.size
@@ -3108,6 +3608,102 @@ export default function DashboardConstrutora() {
 
   function handleDiscardPreviewExtrato() {
     setExtratoPreview([]);
+  }
+
+  // Define (ou troca) a classificação contábil de Débito/Crédito de um
+  // lançamento já salvo no extrato — usado pelos dois dropdowns da tabela.
+  function handleClassificarLancamento(lancamentoId, campo, valor) {
+    persistExtrato(extrato.map((l) => (l.id === lancamentoId ? { ...l, [campo]: valor } : l)));
+  }
+
+  // Exporta os lançamentos do extrato (com a classificação de Débito/Crédito
+  // já preenchida) como um CSV de referência — não é um formato de
+  // importação do Nibo (ele não aceita classificação em lote), serve para
+  // consultar mais rápido na hora de lançar manualmente lá, ou para mandar
+  // para o contador.
+  function handleExportarLancamentosContabeis() {
+    const linhas = extrato
+      .slice()
+      .sort((a, b) => (parseDateBR(a.data) || 0) - (parseDateBR(b.data) || 0))
+      .map((l) => {
+        const contaDebito = planoContas.find((c) => c.id === l.contaDebitoId);
+        const contaCredito = planoContas.find((c) => c.id === l.contaCreditoId);
+        const valor = Math.abs(Number(l.valor)).toFixed(2).replace(".", ",");
+        const campos = [
+          l.data,
+          l.descricao || "",
+          valor,
+          l.valor >= 0 ? "Crédito" : "Débito",
+          contaDebito ? `${contaDebito.codigo} - ${contaDebito.nome}` : "",
+          contaCredito ? `${contaCredito.codigo} - ${contaCredito.nome}` : "",
+        ];
+        return campos.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";");
+      });
+    const cabecalho = ["Data", "Histórico", "Valor", "Tipo", "Débito", "Crédito"]
+      .map((v) => `"${v}"`)
+      .join(";");
+    const conteudo = "﻿" + [cabecalho, ...linhas].join("\r\n");
+    const blob = new Blob([conteudo], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `lancamentos-contabeis-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  async function persistPlanoContas(nextList) {
+    setPlanoContas(nextList);
+    try {
+      const result = await window.storage.set(STORAGE_KEY_PLANO_CONTAS, JSON.stringify(nextList), false);
+      if (!result) setSaveErrorPlanoContas("Não foi possível salvar. Tente novamente.");
+      else setSaveErrorPlanoContas(null);
+    } catch (err) {
+      setSaveErrorPlanoContas("Não foi possível salvar. Tente novamente.");
+    }
+  }
+
+  function handleAddContaPlano(e) {
+    e.preventDefault();
+    if (!formPlanoContas.codigo.trim() || !formPlanoContas.nome.trim()) return;
+    const nova = {
+      id: `conta-${Date.now()}`,
+      codigo: formPlanoContas.codigo.trim(),
+      nome: formPlanoContas.nome.trim().toUpperCase(),
+      tipo: formPlanoContas.tipo,
+    };
+    const proximaLista = [...planoContas, nova].sort((a, b) =>
+      a.codigo.localeCompare(b.codigo, "pt-BR", { numeric: true })
+    );
+    persistPlanoContas(proximaLista);
+    setFormPlanoContas({ codigo: "", nome: "", tipo: "despesa" });
+    setShowFormPlanoContas(false);
+  }
+
+  function handleUpdateContaPlanoCampo(id, campo, valor) {
+    setPlanoContas((prev) => prev.map((c) => (c.id === id ? { ...c, [campo]: valor } : c)));
+  }
+
+  function handlePersistPlanoContasBlur() {
+    persistPlanoContas(planoContas);
+  }
+
+  function handleDeleteContaPlano(id) {
+    if (contaBancoPadraoId === id) {
+      persistContaBancoPadrao("");
+    }
+    persistPlanoContas(planoContas.filter((c) => c.id !== id));
+  }
+
+  async function persistContaBancoPadrao(id) {
+    setContaBancoPadraoId(id);
+    try {
+      await window.storage.set(STORAGE_KEY_CONTA_BANCO_PADRAO, id, false);
+    } catch (err) {
+      // silencioso — é só uma preferência de conveniência para a sugestão automática
+    }
   }
 
   async function persistSocios(nextList) {
@@ -4045,6 +4641,7 @@ export default function DashboardConstrutora() {
             { id: "documentos", label: "Documentos da empresa" },
             { id: "fornecedores", label: "Contratos de fornecedores" },
             { id: "servicos", label: "Contratos de prestação de serviços" },
+            { id: "contabilidade", label: "Plano de contas" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -6349,6 +6946,21 @@ export default function DashboardConstrutora() {
                   >
                     {showFormExtrato ? "CANCELAR" : "+ NOVO LANÇAMENTO"}
                   </button>
+                  <button
+                    onClick={handleExportarLancamentosContabeis}
+                    disabled={extrato.length === 0}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: "#22252A",
+                      background: "#E4E0D6",
+                      opacity: extrato.length === 0 ? 0.5 : 1,
+                    }}
+                    title="Baixa um CSV de referência com data, descrição, valor e a classificação de débito/crédito de cada lançamento"
+                  >
+                    ⬇ EXPORTAR LANÇAMENTOS CONTÁBEIS
+                  </button>
                 </div>
               </div>
 
@@ -6393,7 +7005,7 @@ export default function DashboardConstrutora() {
                       </button>
                     </div>
                   </div>
-                  <div className="hidden sm:grid grid-cols-[0.7fr_1.1fr_0.6fr_0.5fr_0.8fr_0.7fr_1fr_auto] gap-2 px-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[0.7fr_1.1fr_0.6fr_0.5fr_0.8fr_0.7fr_1fr_0.9fr_0.9fr_auto] gap-2 px-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Data</span>
                     <span>Descrição</span>
                     <span>Valor</span>
@@ -6401,6 +7013,8 @@ export default function DashboardConstrutora() {
                     <span>Status</span>
                     <span>Sócio</span>
                     <span>Vincular a</span>
+                    <span>Débito</span>
+                    <span>Crédito</span>
                     <span></span>
                   </div>
                   <div className="space-y-2">
@@ -6412,7 +7026,7 @@ export default function DashboardConstrutora() {
                       return (
                         <div
                           key={l.id}
-                          className="grid grid-cols-2 sm:grid-cols-[0.7fr_1.1fr_0.6fr_0.5fr_0.8fr_0.7fr_1fr_auto] gap-2 items-center rounded-sm px-2 py-2"
+                          className="grid grid-cols-2 sm:grid-cols-[0.7fr_1.1fr_0.6fr_0.5fr_0.8fr_0.7fr_1fr_0.9fr_0.9fr_auto] gap-2 items-center rounded-sm px-2 py-2"
                           style={{
                             border: pulandoDuplicado ? "1px solid #E4C9A8" : "1px solid #E4E0D6",
                             background: pulandoDuplicado ? "#FBF6ED" : "transparent",
@@ -6524,6 +7138,34 @@ export default function DashboardConstrutora() {
                               </span>
                             )}
                           </div>
+                          <select
+                            value={l.contaDebitoId || ""}
+                            onChange={(e) => handleUpdatePreviewRow(l.id, "contaDebitoId", e.target.value)}
+                            className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                            title="Conta de débito — sugestão automática, revise antes de lançar no Nibo"
+                          >
+                            <option value="">Débito — selecione...</option>
+                            {planoContas.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.codigo} — {c.nome}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            value={l.contaCreditoId || ""}
+                            onChange={(e) => handleUpdatePreviewRow(l.id, "contaCreditoId", e.target.value)}
+                            className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                            title="Conta de crédito — sugestão automática, revise antes de lançar no Nibo"
+                          >
+                            <option value="">Crédito — selecione...</option>
+                            {planoContas.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.codigo} — {c.nome}
+                              </option>
+                            ))}
+                          </select>
                           <button
                             onClick={() => handleRemovePreviewRow(l.id)}
                             className="text-xs w-fit"
@@ -6612,13 +7254,15 @@ export default function DashboardConstrutora() {
                 </div>
               ) : (
                 <>
-                  <div className="hidden sm:grid grid-cols-[0.7fr_2.2fr_0.7fr_0.55fr_0.8fr_1.3fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[0.7fr_2.2fr_0.7fr_0.55fr_0.8fr_1.3fr_1fr_1fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Data</span>
                     <span>Descrição</span>
                     <span>Valor</span>
                     <span>Tipo</span>
                     <span>Sócio</span>
                     <span>Vincular a</span>
+                    <span>Débito</span>
+                    <span>Crédito</span>
                     <span></span>
                   </div>
 
@@ -6633,7 +7277,7 @@ export default function DashboardConstrutora() {
                         return (
                           <div
                             key={l.id}
-                            className="grid grid-cols-2 sm:grid-cols-[0.7fr_2.2fr_0.7fr_0.55fr_0.8fr_1.3fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            className="grid grid-cols-2 sm:grid-cols-[0.7fr_2.2fr_0.7fr_0.55fr_0.8fr_1.3fr_1fr_1fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
                             <span
@@ -6700,6 +7344,34 @@ export default function DashboardConstrutora() {
                                 ))}
                               </select>
                             )}
+                            <select
+                              value={l.contaDebitoId || ""}
+                              onChange={(e) => handleClassificarLancamento(l.id, "contaDebitoId", e.target.value)}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                              title="Conta de débito — sugestão automática, revise antes de lançar no Nibo"
+                            >
+                              <option value="">Débito — selecione...</option>
+                              {planoContas.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.codigo} — {c.nome}
+                                </option>
+                              ))}
+                            </select>
+                            <select
+                              value={l.contaCreditoId || ""}
+                              onChange={(e) => handleClassificarLancamento(l.id, "contaCreditoId", e.target.value)}
+                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                              title="Conta de crédito — sugestão automática, revise antes de lançar no Nibo"
+                            >
+                              <option value="">Crédito — selecione...</option>
+                              {planoContas.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.codigo} — {c.nome}
+                                </option>
+                              ))}
+                            </select>
                             <button
                               onClick={() => handleDeleteLancamento(l.id)}
                               className="text-xs w-fit"
@@ -6722,7 +7394,10 @@ export default function DashboardConstrutora() {
               automaticamente no fluxo de caixa da Visão geral. Preencha o campo "Sócio" num lançamento
               (crédito = aporte, débito = devolução) para que ele apareça também na aba Empréstimos de
               sócios, sem duplicar o valor. Vincule um lançamento a uma "Parcela a receber" para marcá-la
-              como recebida automaticamente na aba Valores a receber — desvincular reabre a parcela.
+              como recebida automaticamente na aba Valores a receber — desvincular reabre a parcela. As
+              colunas Débito e Crédito trazem uma sugestão automática de classificação contábil (a partir
+              do plano de contas da aba "Plano de contas") para te ajudar a lançar mais rápido no Nibo —
+              sempre revise antes, principalmente em lançamentos que você ainda não tinha classificado lá.
             </p>
           </>
         )}
@@ -8307,6 +8982,214 @@ export default function DashboardConstrutora() {
             </p>
           </>
         )}
+
+        {activeTab === "contabilidade" && (() => {
+          const contasFiltradas = planoContas
+            .filter((c) => {
+              const alvo = normalizarDescricaoExtrato(`${c.codigo} ${c.nome}`);
+              return !buscaPlanoContas || alvo.includes(normalizarDescricaoExtrato(buscaPlanoContas));
+            })
+            .sort((a, b) => a.codigo.localeCompare(b.codigo, "pt-BR", { numeric: true }));
+          const contasBanco = planoContas.filter((c) => /banco/i.test(c.nome));
+          const TIPO_LABEL = {
+            ativo: "Ativo",
+            passivo: "Passivo",
+            receita: "Receita",
+            despesa: "Despesa",
+            apuracao: "Apuração",
+          };
+          return (
+          <>
+            <div className="flex flex-wrap gap-3 mb-8">
+              <KpiCard eyebrow="Contas cadastradas" value={`${planoContas.length}`} sub="no plano de contas" />
+              <KpiCard
+                eyebrow="Contas de banco"
+                value={`${contasBanco.length}`}
+                sub={contasBanco.length ? contasBanco.map((c) => c.nome).join(", ").slice(0, 60) : "nenhuma identificada"}
+              />
+            </div>
+
+            <section className="rounded-md p-5 border mb-6" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
+              <h2
+                className="text-sm uppercase tracking-[0.12em] font-semibold mb-3"
+                style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Conta bancária padrão do extrato
+              </h2>
+              <p className="text-xs mb-3" style={{ color: "#6B6F76" }}>
+                Usada para preencher automaticamente o lado "Banco" (Débito ou Crédito, conforme o lançamento
+                for entrada ou saída) ao sugerir a classificação contábil de cada lançamento do extrato. Se a
+                empresa tiver mais de uma conta bancária no plano de contas, escolha aqui qual delas o extrato
+                bancário do painel representa.
+              </p>
+              <select
+                value={contaBancoPadraoId}
+                onChange={(e) => persistContaBancoPadrao(e.target.value)}
+                className="text-sm px-3 py-2 rounded-sm border"
+                style={{ borderColor: "#DCD7C9", color: "#22252A", width: "100%", maxWidth: "480px", minWidth: 0 }}
+              >
+                <option value="">Selecione a conta bancária...</option>
+                {planoContas
+                  .filter((c) => c.tipo === "ativo")
+                  .sort((a, b) => a.codigo.localeCompare(b.codigo, "pt-BR", { numeric: true }))
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.codigo} — {c.nome}
+                    </option>
+                  ))}
+              </select>
+            </section>
+
+            <section className="rounded-md p-5 border" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                <h2
+                  className="text-sm uppercase tracking-[0.12em] font-semibold"
+                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                >
+                  Plano de contas
+                </h2>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    type="text"
+                    placeholder="Buscar por código ou nome..."
+                    value={buscaPlanoContas}
+                    onChange={(e) => setBuscaPlanoContas(e.target.value)}
+                    className="text-xs px-3 py-1.5 rounded-sm border"
+                    style={{ borderColor: "#DCD7C9", color: "#22252A", width: "220px", minWidth: 0 }}
+                  />
+                  <button
+                    onClick={() => setShowFormPlanoContas((s) => !s)}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: "#F5F3EC",
+                      background: "#3D6E8C",
+                    }}
+                  >
+                    {showFormPlanoContas ? "CANCELAR" : "+ NOVA CONTA"}
+                  </button>
+                </div>
+              </div>
+
+              {saveErrorPlanoContas && (
+                <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                  {saveErrorPlanoContas}
+                </div>
+              )}
+
+              {showFormPlanoContas && (
+                <form
+                  onSubmit={handleAddContaPlano}
+                  className="mb-5 p-4 rounded-sm grid grid-cols-1 sm:grid-cols-[1fr_2fr_1fr_auto] gap-2"
+                  style={{ background: "#FFFFFF", border: "1px solid #3D6E8C" }}
+                >
+                  <input
+                    type="text"
+                    placeholder="Código (ex: 4.1.10.512)"
+                    value={formPlanoContas.codigo}
+                    onChange={(e) => setFormPlanoContas({ ...formPlanoContas, codigo: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Nome da conta"
+                    value={formPlanoContas.nome}
+                    onChange={(e) => setFormPlanoContas({ ...formPlanoContas, nome: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                  />
+                  <select
+                    value={formPlanoContas.tipo}
+                    onChange={(e) => setFormPlanoContas({ ...formPlanoContas, tipo: e.target.value })}
+                    className="text-sm px-3 py-2 rounded-sm"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                  >
+                    {Object.entries(TIPO_LABEL).map(([valor, label]) => (
+                      <option key={valor} value={valor}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    className="text-xs font-semibold px-3 py-2 rounded-sm"
+                    style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#E1590C" }}
+                  >
+                    ADICIONAR
+                  </button>
+                </form>
+              )}
+
+              <div className="hidden sm:grid grid-cols-[1fr_2.4fr_1fr_auto] gap-2 px-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                <span>Código</span>
+                <span>Nome</span>
+                <span>Tipo</span>
+                <span></span>
+              </div>
+              <div className="space-y-1.5">
+                {contasFiltradas.map((c) => (
+                  <div
+                    key={c.id}
+                    className="grid grid-cols-2 sm:grid-cols-[1fr_2.4fr_1fr_auto] gap-2 items-center rounded-sm px-2 py-1.5"
+                    style={{ border: "1px solid #E4E0D6" }}
+                  >
+                    <input
+                      type="text"
+                      value={c.codigo}
+                      onChange={(e) => handleUpdateContaPlanoCampo(c.id, "codigo", e.target.value)}
+                      onBlur={handlePersistPlanoContasBlur}
+                      className="text-xs px-2 py-1.5 rounded-sm"
+                      style={{ border: "1px solid #DCD7C9", color: "#22252A", fontFamily: "'IBM Plex Mono', monospace", width: "100%", minWidth: 0 }}
+                    />
+                    <input
+                      type="text"
+                      value={c.nome}
+                      onChange={(e) => handleUpdateContaPlanoCampo(c.id, "nome", e.target.value)}
+                      onBlur={handlePersistPlanoContasBlur}
+                      className="text-xs px-2 py-1.5 rounded-sm"
+                      style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                    />
+                    <select
+                      value={c.tipo}
+                      onChange={(e) => handleUpdateContaPlanoCampo(c.id, "tipo", e.target.value)}
+                      onBlur={handlePersistPlanoContasBlur}
+                      className="text-xs px-2 py-1.5 rounded-sm"
+                      style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                    >
+                      {Object.entries(TIPO_LABEL).map(([valor, label]) => (
+                        <option key={valor} value={valor}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => handleDeleteContaPlano(c.id)}
+                      className="text-xs w-fit px-2"
+                      style={{ color: "#B23A2E" }}
+                      title="Excluir conta"
+                    >
+                      Excluir
+                    </button>
+                  </div>
+                ))}
+                {contasFiltradas.length === 0 && (
+                  <p className="text-xs px-2 py-3" style={{ color: "#8A8D93" }}>
+                    Nenhuma conta encontrada{buscaPlanoContas ? " para essa busca" : ""}.
+                  </p>
+                )}
+              </div>
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              Este plano de contas começou com uma cópia do plano de contas informado, mas é totalmente seu:
+              adicione, renomeie ou remova contas sempre que precisar — as mudanças ficam salvas automaticamente
+              e passam a valer nas sugestões de classificação do extrato bancário.
+            </p>
+          </>
+          );
+        })()}
         </>
         )}
       </div>
