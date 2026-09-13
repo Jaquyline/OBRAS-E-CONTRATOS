@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 
 // ---- Importação de PDF: extração por padrão de texto (sem IA) ----
 
@@ -1719,6 +1719,101 @@ function KpiCard({ eyebrow, value, sub, accent, onClick }) {
       {sub && (
         <div className="text-xs mt-1" style={{ color: "#8A8D93" }}>
           {sub}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Campo de busca para escolher uma conta do plano de contas (usado nas
+// colunas Débito/Crédito do Extrato bancário) — substitui um <select> comum
+// porque, com centenas de contas, digitar para filtrar pelo NOME é muito
+// mais rápido do que rolar a lista inteira (o <select> nativo só pula para
+// opções pelo início do texto, que aqui começa pelo código, não pelo nome).
+function SeletorConta({ value, onChange, planoContas, placeholder }) {
+  const [aberto, setAberto] = useState(false);
+  const [busca, setBusca] = useState("");
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!aberto) return;
+    function handleClickFora(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setAberto(false);
+        setBusca("");
+      }
+    }
+    document.addEventListener("mousedown", handleClickFora);
+    return () => document.removeEventListener("mousedown", handleClickFora);
+  }, [aberto]);
+
+  const contaAtual = planoContas.find((c) => c.id === value) || null;
+  // Cada palavra digitada precisa aparecer em algum lugar do código+nome,
+  // mas não precisa ser na ordem digitada nem ser um trecho contínuo — assim
+  // "terrenos isla" encontra "TERRENOS A COMERCIALIZAR - ISLA PROVIDENCIA".
+  const palavrasBusca = normalizarDescricaoExtrato(busca).split(" ").filter(Boolean);
+  const opcoesFiltradas = palavrasBusca.length
+    ? planoContas.filter((c) => {
+        const alvo = normalizarDescricaoExtrato(`${c.codigo} ${c.nome}`);
+        return palavrasBusca.every((p) => alvo.includes(p));
+      })
+    : planoContas;
+
+  return (
+    <div className="relative" ref={containerRef} style={{ width: "100%", minWidth: 0 }}>
+      <input
+        value={aberto ? busca : contaAtual ? `${contaAtual.codigo} — ${contaAtual.nome}` : ""}
+        onChange={(e) => {
+          setBusca(e.target.value);
+          setAberto(true);
+        }}
+        onFocus={() => {
+          setAberto(true);
+          setBusca("");
+        }}
+        placeholder={placeholder}
+        className="text-xs px-2 py-1.5 rounded-sm outline-none"
+        style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+      />
+      {aberto && (
+        <div
+          className="absolute z-20 mt-1 max-h-60 overflow-y-auto rounded-sm border"
+          style={{ background: "#FFFFFF", borderColor: "#DCD7C9", minWidth: "280px", boxShadow: "0 4px 14px rgba(0,0,0,0.15)" }}
+        >
+          <div
+            className="text-xs px-2 py-1.5 cursor-pointer"
+            style={{ color: "#8A8D93" }}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onChange("");
+              setAberto(false);
+              setBusca("");
+            }}
+          >
+            (nenhuma)
+          </div>
+          {opcoesFiltradas.length === 0 && (
+            <div className="text-xs px-2 py-1.5" style={{ color: "#8A8D93" }}>
+              Nenhuma conta encontrada
+            </div>
+          )}
+          {opcoesFiltradas.map((c) => (
+            <div
+              key={c.id}
+              className="text-xs px-2 py-1.5 cursor-pointer"
+              style={{ color: "#22252A", background: c.id === value ? "#E4EBEF" : "transparent" }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChange(c.id);
+                setAberto(false);
+                setBusca("");
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#F5F3EC")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = c.id === value ? "#E4EBEF" : "transparent")}
+            >
+              {c.codigo} — {c.nome}
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -7570,34 +7665,18 @@ export default function DashboardConstrutora() {
                               </span>
                             )}
                           </div>
-                          <select
+                          <SeletorConta
                             value={l.contaDebitoId || ""}
-                            onChange={(e) => handleUpdatePreviewRow(l.id, "contaDebitoId", e.target.value)}
-                            className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                            style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
-                            title="Conta de débito — sugestão automática, revise antes de lançar no Nibo"
-                          >
-                            <option value="">Débito — selecione...</option>
-                            {planoContas.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {c.codigo} — {c.nome}
-                              </option>
-                            ))}
-                          </select>
-                          <select
+                            onChange={(id) => handleUpdatePreviewRow(l.id, "contaDebitoId", id)}
+                            planoContas={planoContas}
+                            placeholder="Débito — digite para buscar..."
+                          />
+                          <SeletorConta
                             value={l.contaCreditoId || ""}
-                            onChange={(e) => handleUpdatePreviewRow(l.id, "contaCreditoId", e.target.value)}
-                            className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                            style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
-                            title="Conta de crédito — sugestão automática, revise antes de lançar no Nibo"
-                          >
-                            <option value="">Crédito — selecione...</option>
-                            {planoContas.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {c.codigo} — {c.nome}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(id) => handleUpdatePreviewRow(l.id, "contaCreditoId", id)}
+                            planoContas={planoContas}
+                            placeholder="Crédito — digite para buscar..."
+                          />
                           <button
                             onClick={() => handleRemovePreviewRow(l.id)}
                             className="text-xs w-fit"
@@ -7776,34 +7855,18 @@ export default function DashboardConstrutora() {
                                 ))}
                               </select>
                             )}
-                            <select
+                            <SeletorConta
                               value={l.contaDebitoId || ""}
-                              onChange={(e) => handleClassificarLancamento(l.id, "contaDebitoId", e.target.value)}
-                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
-                              title="Conta de débito — sugestão automática, revise antes de lançar no Nibo"
-                            >
-                              <option value="">Débito — selecione...</option>
-                              {planoContas.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.codigo} — {c.nome}
-                                </option>
-                              ))}
-                            </select>
-                            <select
+                              onChange={(id) => handleClassificarLancamento(l.id, "contaDebitoId", id)}
+                              planoContas={planoContas}
+                              placeholder="Débito — digite para buscar..."
+                            />
+                            <SeletorConta
                               value={l.contaCreditoId || ""}
-                              onChange={(e) => handleClassificarLancamento(l.id, "contaCreditoId", e.target.value)}
-                              className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
-                              title="Conta de crédito — sugestão automática, revise antes de lançar no Nibo"
-                            >
-                              <option value="">Crédito — selecione...</option>
-                              {planoContas.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.codigo} — {c.nome}
-                                </option>
-                              ))}
-                            </select>
+                              onChange={(id) => handleClassificarLancamento(l.id, "contaCreditoId", id)}
+                              planoContas={planoContas}
+                              placeholder="Crédito — digite para buscar..."
+                            />
                             <button
                               onClick={() => handleDeleteLancamento(l.id)}
                               className="text-xs w-fit"
