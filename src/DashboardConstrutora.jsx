@@ -4068,7 +4068,7 @@ export default function DashboardConstrutora() {
   }
 
   // Exporta os lançamentos do extrato (com a classificação de Débito/Crédito
-  // já preenchida) como um CSV de referência — não é um formato de
+  // já preenchida) como um TXT de referência — não é um formato de
   // importação do Nibo (ele não aceita classificação em lote), serve para
   // consultar mais rápido na hora de lançar manualmente lá, ou para mandar
   // para o contador.
@@ -4094,11 +4094,11 @@ export default function DashboardConstrutora() {
       .map((v) => `"${v}"`)
       .join(";");
     const conteudo = "﻿" + [cabecalho, ...linhas].join("\r\n");
-    const blob = new Blob([conteudo], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([conteudo], { type: "text/plain;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `lancamentos-contabeis-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `lancamentos-contabeis-${new Date().toISOString().slice(0, 10)}.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -7465,7 +7465,7 @@ export default function DashboardConstrutora() {
                           background: "#E4E0D6",
                           opacity: extrato.length === 0 ? 0.5 : 1,
                         }}
-                        title="Baixa um CSV de referência com data, descrição, valor e a classificação de débito/crédito de cada lançamento"
+                        title="Baixa um TXT de referência com data, descrição, valor e a classificação de débito/crédito de cada lançamento"
                       >
                         ⬇ EXPORTAR LANÇAMENTOS CONTÁBEIS
                       </button>
