@@ -1943,6 +1943,7 @@ function ReportView({
         titulo: "Extrato bancário",
         linhas: [
           ["Saldo inicial", formatBRL(saldoInicialExtrato)],
+          ["Saldo do extrato", formatBRL(saldoExtrato)],
           ["Total de créditos", formatBRL(totalCreditosExtrato)],
           ["Total de débitos", formatBRL(totalDebitosExtrato)],
           ["Saldo final", formatBRL(saldoFinalExtrato)],
@@ -2119,6 +2120,7 @@ function ReportView({
     titulo = "Relatório — Extrato Bancário";
     kpis = [
       { label: "Saldo inicial", value: formatBRL(saldoInicialExtrato) },
+      { label: "Saldo do extrato", value: formatBRL(saldoExtrato), accent: saldoExtrato >= 0 ? "#4F7A5B" : "#B23A2E" },
       { label: "Total de créditos", value: formatBRL(totalCreditosExtrato), accent: "#4F7A5B" },
       { label: "Total de débitos", value: formatBRL(totalDebitosExtrato), accent: "#B23A2E" },
       { label: "Saldo final", value: formatBRL(saldoFinalExtrato), accent: saldoFinalExtrato >= 0 ? "#4F7A5B" : "#B23A2E" },
@@ -7160,6 +7162,12 @@ export default function DashboardConstrutora() {
                 eyebrow="Saldo inicial"
                 value={formatBRLShort(saldoInicialExtrato)}
                 sub={formatBRL(saldoInicialExtrato)}
+              />
+              <KpiCard
+                eyebrow="Saldo do extrato"
+                value={formatBRLShort(saldoExtrato)}
+                sub={formatBRL(saldoExtrato)}
+                accent={saldoExtrato >= 0 ? "#4F7A5B" : "#B23A2E"}
               />
               <KpiCard eyebrow="Total de créditos" value={formatBRLShort(totalCreditosExtrato)} sub={formatBRL(totalCreditosExtrato)} accent="#4F7A5B" />
               <KpiCard eyebrow="Total de débitos" value={formatBRLShort(totalDebitosExtrato)} sub={formatBRL(totalDebitosExtrato)} accent="#B23A2E" />
