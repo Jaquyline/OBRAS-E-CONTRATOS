@@ -1101,11 +1101,22 @@ function RulerBar({ pct, colorFrom = "#3D6E8C", colorTo = "#3D6E8C" }) {
   );
 }
 
-function KpiCard({ eyebrow, value, sub, accent }) {
+function KpiCard({ eyebrow, value, sub, accent, onClick }) {
   return (
     <div
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") onClick();
+            }
+          : undefined
+      }
+      title={onClick ? "Ver detalhes nessa aba" : undefined}
       className="flex-1 min-w-[180px] rounded-md p-4 border"
-      style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+      style={{ background: "#F5F3EC", borderColor: "#DCD7C9", cursor: onClick ? "pointer" : "default" }}
     >
       <div
         className="text-[11px] uppercase tracking-[0.14em] font-semibold mb-2"
@@ -4023,24 +4034,32 @@ export default function DashboardConstrutora() {
         <>
         {/* KPI row */}
         <div className="flex flex-wrap gap-3 mb-8">
-          <KpiCard eyebrow="Total contratado" value={formatBRLShort(totalOrcado)} sub={formatBRL(totalOrcado)} />
+          <KpiCard
+            eyebrow="Total contratado"
+            value={formatBRLShort(totalOrcado)}
+            sub={formatBRL(totalOrcado)}
+            onClick={() => setActiveTab("custos")}
+          />
           <KpiCard
             eyebrow="Total realizado"
             value={formatBRLShort(totalRealizado)}
             sub={totalOrcado ? `${Math.round((totalRealizado / totalOrcado) * 100)}% do contratado` : "sem orçamento detalhado ainda"}
             accent="#3D6E8C"
+            onClick={() => setActiveTab("custos")}
           />
           <KpiCard
             eyebrow="Saldo em caixa"
             value={formatBRLShort(saldoCaixa)}
             sub="consolidado, últimos 6 meses"
             accent={saldoCaixa >= 0 ? "#4F7A5B" : "#B23A2E"}
+            onClick={() => setActiveTab("fluxocaixa")}
           />
           <KpiCard
             eyebrow="Contratos vencendo"
             value={`${vencendoEm30}`}
             sub="nos próximos 30 dias"
             accent={vencendoEm30 > 0 ? "#B4590C" : "#22252A"}
+            onClick={() => setActiveTab("fornecedores")}
           />
         </div>
 
@@ -4052,10 +4071,12 @@ export default function DashboardConstrutora() {
             style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
           >
             <h2
-              className="text-sm uppercase tracking-[0.12em] font-semibold mb-4"
+              onClick={() => setActiveTab("custos")}
+              title="Ver detalhamento em Custos das obras"
+              className="text-sm uppercase tracking-[0.12em] font-semibold mb-4 cursor-pointer"
               style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
             >
-              Isla Catalina — orçado × realizado
+              Isla Catalina — orçado × realizado <span style={{ color: "#8A8D93", fontWeight: 400 }}>›</span>
             </h2>
             <div className="space-y-4">
               {obrasComRealizado.map((o) => {
@@ -4123,10 +4144,13 @@ export default function DashboardConstrutora() {
             style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
           >
             <h2
-              className="text-sm uppercase tracking-[0.12em] font-semibold mb-4"
+              onClick={() => setActiveTab("fornecedores")}
+              title="Ver todos em Contratos de fornecedores"
+              className="text-sm uppercase tracking-[0.12em] font-semibold mb-4 cursor-pointer"
               style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
             >
-              Contratos de fornecedores e serviços — atenção a vencimentos
+              Contratos de fornecedores e serviços — atenção a vencimentos{" "}
+              <span style={{ color: "#8A8D93", fontWeight: 400 }}>›</span>
             </h2>
             {contratosVencimentosTodos.length === 0 ? (
               <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
@@ -4150,7 +4174,9 @@ export default function DashboardConstrutora() {
                     return (
                       <div
                         key={c.id}
-                        className="flex items-center justify-between rounded-sm px-3 py-2.5"
+                        onClick={() => setActiveTab(c.tipo ? "fornecedores" : "servicos")}
+                        title={c.tipo ? "Ver em Contratos de fornecedores" : "Ver em Contratos de prestação de serviços"}
+                        className="flex items-center justify-between rounded-sm px-3 py-2.5 cursor-pointer"
                         style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                       >
                         <div className="min-w-0 pr-2">
@@ -4193,10 +4219,12 @@ export default function DashboardConstrutora() {
           style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
         >
           <h2
-            className="text-sm uppercase tracking-[0.12em] font-semibold mb-4"
+            onClick={() => setActiveTab("pagar")}
+            title="Ver todas em Contas a pagar"
+            className="text-sm uppercase tracking-[0.12em] font-semibold mb-4 cursor-pointer"
             style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
           >
-            Contas a pagar — avisos de vencimento
+            Contas a pagar — avisos de vencimento <span style={{ color: "#8A8D93", fontWeight: 400 }}>›</span>
           </h2>
           {loadingNotas ? (
             <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
@@ -4218,7 +4246,9 @@ export default function DashboardConstrutora() {
                   return (
                     <div
                       key={c.id}
-                      className="flex items-center justify-between rounded-sm px-3 py-2.5"
+                      onClick={() => setActiveTab("pagar")}
+                      title="Ver em Contas a pagar"
+                      className="flex items-center justify-between rounded-sm px-3 py-2.5 cursor-pointer"
                       style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                     >
                       <div className="min-w-0 pr-2">
@@ -4257,10 +4287,12 @@ export default function DashboardConstrutora() {
           style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
         >
           <h2
-            className="text-sm uppercase tracking-[0.12em] font-semibold mb-4"
+            onClick={() => setActiveTab("receber")}
+            title="Ver todos em Valores a receber"
+            className="text-sm uppercase tracking-[0.12em] font-semibold mb-4 cursor-pointer"
             style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
           >
-            Valores a receber — avisos de vencimento
+            Valores a receber — avisos de vencimento <span style={{ color: "#8A8D93", fontWeight: 400 }}>›</span>
           </h2>
           {loadingCV ? (
             <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
@@ -4282,7 +4314,9 @@ export default function DashboardConstrutora() {
                   return (
                     <div
                       key={v.id}
-                      className="flex items-center justify-between rounded-sm px-3 py-2.5"
+                      onClick={() => setActiveTab("receber")}
+                      title="Ver em Valores a receber"
+                      className="flex items-center justify-between rounded-sm px-3 py-2.5 cursor-pointer"
                       style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                     >
                       <div className="min-w-0 pr-2">
