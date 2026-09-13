@@ -2844,8 +2844,6 @@ export default function DashboardConstrutora() {
   const [loadingExtrato, setLoadingExtrato] = useState(true);
   const [saveErrorExtrato, setSaveErrorExtrato] = useState(null);
   const [showFormExtrato, setShowFormExtrato] = useState(false);
-  const [pdfImportingExtrato, setPdfImportingExtrato] = useState(false);
-  const [pdfImportErrorExtrato, setPdfImportErrorExtrato] = useState(null);
   const [extratoPreview, setExtratoPreview] = useState([]);
 
   // Plano de contas (contabilidade) — editável pelo usuário na aba própria;
@@ -3816,39 +3814,6 @@ export default function DashboardConstrutora() {
     );
   }
 
-  async function handlePdfImportExtrato(e) {
-    const file = e.target.files[0];
-    e.target.value = "";
-    if (!file) return;
-    setPdfImportingExtrato(true);
-    setPdfImportErrorExtrato(null);
-    try {
-      const linhas = await extractLinesFromPdf(file);
-      let lancamentos = parseLancamentosExtrato(linhas);
-      if (lancamentos.length === 0) {
-        lancamentos = parseLancamentosExtratoVertical(linhas);
-      }
-      if (lancamentos.length === 0) {
-        setPdfImportErrorExtrato(
-          "Não consegui reconhecer lançamentos neste PDF. O formato deste extrato pode ser diferente do esperado — tente adicionar manualmente."
-        );
-      } else {
-        const comDuplicados = marcarDuplicadosExtrato(lancamentos, extrato);
-        const comParcelaReceber = sugerirParcelasReceber(comDuplicados, valoresReceber);
-        const comContaPagar = sugerirContasPagar(comParcelaReceber, contasPagar);
-        const comClassificacaoContabil = comContaPagar.map((l) => ({
-          ...l,
-          ...sugerirClassificacaoContabil(l, { planoContas, contaBancoPadraoId, contasPagar, valoresReceber }),
-        }));
-        setExtratoPreview(comClassificacaoContabil);
-      }
-    } catch (err) {
-      setPdfImportErrorExtrato("Não foi possível ler esse PDF.");
-    } finally {
-      setPdfImportingExtrato(false);
-    }
-  }
-
   async function persistExtratosPdf(nextList) {
     setExtratosPdf(nextList);
     try {
@@ -3860,10 +3825,13 @@ export default function DashboardConstrutora() {
     }
   }
 
-  // Importação para a aba "Extrato em PDF" — independente da importação da
-  // aba de Lançamentos (handlePdfImportExtrato): aqui não há conciliação,
-  // classificação contábil nem prévia editável, só a leitura fiel do PDF
-  // (por dia, com os saldos reais impressos nele) guardada para consulta.
+  // Importação única do PDF do extrato — feita a partir da sub-visualização
+  // "Extrato em PDF", mas alimenta as duas coisas de uma vez: guarda a
+  // leitura fiel por dia (com os saldos reais impressos no extrato) para
+  // consulta aqui, E já prepara a prévia de lançamentos contábeis (com
+  // sugestão de Débito/Crédito) na aba "Lançamentos" — não precisa importar
+  // duas vezes. Ao final, troca para a sub-visualização "Lançamentos" para a
+  // pessoa revisar e confirmar a importação.
   async function handleImportExtratoPdfView(e) {
     const file = e.target.files[0];
     e.target.value = "";
@@ -3872,6 +3840,7 @@ export default function DashboardConstrutora() {
     setErrorExtratoPdfView(null);
     try {
       const linhas = await extractLinesFromPdf(file);
+
       const { saldoAnterior, dias } = parseExtratoPdfComSaldos(linhas);
       if (dias.length === 0) {
         setErrorExtratoPdfView(
@@ -3886,6 +3855,25 @@ export default function DashboardConstrutora() {
           dias,
         };
         persistExtratosPdf([novoExtrato, ...extratosPdf]);
+      }
+
+      let lancamentos = parseLancamentosExtrato(linhas);
+      if (lancamentos.length === 0) {
+        lancamentos = parseLancamentosExtratoVertical(linhas);
+      }
+      if (lancamentos.length > 0) {
+        const comDuplicados = marcarDuplicadosExtrato(lancamentos, extrato);
+        const comParcelaReceber = sugerirParcelasReceber(comDuplicados, valoresReceber);
+        const comContaPagar = sugerirContasPagar(comParcelaReceber, contasPagar);
+        const comClassificacaoContabil = comContaPagar.map((l) => ({
+          ...l,
+          ...sugerirClassificacaoContabil(l, { planoContas, contaBancoPadraoId, contasPagar, valoresReceber }),
+        }));
+        setExtratoPreview(comClassificacaoContabil);
+        setSubAbaExtrato("lancamentos");
+      } else if (dias.length === 0) {
+        // nem o dia-a-dia nem os lançamentos foram reconhecidos — o erro
+        // acima já cobre esse caso, nada mais a fazer.
       }
     } catch (err) {
       setErrorExtratoPdfView("Não foi possível ler esse PDF.");
@@ -7331,24 +7319,6 @@ export default function DashboardConstrutora() {
 
                   {subAbaExtrato === "lancamentos" ? (
                     <>
-                      <label
-                        className="text-xs font-semibold px-3 py-1.5 rounded-sm cursor-pointer"
-                        style={{
-                          fontFamily: "'Oswald', sans-serif",
-                          letterSpacing: "0.03em",
-                          color: "#22252A",
-                          background: "#E4E0D6",
-                        }}
-                      >
-                        {pdfImportingExtrato ? "LENDO PDF…" : "📄 IMPORTAR PDF"}
-                        <input
-                          type="file"
-                          accept="application/pdf"
-                          onChange={handlePdfImportExtrato}
-                          disabled={pdfImportingExtrato}
-                          className="hidden"
-                        />
-                      </label>
                       <button
                         onClick={() => setShowFormExtrato((s) => !s)}
                         className="text-xs font-semibold px-3 py-1.5 rounded-sm"
@@ -7403,9 +7373,10 @@ export default function DashboardConstrutora() {
               {subAbaExtrato === "extrato-pdf" ? (
                 <>
                   <p className="text-xs max-w-xl mb-4" style={{ color: "#6B6F76" }}>
-                    Visualização somente leitura do extrato exatamente como foi exportado do banco/app,
-                    incluindo os saldos reais impressos nele (Saldo Anterior e Saldo do dia). Não é
-                    editável e não afeta os lançamentos contábeis de "Lançamentos".
+                    Importe o PDF do extrato aqui: ele alimenta esta visualização (fiel ao banco/app,
+                    com os saldos reais impressos nele — Saldo Anterior e Saldo do dia) e, ao mesmo
+                    tempo, já prepara a prévia de lançamentos contábeis na aba "Lançamentos" para você
+                    revisar e classificar.
                   </p>
 
                   {saveErrorExtratosPdf && (
@@ -7508,12 +7479,6 @@ export default function DashboardConstrutora() {
               {saveErrorExtrato && (
                 <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
                   {saveErrorExtrato}
-                </div>
-              )}
-
-              {pdfImportErrorExtrato && (
-                <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
-                  {pdfImportErrorExtrato}
                 </div>
               )}
 
