@@ -4745,7 +4745,7 @@ export default function DashboardConstrutora() {
                                             onChange={(e) => handleUpdateCustoItemCampo(it.id, "item", e.target.value)}
                                             onBlur={handlePersistCustosBlur}
                                             className="text-sm px-1.5 py-1 rounded-sm outline-none flex-1 min-w-0"
-                                            style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                            style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                                           />
                                           <button
                                             type="button"
@@ -4765,8 +4765,8 @@ export default function DashboardConstrutora() {
                                         value={it.observacoes}
                                         onChange={(e) => handleUpdateCustoItemCampo(it.id, "observacoes", e.target.value)}
                                         onBlur={handlePersistCustosBlur}
-                                        className="text-[11px] px-1.5 py-1 rounded-sm outline-none"
-                                        style={{ border: "1px solid #E4E0D6", color: "#8A8D93" }}
+                                        className="text-[11px] px-1.5 py-1 rounded-sm outline-none w-full"
+                                        style={{ border: "1px solid #E4E0D6", color: "#8A8D93", minWidth: 0 }}
                                       />
                                     </div>
                                     {it.extra ? (
@@ -4776,7 +4776,7 @@ export default function DashboardConstrutora() {
                                         onChange={(e) => handleUpdateCustoItemCampo(it.id, "unidade", e.target.value)}
                                         onBlur={handlePersistCustosBlur}
                                         className="text-xs px-1 py-1 rounded-sm outline-none w-full"
-                                        style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                        style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                                       />
                                     ) : (
                                       <span className="text-xs" style={{ color: "#6B6F76" }}>{it.unidade}</span>
@@ -4786,16 +4786,16 @@ export default function DashboardConstrutora() {
                                       value={it.quantidade}
                                       onChange={(e) => handleUpdateCustoItemCampo(it.id, "quantidade", e.target.value)}
                                       onBlur={handlePersistCustosBlur}
-                                      className="text-xs px-1.5 py-1 rounded-sm outline-none"
-                                      style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                      className="text-xs px-1.5 py-1 rounded-sm outline-none w-full"
+                                      style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0 }}
                                     />
                                     <input
                                       type="number"
                                       value={it.valorUnitario}
                                       onChange={(e) => handleUpdateCustoItemCampo(it.id, "valorUnitario", e.target.value)}
                                       onBlur={handlePersistCustosBlur}
-                                      className="text-xs px-1.5 py-1 rounded-sm outline-none"
-                                      style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                      className="text-xs px-1.5 py-1 rounded-sm outline-none w-full"
+                                      style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0 }}
                                     />
                                     <span
                                       className="text-xs"
@@ -4817,8 +4817,8 @@ export default function DashboardConstrutora() {
                                         value={it.gastoReal}
                                         onChange={(e) => handleUpdateCustoItemCampo(it.id, "gastoReal", e.target.value)}
                                         onBlur={handlePersistCustosBlur}
-                                        className="text-xs px-1.5 py-1 rounded-sm outline-none"
-                                        style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                        className="text-xs px-1.5 py-1 rounded-sm outline-none w-full"
+                                        style={{ border: "1px solid #DCD7C9", color: "#22252A", minWidth: 0 }}
                                       />
                                     )}
                                     <span
@@ -5005,7 +5005,7 @@ export default function DashboardConstrutora() {
                     value={formUnidade.obra}
                     onChange={(e) => setFormUnidade({ ...formUnidade, obra: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
                     {NOMES_OBRAS.map((o) => (
                       <option key={o} value={o}>{o}</option>
@@ -5017,21 +5017,21 @@ export default function DashboardConstrutora() {
                     value={formUnidade.unidade}
                     onChange={(e) => setFormUnidade({ ...formUnidade, unidade: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     placeholder="Andar (ex: 7º)"
                     value={formUnidade.andar}
                     onChange={(e) => setFormUnidade({ ...formUnidade, andar: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     placeholder="Tipo (ex: 3 quartos, Cobertura)"
                     value={formUnidade.tipo}
                     onChange={(e) => setFormUnidade({ ...formUnidade, tipo: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="number"
@@ -5039,7 +5039,7 @@ export default function DashboardConstrutora() {
                     value={formUnidade.metragem}
                     onChange={(e) => setFormUnidade({ ...formUnidade, metragem: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     required
@@ -5048,14 +5048,14 @@ export default function DashboardConstrutora() {
                     value={formUnidade.valorVenda}
                     onChange={(e) => setFormUnidade({ ...formUnidade, valorVenda: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     placeholder="Observações (opcional)"
                     value={formUnidade.observacoes}
                     onChange={(e) => setFormUnidade({ ...formUnidade, observacoes: e.target.value })}
                     className="sm:col-span-3 text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
 
                   <button
@@ -5338,7 +5338,7 @@ export default function DashboardConstrutora() {
                     value={form.unidade}
                     onChange={(e) => setForm({ ...form, unidade: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     required
@@ -5346,7 +5346,7 @@ export default function DashboardConstrutora() {
                     value={form.comprador}
                     onChange={(e) => setForm({ ...form, comprador: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     required
@@ -5355,7 +5355,7 @@ export default function DashboardConstrutora() {
                     value={form.valor}
                     onChange={(e) => setForm({ ...form, valor: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="number"
@@ -5365,7 +5365,7 @@ export default function DashboardConstrutora() {
                     value={form.percentualPago}
                     onChange={(e) => setForm({ ...form, percentualPago: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="date"
@@ -5373,13 +5373,13 @@ export default function DashboardConstrutora() {
                     value={dataBRparaISO(form.dataAssinatura)}
                     onChange={(e) => setForm({ ...form, dataAssinatura: dataISOparaBR(e.target.value) })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <select
                     value={form.statusPagamento}
                     onChange={(e) => setForm({ ...form, statusPagamento: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
                     <option value="em_dia">Em dia</option>
                     <option value="quitado">Quitado</option>
@@ -5396,7 +5396,7 @@ export default function DashboardConstrutora() {
                       if (personalizarParcelasCV) setPersonalizarParcelasCV(false);
                     }}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <button
                     type="button"
@@ -5429,7 +5429,7 @@ export default function DashboardConstrutora() {
                               value={v}
                               onChange={(e) => handleAtualizarValorParcelaCV(i, e.target.value)}
                               className="text-sm px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                             />
                           </label>
                           <label className="text-xs flex flex-col gap-1" style={{ color: "#8A8D93" }}>
@@ -5439,7 +5439,7 @@ export default function DashboardConstrutora() {
                               value={dataBRparaISO(datasParcelasCV[i] || "")}
                               onChange={(e) => handleAtualizarDataParcelaCV(i, dataISOparaBR(e.target.value))}
                               className="text-sm px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                             />
                           </label>
                         </div>
@@ -5647,7 +5647,7 @@ export default function DashboardConstrutora() {
                               onChange={(e) => handleUpdateParcelaReceberCampo(v.id, "juros", Number(e.target.value) || 0)}
                               onBlur={handlePersistValoresReceberBlur}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                               title="Juros recebidos além do valor original (opcional)"
                             />
                             <input
@@ -5657,7 +5657,7 @@ export default function DashboardConstrutora() {
                               onChange={(e) => handleUpdateParcelaReceberCampo(v.id, "multa", Number(e.target.value) || 0)}
                               onBlur={handlePersistValoresReceberBlur}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                               title="Multa recebida além do valor original (opcional)"
                             />
                             <span
@@ -5841,13 +5841,13 @@ export default function DashboardConstrutora() {
                     value={formNota.fornecedor}
                     onChange={(e) => setFormNota({ ...formNota, fornecedor: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <select
                     value={formNota.obra}
                     onChange={(e) => setFormNota({ ...formNota, obra: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
                     {NOMES_OBRAS.map((o) => (
                       <option key={o} value={o}>{o}</option>
@@ -5860,7 +5860,7 @@ export default function DashboardConstrutora() {
                     value={formNota.valorTotal}
                     onChange={(e) => setFormNota({ ...formNota, valorTotal: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="date"
@@ -5868,7 +5868,7 @@ export default function DashboardConstrutora() {
                     value={dataBRparaISO(formNota.dataEmissao)}
                     onChange={(e) => setFormNota({ ...formNota, dataEmissao: dataISOparaBR(e.target.value) })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="number"
@@ -5878,7 +5878,7 @@ export default function DashboardConstrutora() {
                     value={formNota.numeroParcelas}
                     onChange={(e) => setFormNota({ ...formNota, numeroParcelas: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <div className="text-xs flex items-center" style={{ color: "#8A8D93" }}>
                     As parcelas são lançadas automaticamente em Contas a pagar.
@@ -6048,13 +6048,13 @@ export default function DashboardConstrutora() {
                     value={formDespesa.fornecedor}
                     onChange={(e) => setFormDespesa({ ...formDespesa, fornecedor: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <select
                     value={formDespesa.obra}
                     onChange={(e) => setFormDespesa({ ...formDespesa, obra: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
                     {NOMES_OBRAS.map((o) => (
                       <option key={o} value={o}>{o}</option>
@@ -6067,7 +6067,7 @@ export default function DashboardConstrutora() {
                     value={formDespesa.valor}
                     onChange={(e) => setFormDespesa({ ...formDespesa, valor: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="date"
@@ -6075,7 +6075,7 @@ export default function DashboardConstrutora() {
                     value={dataBRparaISO(formDespesa.dataVencimento)}
                     onChange={(e) => setFormDespesa({ ...formDespesa, dataVencimento: dataISOparaBR(e.target.value) })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="number"
@@ -6085,7 +6085,7 @@ export default function DashboardConstrutora() {
                     value={formDespesa.numeroParcelas}
                     onChange={(e) => setFormDespesa({ ...formDespesa, numeroParcelas: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <div className="text-xs flex items-center" style={{ color: "#8A8D93" }}>
                     Use para gastos avulsos que não vieram de uma nota de compra ou contrato.
@@ -6167,7 +6167,7 @@ export default function DashboardConstrutora() {
                               onChange={(e) => handleUpdateContaPagarCampo(c.id, "juros", Number(e.target.value) || 0)}
                               onBlur={handlePersistContasPagarBlur}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                               title="Juros pagos além do valor original (opcional)"
                             />
                             <input
@@ -6177,7 +6177,7 @@ export default function DashboardConstrutora() {
                               onChange={(e) => handleUpdateContaPagarCampo(c.id, "multa", Number(e.target.value) || 0)}
                               onBlur={handlePersistContasPagarBlur}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                               title="Multa paga além do valor original (opcional)"
                             />
                             <span
@@ -6203,7 +6203,7 @@ export default function DashboardConstrutora() {
                               value={c.custoItemId || ""}
                               onChange={(e) => handleVincularCustoItem(c.id, e.target.value)}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                               title="Vincule a um item do orçamento para que o valor pago componha o Gasto Real automaticamente"
                             >
                               <option value="">— nenhum —</option>
@@ -6391,13 +6391,13 @@ export default function DashboardConstrutora() {
                             value={l.data}
                             onChange={(e) => handleUpdatePreviewRow(l.id, "data", e.target.value)}
                             className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                            style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                           />
                           <input
                             value={l.descricao}
                             onChange={(e) => handleUpdatePreviewRow(l.id, "descricao", e.target.value)}
                             className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                            style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                           />
                           <input
                             type="number"
@@ -6410,7 +6410,7 @@ export default function DashboardConstrutora() {
                               )
                             }
                             className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                            style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                           />
                           <button
                             onClick={() => handleTogglePreviewTipo(l.id)}
@@ -6446,7 +6446,7 @@ export default function DashboardConstrutora() {
                             value={l.socio || ""}
                             onChange={(e) => handleUpdatePreviewRow(l.id, "socio", e.target.value)}
                             className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                            style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                             title="Preencha se este lançamento for um aporte ou devolução de sócio"
                           >
                             <option value="">Sócio — nenhum</option>
@@ -6460,7 +6460,7 @@ export default function DashboardConstrutora() {
                                 value={l.parcelaReceberId || ""}
                                 onChange={(e) => handleUpdatePreviewRow(l.id, "parcelaReceberId", e.target.value)}
                                 className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                                style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                                 title="Ao confirmar a importação, essa parcela é marcada como recebida automaticamente"
                               >
                                 <option value="">Parcela a receber — nenhuma</option>
@@ -6475,7 +6475,7 @@ export default function DashboardConstrutora() {
                                 value={l.contaPagarId || ""}
                                 onChange={(e) => handleUpdatePreviewRow(l.id, "contaPagarId", e.target.value)}
                                 className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                                style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                                 title="Ao confirmar a importação, essa conta é marcada como paga automaticamente"
                               >
                                 <option value="">Conta a pagar — nenhuma</option>
@@ -6520,7 +6520,7 @@ export default function DashboardConstrutora() {
                     value={dataBRparaISO(formExtrato.data)}
                     onChange={(e) => setFormExtrato({ ...formExtrato, data: dataISOparaBR(e.target.value) })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     required
@@ -6528,7 +6528,7 @@ export default function DashboardConstrutora() {
                     value={formExtrato.descricao}
                     onChange={(e) => setFormExtrato({ ...formExtrato, descricao: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     required
@@ -6537,13 +6537,13 @@ export default function DashboardConstrutora() {
                     value={formExtrato.valor}
                     onChange={(e) => setFormExtrato({ ...formExtrato, valor: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <select
                     value={formExtrato.tipo}
                     onChange={(e) => setFormExtrato({ ...formExtrato, tipo: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
                     <option value="credito">Crédito (entrada)</option>
                     <option value="debito">Débito (saída)</option>
@@ -6553,7 +6553,7 @@ export default function DashboardConstrutora() {
                     value={formExtrato.socio}
                     onChange={(e) => setFormExtrato({ ...formExtrato, socio: e.target.value })}
                     className="sm:col-span-3 text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <button
                     type="submit"
@@ -6629,7 +6629,7 @@ export default function DashboardConstrutora() {
                               onChange={(e) => handleUpdateExtratoSocio(l.id, e.target.value)}
                               onBlur={handlePersistExtratoSocio}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                               title="Preencha se este lançamento for um aporte ou devolução de sócio — ele passa a contar em Empréstimos de sócios"
                             >
                               <option value="">Sócio — nenhum</option>
@@ -6642,7 +6642,7 @@ export default function DashboardConstrutora() {
                                 value={l.parcelaReceberId || ""}
                                 onChange={(e) => handleVincularParcelaReceber(l.id, e.target.value)}
                                 className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                                style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                                 title="Vincule a uma parcela de Valores a receber para marcá-la como recebida automaticamente"
                               >
                                 <option value="">Parcela a receber — nenhuma</option>
@@ -6657,7 +6657,7 @@ export default function DashboardConstrutora() {
                                 value={l.contaPagarId || ""}
                                 onChange={(e) => handleVincularContaPagar(l.id, e.target.value)}
                                 className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                                style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                                 title="Vincule a uma conta a pagar para marcá-la como paga automaticamente"
                               >
                                 <option value="">Conta a pagar — nenhuma</option>
@@ -6827,7 +6827,7 @@ export default function DashboardConstrutora() {
                     value={formSocio.socio}
                     onChange={(e) => setFormSocio({ ...formSocio, socio: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
                     <option value="">Selecione o sócio</option>
                     {NOMES_SOCIOS.map((nome) => (
@@ -6838,7 +6838,7 @@ export default function DashboardConstrutora() {
                     value={formSocio.tipo}
                     onChange={(e) => setFormSocio({ ...formSocio, tipo: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
                     <option value="aporte">Aporte (empréstimo ao caixa)</option>
                     <option value="devolucao">Devolução ao sócio</option>
@@ -6850,7 +6850,7 @@ export default function DashboardConstrutora() {
                     value={formSocio.valor}
                     onChange={(e) => setFormSocio({ ...formSocio, valor: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="date"
@@ -6858,13 +6858,13 @@ export default function DashboardConstrutora() {
                     value={dataBRparaISO(formSocio.data)}
                     onChange={(e) => setFormSocio({ ...formSocio, data: dataISOparaBR(e.target.value) })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <select
                     value={formSocio.obra}
                     onChange={(e) => setFormSocio({ ...formSocio, obra: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
                     {NOMES_OBRAS.map((o) => (
                       <option key={o} value={o}>{o}</option>
@@ -6875,7 +6875,7 @@ export default function DashboardConstrutora() {
                     value={formSocio.observacao}
                     onChange={(e) => setFormSocio({ ...formSocio, observacao: e.target.value })}
                     className="sm:col-span-3 text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <button
                     type="submit"
@@ -7064,13 +7064,13 @@ export default function DashboardConstrutora() {
                     value={formEmprestimoBancario.banco}
                     onChange={(e) => setFormEmprestimoBancario({ ...formEmprestimoBancario, banco: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <select
                     value={formEmprestimoBancario.obra}
                     onChange={(e) => setFormEmprestimoBancario({ ...formEmprestimoBancario, obra: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
                     {NOMES_OBRAS.map((o) => (
                       <option key={o} value={o}>{o}</option>
@@ -7082,7 +7082,7 @@ export default function DashboardConstrutora() {
                     value={formEmprestimoBancario.valorContratado}
                     onChange={(e) => setFormEmprestimoBancario({ ...formEmprestimoBancario, valorContratado: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                     title="O valor liberado/emprestado pelo banco"
                   />
                   <input
@@ -7092,7 +7092,7 @@ export default function DashboardConstrutora() {
                     value={formEmprestimoBancario.valorAPagar}
                     onChange={(e) => setFormEmprestimoBancario({ ...formEmprestimoBancario, valorAPagar: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                     title="O total a devolver, já com juros — é esse valor que vira parcelas em Contas a pagar"
                   />
                   <input
@@ -7103,14 +7103,14 @@ export default function DashboardConstrutora() {
                     value={formEmprestimoBancario.numeroParcelas}
                     onChange={(e) => setFormEmprestimoBancario({ ...formEmprestimoBancario, numeroParcelas: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="date"
                     value={dataBRparaISO(formEmprestimoBancario.dataContratacao)}
                     onChange={(e) => setFormEmprestimoBancario({ ...formEmprestimoBancario, dataContratacao: dataISOparaBR(e.target.value) })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                     title="Data do 1º vencimento — as demais parcelas seguem mensalmente a partir dela"
                   />
                   <input
@@ -7118,7 +7118,7 @@ export default function DashboardConstrutora() {
                     value={formEmprestimoBancario.observacoes}
                     onChange={(e) => setFormEmprestimoBancario({ ...formEmprestimoBancario, observacoes: e.target.value })}
                     className="sm:col-span-3 text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
 
                   {formEmprestimoBancario.valorAPagar && formEmprestimoBancario.dataContratacao && (() => {
@@ -7326,7 +7326,7 @@ export default function DashboardConstrutora() {
                               onChange={(e) => handleUpdateDocumentoCampo(d.id, "nome", e.target.value)}
                               onBlur={handlePersistDocumentosBlur}
                               className="text-sm px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                             />
                             <input
                               placeholder="Número"
@@ -7334,7 +7334,7 @@ export default function DashboardConstrutora() {
                               onChange={(e) => handleUpdateDocumentoCampo(d.id, "numero", e.target.value)}
                               onBlur={handlePersistDocumentosBlur}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                             />
                             <input
                               type="date"
@@ -7343,7 +7343,7 @@ export default function DashboardConstrutora() {
                               onChange={(e) => handleUpdateDocumentoCampo(d.id, "dataEmissao", dataISOparaBR(e.target.value))}
                               onBlur={handlePersistDocumentosBlur}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                             />
                             <input
                               type="date"
@@ -7352,7 +7352,7 @@ export default function DashboardConstrutora() {
                               onChange={(e) => handleUpdateDocumentoCampo(d.id, "validade", dataISOparaBR(e.target.value))}
                               onBlur={handlePersistDocumentosBlur}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                             />
                             <span
                               className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
@@ -7464,14 +7464,14 @@ export default function DashboardConstrutora() {
                     value={formDocumento.nome}
                     onChange={(e) => setFormDocumento({ ...formDocumento, nome: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     placeholder="Número (opcional)"
                     value={formDocumento.numero}
                     onChange={(e) => setFormDocumento({ ...formDocumento, numero: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="date"
@@ -7479,7 +7479,7 @@ export default function DashboardConstrutora() {
                     value={dataBRparaISO(formDocumento.dataEmissao)}
                     onChange={(e) => setFormDocumento({ ...formDocumento, dataEmissao: dataISOparaBR(e.target.value) })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <label className="flex flex-col gap-1">
                     <input
@@ -7488,7 +7488,7 @@ export default function DashboardConstrutora() {
                       value={dataBRparaISO(formDocumento.validade)}
                       onChange={(e) => setFormDocumento({ ...formDocumento, validade: dataISOparaBR(e.target.value) })}
                       className="text-sm px-3 py-2 rounded-sm outline-none"
-                      style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                      style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                     />
                     <span className="text-[10px]" style={{ color: "#8A8D93" }}>Validade — deixe em branco se não expira</span>
                   </label>
@@ -7497,7 +7497,7 @@ export default function DashboardConstrutora() {
                     value={formDocumento.observacao}
                     onChange={(e) => setFormDocumento({ ...formDocumento, observacao: e.target.value })}
                     className="sm:col-span-2 text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
 
                   <button
@@ -7743,20 +7743,20 @@ export default function DashboardConstrutora() {
                     value={formFornecedor.fornecedor}
                     onChange={(e) => setFormFornecedor({ ...formFornecedor, fornecedor: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     placeholder="CNPJ (opcional)"
                     value={formFornecedor.cnpj}
                     onChange={(e) => setFormFornecedor({ ...formFornecedor, cnpj: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <select
                     value={formFornecedor.obra}
                     onChange={(e) => setFormFornecedor({ ...formFornecedor, obra: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
                     {NOMES_OBRAS.map((o) => (
                       <option key={o} value={o}>{o}</option>
@@ -7766,7 +7766,7 @@ export default function DashboardConstrutora() {
                     value={formFornecedor.tipo}
                     onChange={(e) => setFormFornecedor({ ...formFornecedor, tipo: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
                     {TIPOS_FORNECEDOR.map((t) => (
                       <option key={t} value={t}>{t}</option>
@@ -7779,7 +7779,7 @@ export default function DashboardConstrutora() {
                     value={formFornecedor.valor}
                     onChange={(e) => setFormFornecedor({ ...formFornecedor, valor: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="number"
@@ -7789,7 +7789,7 @@ export default function DashboardConstrutora() {
                     value={formFornecedor.numeroParcelas}
                     onChange={(e) => setFormFornecedor({ ...formFornecedor, numeroParcelas: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="date"
@@ -7797,7 +7797,7 @@ export default function DashboardConstrutora() {
                     value={dataBRparaISO(formFornecedor.dataInicio)}
                     onChange={(e) => setFormFornecedor({ ...formFornecedor, dataInicio: dataISOparaBR(e.target.value) })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="date"
@@ -7805,7 +7805,7 @@ export default function DashboardConstrutora() {
                     value={dataBRparaISO(formFornecedor.dataTermino)}
                     onChange={(e) => setFormFornecedor({ ...formFornecedor, dataTermino: dataISOparaBR(e.target.value) })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <div className="text-xs flex items-center" style={{ color: "#8A8D93" }}>
                     As parcelas são lançadas automaticamente em Contas a pagar.
@@ -7815,14 +7815,14 @@ export default function DashboardConstrutora() {
                     value={formFornecedor.objeto}
                     onChange={(e) => setFormFornecedor({ ...formFornecedor, objeto: e.target.value })}
                     className="sm:col-span-2 text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     placeholder="Observações (opcional)"
                     value={formFornecedor.observacoes}
                     onChange={(e) => setFormFornecedor({ ...formFornecedor, observacoes: e.target.value })}
                     className="sm:col-span-3 text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
 
                   <button
@@ -8082,20 +8082,20 @@ export default function DashboardConstrutora() {
                     value={formServico.fornecedor}
                     onChange={(e) => setFormServico({ ...formServico, fornecedor: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     placeholder="CNPJ/CPF (opcional)"
                     value={formServico.cnpj}
                     onChange={(e) => setFormServico({ ...formServico, cnpj: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <select
                     value={formServico.obra}
                     onChange={(e) => setFormServico({ ...formServico, obra: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
                     {NOMES_OBRAS.map((o) => (
                       <option key={o} value={o}>{o}</option>
@@ -8108,7 +8108,7 @@ export default function DashboardConstrutora() {
                     value={formServico.valor}
                     onChange={(e) => setFormServico({ ...formServico, valor: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="number"
@@ -8118,7 +8118,7 @@ export default function DashboardConstrutora() {
                     value={formServico.numeroParcelas}
                     onChange={(e) => setFormServico({ ...formServico, numeroParcelas: e.target.value })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="date"
@@ -8126,7 +8126,7 @@ export default function DashboardConstrutora() {
                     value={dataBRparaISO(formServico.dataInicio)}
                     onChange={(e) => setFormServico({ ...formServico, dataInicio: dataISOparaBR(e.target.value) })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     type="date"
@@ -8134,7 +8134,7 @@ export default function DashboardConstrutora() {
                     value={dataBRparaISO(formServico.dataTermino)}
                     onChange={(e) => setFormServico({ ...formServico, dataTermino: dataISOparaBR(e.target.value) })}
                     className="text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <div className="text-xs flex items-center" style={{ color: "#8A8D93" }}>
                     As parcelas são lançadas automaticamente em Contas a pagar.
@@ -8144,14 +8144,14 @@ export default function DashboardConstrutora() {
                     value={formServico.objeto}
                     onChange={(e) => setFormServico({ ...formServico, objeto: e.target.value })}
                     className="sm:col-span-2 text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
                   <input
                     placeholder="Observações (opcional)"
                     value={formServico.observacoes}
                     onChange={(e) => setFormServico({ ...formServico, observacoes: e.target.value })}
                     className="sm:col-span-3 text-sm px-3 py-2 rounded-sm outline-none"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   />
 
                   <button
