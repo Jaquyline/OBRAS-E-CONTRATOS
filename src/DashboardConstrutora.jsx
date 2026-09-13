@@ -1799,7 +1799,7 @@ function SeletorConta({ value, onChange, planoContas, placeholder, disabled }) {
   return (
     <div className="relative" ref={containerRef} style={{ width: "100%", minWidth: 0 }}>
       <input
-        value={aberto ? busca : contaAtual ? `${contaAtual.codigo} — ${contaAtual.nome}` : ""}
+        value={aberto ? busca : contaAtual ? contaAtual.nome : ""}
         onChange={(e) => {
           setBusca(e.target.value);
           setAberto(true);
@@ -1810,7 +1810,13 @@ function SeletorConta({ value, onChange, planoContas, placeholder, disabled }) {
           setBusca("");
         }}
         disabled={disabled}
-        title={disabled ? "Lançamento já lançado — marque e use \"Editar\" ou \"Desfazer\" para alterar" : undefined}
+        title={
+          disabled
+            ? "Lançamento já lançado — marque e use \"Editar\" ou \"Desfazer\" para alterar"
+            : contaAtual
+            ? `${contaAtual.codigo} — ${contaAtual.nome}`
+            : undefined
+        }
         placeholder={placeholder}
         className="text-xs px-2 py-1.5 rounded-sm outline-none"
         style={{
@@ -1857,8 +1863,9 @@ function SeletorConta({ value, onChange, planoContas, placeholder, disabled }) {
               }}
               onMouseEnter={(e) => (e.currentTarget.style.background = "#F5F3EC")}
               onMouseLeave={(e) => (e.currentTarget.style.background = c.id === value ? "#E4EBEF" : "transparent")}
+              title={`${c.codigo} — ${c.nome}`}
             >
-              {c.codigo} — {c.nome}
+              {c.nome}
             </div>
           ))}
         </div>
@@ -9875,7 +9882,7 @@ export default function DashboardConstrutora() {
                   .sort((a, b) => a.codigo.localeCompare(b.codigo, "pt-BR", { numeric: true }))
                   .map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.codigo} — {c.nome}
+                      {c.nome}
                     </option>
                   ))}
               </select>
