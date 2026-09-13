@@ -1770,7 +1770,7 @@ function KpiCard({ eyebrow, value, sub, accent, onClick }) {
 // porque, com centenas de contas, digitar para filtrar pelo NOME é muito
 // mais rápido do que rolar a lista inteira (o <select> nativo só pula para
 // opções pelo início do texto, que aqui começa pelo código, não pelo nome).
-function SeletorConta({ value, onChange, planoContas, placeholder }) {
+function SeletorConta({ value, onChange, planoContas, placeholder, disabled }) {
   const [aberto, setAberto] = useState(false);
   const [busca, setBusca] = useState("");
   const containerRef = useRef(null);
@@ -1805,14 +1805,24 @@ function SeletorConta({ value, onChange, planoContas, placeholder }) {
           setAberto(true);
         }}
         onFocus={() => {
+          if (disabled) return;
           setAberto(true);
           setBusca("");
         }}
+        disabled={disabled}
+        title={disabled ? "Lançamento já lançado — marque e use \"Editar\" ou \"Desfazer\" para alterar" : undefined}
         placeholder={placeholder}
         className="text-xs px-2 py-1.5 rounded-sm outline-none"
-        style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+        style={{
+          border: "1px solid #DCD7C9",
+          color: disabled ? "#8A8D93" : "#22252A",
+          background: disabled ? "#F3F1EA" : "#FFFFFF",
+          cursor: disabled ? "not-allowed" : "text",
+          width: "100%",
+          minWidth: 0,
+        }}
       />
-      {aberto && (
+      {aberto && !disabled && (
         <div
           className="absolute z-20 mt-1 max-h-60 overflow-y-auto rounded-sm border"
           style={{ background: "#FFFFFF", borderColor: "#DCD7C9", minWidth: "280px", boxShadow: "0 4px 14px rgba(0,0,0,0.15)" }}
@@ -2868,6 +2878,13 @@ export default function DashboardConstrutora() {
   const [saveErrorExtrato, setSaveErrorExtrato] = useState(null);
   const [showFormExtrato, setShowFormExtrato] = useState(false);
   const [extratoPreview, setExtratoPreview] = useState([]);
+  // Seleção (checkbox) e "desbloqueio" de lançamentos já salvos — igual ao
+  // padrão da Nibo: um lançamento "Lançado" (Débito e Crédito preenchidos)
+  // trava os campos de classificação para evitar alteração acidental; para
+  // mudar, a pessoa marca o(s) lançamento(s) e usa "Editar" ou "Desfazer" na
+  // barra de seleção. Nada disso é salvo — reseta ao recarregar a página.
+  const [selecionadosLancamentos, setSelecionadosLancamentos] = useState(() => new Set());
+  const [lancamentosDesbloqueados, setLancamentosDesbloqueados] = useState(() => new Set());
 
   // Plano de contas (contabilidade) — editável pelo usuário na aba própria;
   // começa com o plano de contas padrão só na primeira vez (nada salvo ainda).
@@ -3965,6 +3982,60 @@ export default function DashboardConstrutora() {
   // lançamento já salvo no extrato — usado pelos dois dropdowns da tabela.
   function handleClassificarLancamento(lancamentoId, campo, valor) {
     persistExtrato(extrato.map((l) => (l.id === lancamentoId ? { ...l, [campo]: valor } : l)));
+  }
+
+  // Seleção (checkbox) dos lançamentos já salvos, e ações em lote sobre a
+  // seleção — igual à barra "N item(ns) selecionado(s)" da Nibo.
+  function toggleSelecaoLancamento(id) {
+    setSelecionadosLancamentos((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function limparSelecaoLancamentos() {
+    setSelecionadosLancamentos(new Set());
+  }
+
+  // "Editar" na barra de seleção — apenas destrava os campos de
+  // classificação dos lançamentos marcados (sem apagar nada), para a pessoa
+  // poder trocar Sócio/Vincular a/Débito/Crédito de um lançamento já
+  // "Lançado".
+  function handleEditarSelecionados() {
+    setLancamentosDesbloqueados((prev) => {
+      const next = new Set(prev);
+      selecionadosLancamentos.forEach((id) => next.add(id));
+      return next;
+    });
+    limparSelecaoLancamentos();
+  }
+
+  // "Desfazer" na barra de seleção — limpa a classificação (Débito/Crédito)
+  // dos lançamentos marcados, voltando-os para "Pendente", e já destrava os
+  // campos para reclassificar. Um único persistExtrato para todos os
+  // marcados de uma vez (evita perder alterações ao processar vários ids em
+  // sequência).
+  function handleDesfazerSelecionados() {
+    const ids = selecionadosLancamentos;
+    persistExtrato(
+      extrato.map((l) => (ids.has(l.id) ? { ...l, contaDebitoId: "", contaCreditoId: "" } : l))
+    );
+    setLancamentosDesbloqueados((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.add(id));
+      return next;
+    });
+    limparSelecaoLancamentos();
+  }
+
+  // "Excluir" na barra de seleção — remove todos os lançamentos marcados de
+  // uma vez.
+  function handleExcluirSelecionados() {
+    const ids = selecionadosLancamentos;
+    persistExtrato(extrato.filter((l) => !ids.has(l.id)));
+    limparSelecaoLancamentos();
   }
 
   // Exporta os lançamentos do extrato (com a classificação de Débito/Crédito
@@ -7534,7 +7605,7 @@ export default function DashboardConstrutora() {
                       </button>
                     </div>
                   </div>
-                  <div className="hidden sm:grid grid-cols-[0.7fr_1.1fr_0.6fr_0.5fr_0.8fr_0.7fr_1fr_0.9fr_0.9fr_auto] gap-2 px-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[0.6fr_1.8fr_0.5fr_0.45fr_0.6fr_0.6fr_0.95fr_1fr_1fr_auto] gap-2 px-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Data</span>
                     <span>Descrição</span>
                     <span>Valor</span>
@@ -7555,7 +7626,7 @@ export default function DashboardConstrutora() {
                       return (
                         <div
                           key={l.id}
-                          className="grid grid-cols-2 sm:grid-cols-[0.7fr_1.1fr_0.6fr_0.5fr_0.8fr_0.7fr_1fr_0.9fr_0.9fr_auto] gap-2 items-center rounded-sm px-2 py-2"
+                          className="grid grid-cols-2 sm:grid-cols-[0.6fr_1.8fr_0.5fr_0.45fr_0.6fr_0.6fr_0.95fr_1fr_1fr_auto] gap-2 items-center rounded-sm px-2 py-2"
                           style={{
                             border: pulandoDuplicado ? "1px solid #E4C9A8" : "1px solid #E4E0D6",
                             background: pulandoDuplicado ? "#FBF6ED" : "transparent",
@@ -7571,6 +7642,7 @@ export default function DashboardConstrutora() {
                           <input
                             value={l.descricao}
                             onChange={(e) => handleUpdatePreviewRow(l.id, "descricao", e.target.value)}
+                            title={l.descricao}
                             className="text-xs px-2 py-1.5 rounded-sm outline-none"
                             style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                           />
@@ -7777,9 +7849,25 @@ export default function DashboardConstrutora() {
                 <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
                   Nenhum lançamento ainda. Importe um PDF ou adicione manualmente.
                 </div>
-              ) : (
+              ) : (() => {
+                const extratoOrdenado = extrato
+                  .slice()
+                  .sort((a, b) => (parseDateBR(b.data) || 0) - (parseDateBR(a.data) || 0));
+                const todosSelecionados =
+                  extratoOrdenado.length > 0 && extratoOrdenado.every((l) => selecionadosLancamentos.has(l.id));
+                return (
                 <>
-                  <div className="hidden sm:grid grid-cols-[0.7fr_2fr_0.7fr_0.55fr_0.65fr_0.8fr_1.3fr_1fr_1fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[24px_0.7fr_2fr_0.7fr_0.55fr_0.65fr_0.8fr_1.3fr_1fr_1fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold items-center" style={{ color: "#8A8D93" }}>
+                    <input
+                      type="checkbox"
+                      checked={todosSelecionados}
+                      onChange={() =>
+                        setSelecionadosLancamentos(
+                          todosSelecionados ? new Set() : new Set(extratoOrdenado.map((l) => l.id))
+                        )
+                      }
+                      title="Selecionar todos"
+                    />
                     <span>Data</span>
                     <span>Descrição</span>
                     <span>Valor</span>
@@ -7792,21 +7880,42 @@ export default function DashboardConstrutora() {
                     <span></span>
                   </div>
 
-                  <div className="space-y-2">
-                    {extrato
-                      .slice()
-                      .sort((a, b) => (parseDateBR(b.data) || 0) - (parseDateBR(a.data) || 0))
-                      .map((l) => {
+                  <div className="space-y-2" style={{ paddingBottom: selecionadosLancamentos.size > 0 ? 64 : 0 }}>
+                    {extratoOrdenado.map((l) => {
                         const cfg = tipoExtratoConfig(l.valor);
                         const statusCfg = statusClassificacaoConfig[statusClassificacaoContabil(l)];
                         const opcoesParcela = opcoesParcelaReceberPara(l.id, l.parcelaReceberId);
                         const opcoesConta = opcoesContaPagarPara(l.id, l.contaPagarId);
+                        const selecionado = selecionadosLancamentos.has(l.id);
+                        // Igual à Nibo: um lançamento "Lançado" trava os campos de
+                        // classificação — para mudar, marque e use "Editar" ou
+                        // "Desfazer" na barra que aparece embaixo.
+                        const bloqueado =
+                          statusClassificacaoContabil(l) === "lancado" && !lancamentosDesbloqueados.has(l.id);
+                        const tituloBloqueado = 'Lançamento já lançado — marque e use "Editar" ou "Desfazer" para alterar';
+                        const estiloCampo = {
+                          border: "1px solid #DCD7C9",
+                          color: bloqueado ? "#8A8D93" : "#22252A",
+                          background: bloqueado ? "#F3F1EA" : "#FFFFFF",
+                          cursor: bloqueado ? "not-allowed" : "auto",
+                          width: "100%",
+                          minWidth: 0,
+                        };
                         return (
                           <div
                             key={l.id}
-                            className="grid grid-cols-2 sm:grid-cols-[0.7fr_2fr_0.7fr_0.55fr_0.65fr_0.8fr_1.3fr_1fr_1fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
-                            style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
+                            className="grid grid-cols-2 sm:grid-cols-[24px_0.7fr_2fr_0.7fr_0.55fr_0.65fr_0.8fr_1.3fr_1fr_1fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            style={{
+                              background: selecionado ? "#EAF1F6" : "#FFFFFF",
+                              border: selecionado ? "1px solid #3D6E8C" : "1px solid #E4E0D6",
+                            }}
                           >
+                            <input
+                              type="checkbox"
+                              checked={selecionado}
+                              onChange={() => toggleSelecaoLancamento(l.id)}
+                              className="hidden sm:inline-block"
+                            />
                             <span
                               className="text-xs"
                               style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
@@ -7838,9 +7947,10 @@ export default function DashboardConstrutora() {
                               value={l.socio || ""}
                               onChange={(e) => handleUpdateExtratoSocio(l.id, e.target.value)}
                               onBlur={handlePersistExtratoSocio}
+                              disabled={bloqueado}
                               className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                              style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
-                              title="Preencha se este lançamento for um aporte ou devolução de sócio — ele passa a contar em Empréstimos de sócios"
+                              style={estiloCampo}
+                              title={bloqueado ? tituloBloqueado : "Preencha se este lançamento for um aporte ou devolução de sócio — ele passa a contar em Empréstimos de sócios"}
                             >
                               <option value="">Sócio — nenhum</option>
                               {NOMES_SOCIOS.map((nome) => (
@@ -7851,9 +7961,10 @@ export default function DashboardConstrutora() {
                               <select
                                 value={l.parcelaReceberId || ""}
                                 onChange={(e) => handleVincularParcelaReceber(l.id, e.target.value)}
+                                disabled={bloqueado}
                                 className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                                style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
-                                title="Vincule a uma parcela de Valores a receber para marcá-la como recebida automaticamente"
+                                style={estiloCampo}
+                                title={bloqueado ? tituloBloqueado : "Vincule a uma parcela de Valores a receber para marcá-la como recebida automaticamente"}
                               >
                                 <option value="">Parcela a receber — nenhuma</option>
                                 {opcoesParcela.map((v) => (
@@ -7866,9 +7977,10 @@ export default function DashboardConstrutora() {
                               <select
                                 value={l.contaPagarId || ""}
                                 onChange={(e) => handleVincularContaPagar(l.id, e.target.value)}
+                                disabled={bloqueado}
                                 className="text-xs px-2 py-1.5 rounded-sm outline-none"
-                                style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
-                                title="Vincule a uma conta a pagar para marcá-la como paga automaticamente"
+                                style={estiloCampo}
+                                title={bloqueado ? tituloBloqueado : "Vincule a uma conta a pagar para marcá-la como paga automaticamente"}
                               >
                                 <option value="">Conta a pagar — nenhuma</option>
                                 {opcoesConta.map((c) => (
@@ -7883,12 +7995,14 @@ export default function DashboardConstrutora() {
                               onChange={(id) => handleClassificarLancamento(l.id, "contaDebitoId", id)}
                               planoContas={planoContas}
                               placeholder="Débito — digite para buscar..."
+                              disabled={bloqueado}
                             />
                             <SeletorConta
                               value={l.contaCreditoId || ""}
                               onChange={(id) => handleClassificarLancamento(l.id, "contaCreditoId", id)}
                               planoContas={planoContas}
                               placeholder="Crédito — digite para buscar..."
+                              disabled={bloqueado}
                             />
                             <button
                               onClick={() => handleDeleteLancamento(l.id)}
@@ -7902,8 +8016,55 @@ export default function DashboardConstrutora() {
                         );
                       })}
                   </div>
+
+                  {selecionadosLancamentos.size > 0 && (
+                    <div
+                      className="flex items-center gap-3 px-4 py-2.5 rounded-full flex-wrap justify-center"
+                      style={{
+                        position: "fixed",
+                        left: "50%",
+                        bottom: 20,
+                        transform: "translateX(-50%)",
+                        background: "#22252A",
+                        boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
+                        zIndex: 30,
+                      }}
+                    >
+                      <span className="text-xs font-semibold flex items-center gap-2" style={{ color: "#F5F3EC" }}>
+                        {selecionadosLancamentos.size} item(ns) selecionado(s)
+                        <button onClick={limparSelecaoLancamentos} title="Limpar seleção" style={{ color: "#C7CBD1" }}>
+                          ✕
+                        </button>
+                      </span>
+                      <button
+                        onClick={handleEditarSelecionados}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-full"
+                        style={{ color: "#F5F3EC", background: "#3D6E8C" }}
+                        title="Destrava os campos para editar, sem apagar a classificação atual"
+                      >
+                        ✎ Editar
+                      </button>
+                      <button
+                        onClick={handleDesfazerSelecionados}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-full"
+                        style={{ color: "#F5F3EC", background: "#8A6A3E" }}
+                        title="Limpa a classificação (Débito/Crédito) e volta para Pendente"
+                      >
+                        ↺ Desfazer
+                      </button>
+                      <button
+                        onClick={handleExcluirSelecionados}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-full"
+                        style={{ color: "#F5F3EC", background: "#B23A2E" }}
+                        title="Excluir os lançamentos selecionados"
+                      >
+                        🗑 Excluir
+                      </button>
+                    </div>
+                  )}
                 </>
-              )}
+                );
+              })()}
                 </>
               )}
             </section>
