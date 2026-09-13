@@ -4110,44 +4110,6 @@ export default function DashboardConstrutora() {
     setFiltroLancStatus("");
   }
 
-  // Exporta os lançamentos do extrato (com a classificação de Débito/Crédito
-  // já preenchida) como um TXT de referência — não é um formato de
-  // importação do Nibo (ele não aceita classificação em lote), serve para
-  // consultar mais rápido na hora de lançar manualmente lá, ou para mandar
-  // para o contador.
-  function handleExportarLancamentosContabeis() {
-    const linhas = extrato
-      .slice()
-      .sort((a, b) => (parseDateBR(a.data) || 0) - (parseDateBR(b.data) || 0))
-      .map((l) => {
-        const contaDebito = planoContas.find((c) => c.id === l.contaDebitoId);
-        const contaCredito = planoContas.find((c) => c.id === l.contaCreditoId);
-        const valor = Math.abs(Number(l.valor)).toFixed(2).replace(".", ",");
-        const campos = [
-          l.data,
-          l.descricao || "",
-          valor,
-          l.valor >= 0 ? "Crédito" : "Débito",
-          contaDebito ? `${contaDebito.codigo} - ${contaDebito.nome}` : "",
-          contaCredito ? `${contaCredito.codigo} - ${contaCredito.nome}` : "",
-        ];
-        return campos.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";");
-      });
-    const cabecalho = ["Data", "Histórico", "Valor", "Tipo", "Débito", "Crédito"]
-      .map((v) => `"${v}"`)
-      .join(";");
-    const conteudo = "﻿" + [cabecalho, ...linhas].join("\r\n");
-    const blob = new Blob([conteudo], { type: "text/plain;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `lancamentos-contabeis-${new Date().toISOString().slice(0, 10)}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }
-
   // Exportação no layout posicional (largura fixa) que a Domínio Sistemas
   // exige para importar lançamentos contábeis — decodificado a partir de um
   // arquivo real que a pessoa já importou com sucesso lá. Cada lançamento
@@ -4175,12 +4137,27 @@ export default function DashboardConstrutora() {
   }
 
   function handleExportarLancamentosDominio() {
-    const candidatos = extrato.filter((l) => l.contaDebitoId && l.contaCreditoId);
+    // Usa o mesmo período do filtro "Data de" / "Data até" da barra de
+    // filtros acima da tabela de Lançamentos — assim dá pra exportar só o
+    // período desejado (ex: só o mês que ainda não foi importado na
+    // Domínio), em vez de mandar tudo de novo e duplicar lançamentos que já
+    // foram importados antes. Deixe os dois filtros vazios para exportar
+    // todos os lançamentos "Lançados".
+    const filtroDataDeObj = filtroLancDataDe ? new Date(filtroLancDataDe + "T00:00:00") : null;
+    const filtroDataAteObj = filtroLancDataAte ? new Date(filtroLancDataAte + "T23:59:59") : null;
+    const candidatos = extrato.filter((l) => {
+      if (!l.contaDebitoId || !l.contaCreditoId) return false;
+      const dataLanc = parseDateBR(l.data);
+      if (filtroDataDeObj && (!dataLanc || dataLanc < filtroDataDeObj)) return false;
+      if (filtroDataAteObj && (!dataLanc || dataLanc > filtroDataAteObj)) return false;
+      return true;
+    });
     const ordenados = candidatos
       .slice()
       .sort((a, b) => (parseDateBR(a.data) || 0) - (parseDateBR(b.data) || 0));
 
     const semCodigo = [];
+    const contasSemCodigo = new Map();
     const registros = [];
     let seq = 1;
     let dataMin = null;
@@ -4193,6 +4170,8 @@ export default function DashboardConstrutora() {
       const codCredito = codigoDominioDe(contaCredito);
       if (!codDebito || !codCredito) {
         semCodigo.push(l);
+        if (!codDebito && contaDebito) contasSemCodigo.set(contaDebito.id, contaDebito);
+        if (!codCredito && contaCredito) contasSemCodigo.set(contaCredito.id, contaCredito);
         return;
       }
       const dataObj = parseDateBR(l.data);
@@ -4238,11 +4217,15 @@ export default function DashboardConstrutora() {
       seq++;
     });
 
+    const filtroPeriodoAtivo = filtroLancDataDe || filtroLancDataAte;
+    const nomesContasSemCodigo = Array.from(contasSemCodigo.values())
+      .map((c) => c.nome)
+      .join(", ");
     if (registros.length === 0) {
       setAvisoExportDominio(
         semCodigo.length > 0
-          ? `Nenhum lançamento pôde ser exportado: ${semCodigo.length} lançamento(s) "Lançado(s)" está(ão) com uma conta (Débito e/ou Crédito) sem "Código Domínio" preenchido no Plano de Contas.`
-          : "Não há lançamentos com Débito e Crédito preenchidos (\"Lançado\") para exportar."
+          ? `Nenhum lançamento pôde ser exportado: ${semCodigo.length} lançamento(s) "Lançado(s)" está(ão) com uma conta sem "Código Domínio" preenchido no Plano de Contas. Contas para preencher: ${nomesContasSemCodigo}.`
+          : `Não há lançamentos "Lançados" para exportar${filtroPeriodoAtivo ? " no período selecionado no filtro (Data de / Data até)" : ""}.`
       );
       return;
     }
@@ -4271,10 +4254,15 @@ export default function DashboardConstrutora() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
+    const qtdExportada = registros.length / 3;
+    const periodoTexto = filtroPeriodoAtivo
+      ? ` (período: ${filtroLancDataDe || "início"} até ${filtroLancDataAte || "hoje"})`
+      : " (todos os lançamentos Lançados, sem filtro de período)";
     setAvisoExportDominio(
-      semCodigo.length > 0
-        ? `Arquivo gerado com ${registros.length / 3} lançamento(s). ${semCodigo.length} lançamento(s) ficaram de fora por falta de "Código Domínio" em alguma conta (preencha na aba Plano de Contas e exporte de novo).`
-        : null
+      `Arquivo gerado com ${qtdExportada} lançamento(s)${periodoTexto}.` +
+        (semCodigo.length > 0
+          ? ` ${semCodigo.length} lançamento(s) ficaram de fora por falta de "Código Domínio" em alguma conta (preencha na aba Plano de Contas e exporte de novo).`
+          : "")
     );
   }
 
@@ -7629,21 +7617,6 @@ export default function DashboardConstrutora() {
                         {showFormExtrato ? "CANCELAR" : "+ NOVO LANÇAMENTO"}
                       </button>
                       <button
-                        onClick={handleExportarLancamentosContabeis}
-                        disabled={extrato.length === 0}
-                        className="text-xs font-semibold px-3 py-1.5 rounded-sm"
-                        style={{
-                          fontFamily: "'Oswald', sans-serif",
-                          letterSpacing: "0.03em",
-                          color: "#22252A",
-                          background: "#E4E0D6",
-                          opacity: extrato.length === 0 ? 0.5 : 1,
-                        }}
-                        title="Baixa um TXT de referência com data, descrição, valor e a classificação de débito/crédito de cada lançamento"
-                      >
-                        ⬇ EXPORTAR LANÇAMENTOS CONTÁBEIS
-                      </button>
-                      <button
                         onClick={handleExportarLancamentosDominio}
                         disabled={extrato.length === 0}
                         className="text-xs font-semibold px-3 py-1.5 rounded-sm"
@@ -7654,7 +7627,7 @@ export default function DashboardConstrutora() {
                           background: "#4F7A5B",
                           opacity: extrato.length === 0 ? 0.5 : 1,
                         }}
-                        title="Gera o TXT no formato que a Domínio Sistemas espera para importar lançamentos contábeis"
+                        title="Gera o TXT no formato que a Domínio Sistemas espera para importar lançamentos contábeis. Usa o período do filtro Data de/Data até logo abaixo (deixe vazio para exportar tudo)."
                       >
                         ⬇ EXPORTAR PARA DOMÍNIO
                       </button>
