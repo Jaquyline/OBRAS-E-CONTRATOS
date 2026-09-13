@@ -42,7 +42,11 @@ async function extractTextFromPdf(file) {
 // Extrai o texto preservando quebras de linha por linha visual (agrupando
 // itens pela posição Y), essencial para ler extratos bancários tabulares
 // (data | descrição | valor) — extractTextFromPdf junta tudo numa linha só
-// por página e por isso não serve para esse caso.
+// por página e por isso não serve para esse caso. Cada linha carrega também
+// sua posição Y (dentro da própria página) e se é a primeira linha de uma
+// nova página — usado por parseLancamentosExtratoVertical para saber onde um
+// lançamento termina e o próximo começa, inclusive quando o extrato tem mais
+// de uma página.
 async function extractLinesFromPdf(file) {
   const pdfjsLib = await loadPdfJs();
   const arrayBuffer = await file.arrayBuffer();
@@ -60,14 +64,14 @@ async function extractLinesFromPdf(file) {
     const ys = Object.keys(linhasPorY)
       .map(Number)
       .sort((a, b) => b - a); // de cima para baixo (Y cresce para cima em PDF)
-    ys.forEach((y) => {
+    ys.forEach((y, idx) => {
       const texto = linhasPorY[y]
         .sort((a, b) => a.transform[4] - b.transform[4])
         .map((it) => it.str)
         .join(" ")
         .replace(/\s+/g, " ")
         .trim();
-      if (texto) linhas.push(texto);
+      if (texto) linhas.push({ y, texto, novaPagina: idx === 0 });
     });
   }
   return linhas;
@@ -186,7 +190,8 @@ function parseLancamentosExtrato(linhas) {
     /^(\d{2}\/\d{2}(?:\/\d{2,4})?)\s+(.+?)\s+(-)?\s?(?:R\$\s?)?(\d{1,3}(?:\.\d{3})*,\d{2})\s*([CD])?$/i;
   const resultado = [];
 
-  linhas.forEach((linha) => {
+  linhas.forEach((linhaObj) => {
+    const linha = linhaObj.texto;
     const m = linha.match(linhaRegex);
     if (!m) return;
     const [, dataStr, descricaoRaw, sinalNeg, valorStr, marcador] = m;
@@ -215,46 +220,70 @@ function parseLancamentosExtrato(linhas) {
   return resultado;
 }
 
-const MESES_ABREV_EXTRATO = {
-  JAN: "01", FEV: "02", MAR: "03", ABR: "04", MAI: "05", JUN: "06",
-  JUL: "07", AGO: "08", SET: "09", OUT: "10", NOV: "11", DEZ: "12",
-};
-
 // Extração alternativa para extratos em formato "lista vertical" — comum em
 // extratos exportados direto do aplicativo do banco no celular (em vez de
 // uma tabela com data/descrição/valor lado a lado, cada lançamento aparece
-// em várias linhas empilhadas: uma ou mais linhas de descrição, o valor
-// — ex: "-R$ 324,63" — e por fim um marcador curto de dia+mês — ex:
-// "26AGO"). O ano vem de um cabeçalho "DD de Mês de AAAA" encontrado em
-// qualquer lugar do documento (assume um único ano no extrato). Linhas de
-// saldo ("Saldo do dia", "Saldo Anterior") são ignoradas. Usado como
-// segunda tentativa quando parseLancamentosExtrato não encontra nada.
+// como um "cartão" com 1-4 linhas: rótulo, valor — ex: "-R$ 324,63" — e às
+// vezes 1-2 linhas de complemento/contraparte). Cada cartão também tem um
+// pequeno marcador de dia+mês (ex: "26AGO"), mas a posição vertical dele
+// dentro do cartão não é confiável (pode cair no meio de um nome de
+// fornecedor escrito em duas linhas) — por isso essa extração NÃO usa o
+// marcador para separar lançamentos. Em vez disso usa: (1) o cabeçalho de
+// data de cada bloco ("26 de Agosto de 2026, ...") para saber o dia, e (2) o
+// salto vertical entre linhas — bem maior entre cartões do que dentro do
+// mesmo cartão, e sempre "grande" numa quebra de página — para saber onde um
+// lançamento termina e o próximo começa. Isso também corrige o caso de
+// extratos com várias páginas, que antes só reconheciam os lançamentos da
+// 1ª página. Linhas de saldo ("Saldo do dia", "Saldo Anterior") fecham o
+// cartão atual. Usado como segunda tentativa quando parseLancamentosExtrato
+// não encontra nada.
 function parseLancamentosExtratoVertical(linhas) {
   let ano = String(new Date().getFullYear());
-  for (const linha of linhas) {
-    const m = linha.match(/\bde\s+[a-zçã]+\s+de\s+(\d{4})\b/i);
-    if (m) {
-      ano = m[1];
-      break;
-    }
+  let diaAtual = null;
+  let mesAtual = null;
+
+  // Salto vertical (em pontos) a partir do qual duas linhas são consideradas
+  // de cartões/lançamentos diferentes. Nos exemplos observados, o maior
+  // espaçamento dentro de um mesmo cartão (entre a 1ª e a 2ª linha de um
+  // nome de contraparte em duas linhas) fica em torno de 22-23pt, enquanto o
+  // espaçamento entre cartões distintos é de 45pt ou mais — 32 fica
+  // confortavelmente no meio.
+  const GAP_CARTAO = 32;
+
+  const cartoes = [];
+  let cartaoAtual = null;
+  let yAnterior = null;
+
+  function novoCartao() {
+    cartaoAtual = { linhas: [], dia: diaAtual, mes: mesAtual, ano };
+    cartoes.push(cartaoAtual);
   }
 
-  const resultado = [];
-  let bufferDescricao = [];
-
-  linhas.forEach((linhaOriginal) => {
-    const linha = (linhaOriginal || "").trim();
+  linhas.forEach((l) => {
+    const linha = (l.texto || "").trim();
     if (!linha) return;
 
-    // Linhas de saldo — não são lançamentos, descarta o que estava acumulado
-    if (/^saldo\s+(do\s+dia|anterior)/i.test(linha)) {
-      bufferDescricao = [];
+    // Cabeçalho de data completo ("26 de Agosto de 2026, Quarta-feira") —
+    // define o dia usado em todos os lançamentos do bloco seguinte, até o
+    // próximo cabeçalho.
+    const headerMatch = linha.match(/^(\d{1,2})\s+de\s+([a-zçã]+)\s+de\s+(\d{4})/i);
+    if (headerMatch) {
+      const [, dia, mesNome, anoHeader] = headerMatch;
+      const mes = MESES[mesNome.toLowerCase()];
+      if (mes) {
+        diaAtual = dia.padStart(2, "0");
+        mesAtual = mes;
+        ano = anoHeader;
+      }
+      cartaoAtual = null;
+      yAnterior = null;
       return;
     }
 
-    // Cabeçalho de data completo ("26 de Agosto de 2026, Quarta-feira")
-    if (/^\d{1,2}\s+de\s+[a-zçã]+\s+de\s+\d{4}/i.test(linha)) {
-      bufferDescricao = [];
+    // Linhas de saldo — não são lançamentos, fecham o cartão acumulado
+    if (/^saldo\s+(do\s+dia|anterior)/i.test(linha)) {
+      cartaoAtual = null;
+      yAnterior = null;
       return;
     }
 
@@ -263,53 +292,56 @@ function parseLancamentosExtratoVertical(linhas) {
       return;
     }
 
-    // Marcador de dia+mês (ex: "26AGO") — fecha o lançamento acumulado
-    const marcadorMatch = linha.match(/^(\d{1,2})([A-Z]{3})$/);
-    if (marcadorMatch) {
-      if (bufferDescricao.length === 0) return; // marcador sem conteúdo antes — ignora
-
-      const [, dia, mesAbrev] = marcadorMatch;
-      const mes = MESES_ABREV_EXTRATO[mesAbrev.toUpperCase()];
-      if (!mes) {
-        bufferDescricao = [];
-        return;
-      }
-
-      // A última linha do buffer traz o valor — sozinha ("-R$ 324,63") ou
-      // junto com uma descrição curta na mesma linha ("Tar Pix -R$ 3,15")
-      const ultimaLinha = bufferDescricao[bufferDescricao.length - 1];
-      const valorMatch = ultimaLinha.match(/^(.*?)\s*(-)?\s?R\$\s?([\d.,]+)\s*$/i);
-      if (!valorMatch) {
-        bufferDescricao = [];
-        return;
-      }
-      const [, descExtra, sinalNeg, valorStr] = valorMatch;
-      const numero = parseFloat(valorStr.replace(/\./g, "").replace(",", "."));
-      if (Number.isNaN(numero)) {
-        bufferDescricao = [];
-        return;
-      }
-      const valor = sinalNeg === "-" ? -Math.abs(numero) : Math.abs(numero);
-
-      const descricaoPartes = bufferDescricao.slice(0, -1);
-      if (descExtra && descExtra.trim()) descricaoPartes.push(descExtra.trim());
-      const descricao = descricaoPartes.join(" ").trim().replace(/\s+/g, " ");
-
-      if (descricao) {
-        resultado.push({
-          id: `tmp-${resultado.length}-${Date.now()}`,
-          data: `${dia.padStart(2, "0")}/${mes}/${ano}`,
-          descricao,
-          valor,
-          socio: "",
-        });
-      }
-      bufferDescricao = [];
+    // Marcador de dia+mês (ex: "26AGO") — a data já vem do cabeçalho do
+    // bloco, então esse marcador só serviria para confirmar; como sua
+    // posição pode cair no meio da descrição de um lançamento, é ignorado.
+    if (/^\d{1,2}[A-Z]{3}$/.test(linha)) {
       return;
     }
 
-    // Linha comum — acumula como parte da descrição (ou descrição+valor)
-    bufferDescricao.push(linha);
+    const salto = yAnterior === null ? Infinity : yAnterior - l.y;
+    if (l.novaPagina || cartaoAtual === null || salto > GAP_CARTAO) {
+      novoCartao();
+    }
+    cartaoAtual.linhas.push(linha);
+    yAnterior = l.y;
+  });
+
+  const resultado = [];
+  cartoes.forEach((cartao) => {
+    if (!cartao.dia || !cartao.mes) return;
+
+    // Dentro do cartão, a linha do valor pode vir sozinha ("-R$ 324,63") ou
+    // com um pedaço da descrição antes, na mesma linha ("Tar Pix -R$ 3,15");
+    // as demais linhas (antes ou depois) são descrição/complemento.
+    let valor = null;
+    const descricaoPartes = [];
+    cartao.linhas.forEach((linha) => {
+      if (valor === null && /R\$/.test(linha)) {
+        const valorMatch = linha.match(/^(.*?)\s*(-)?\s?R\$\s?([\d.,]+)\s*$/i);
+        if (valorMatch) {
+          const [, descExtra, sinalNeg, valorStr] = valorMatch;
+          const numero = parseFloat(valorStr.replace(/\./g, "").replace(",", "."));
+          if (!Number.isNaN(numero)) {
+            valor = sinalNeg === "-" ? -Math.abs(numero) : Math.abs(numero);
+            if (descExtra && descExtra.trim()) descricaoPartes.push(descExtra.trim());
+            return;
+          }
+        }
+      }
+      descricaoPartes.push(linha);
+    });
+
+    const descricao = descricaoPartes.join(" ").trim().replace(/\s+/g, " ");
+    if (valor !== null && descricao) {
+      resultado.push({
+        id: `tmp-${resultado.length}-${Date.now()}`,
+        data: `${cartao.dia}/${cartao.mes}/${cartao.ano}`,
+        descricao,
+        valor,
+        socio: "",
+      });
+    }
   });
 
   return resultado;
