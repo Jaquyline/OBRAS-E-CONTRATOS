@@ -669,6 +669,123 @@ function parseLancamentosExtratoVertical(linhas) {
   return resultado;
 }
 
+// Extração para a aba "Extrato em PDF" (visualização somente leitura): ao
+// contrário de parseLancamentosExtratoVertical (usada na aba de Lançamentos
+// contábeis, que ignora as linhas de saldo porque ali o saldo inicial é
+// controlado manualmente pelo usuário), essa função MANTÉM a divisão por dia
+// e os saldos reais impressos no próprio extrato ("Saldo Anterior" e "Saldo
+// do dia" de cada dia) — para simplesmente mostrar o extrato tal como veio
+// do banco/app, sem misturar com a contabilização.
+function parseExtratoPdfComSaldos(linhas) {
+  const GAP_CARTAO = 32;
+
+  const dias = [];
+  let diaAtualObj = null;
+  let cartaoAtual = null;
+  let yAnterior = null;
+  let saldoAnterior = null;
+
+  function novoCartao() {
+    cartaoAtual = { linhas: [] };
+    if (diaAtualObj) diaAtualObj.cartoes.push(cartaoAtual);
+  }
+
+  linhas.forEach((l) => {
+    const linha = (l.texto || "").trim();
+    if (!linha) return;
+
+    const headerMatch = linha.match(/^(\d{1,2})\s+de\s+([a-zçã]+)\s+de\s+(\d{4})(?:,\s*(.+))?/i);
+    if (headerMatch) {
+      const [, dia, mesNome, anoHeader, diaSemana] = headerMatch;
+      const mes = MESES[mesNome.toLowerCase()];
+      if (mes) {
+        const dataLabel = `${dia.padStart(2, "0")}/${mes}/${anoHeader}`;
+        diaAtualObj = {
+          data: dataLabel,
+          diaSemana: (diaSemana || "").replace(/\s*-\s*/g, "-"),
+          saldoDoDia: null,
+          cartoes: [],
+        };
+        dias.push(diaAtualObj);
+      }
+      cartaoAtual = null;
+      yAnterior = null;
+      return;
+    }
+
+    const saldoDoDiaMatch = linha.match(/^saldo\s+do\s+dia\D*(-)?\s?R\$\s?([\d.,]+)/i);
+    if (saldoDoDiaMatch) {
+      const [, sinalNeg, valorStr] = saldoDoDiaMatch;
+      const numero = parseFloat(valorStr.replace(/\./g, "").replace(",", "."));
+      if (!Number.isNaN(numero) && diaAtualObj) {
+        diaAtualObj.saldoDoDia = sinalNeg === "-" ? -Math.abs(numero) : Math.abs(numero);
+      }
+      cartaoAtual = null;
+      yAnterior = null;
+      return;
+    }
+
+    const saldoAnteriorMatch = linha.match(/^saldo\s+anterior\D*(-)?\s?R\$\s?([\d.,]+)/i);
+    if (saldoAnteriorMatch) {
+      const [, sinalNeg, valorStr] = saldoAnteriorMatch;
+      const numero = parseFloat(valorStr.replace(/\./g, "").replace(",", "."));
+      if (!Number.isNaN(numero)) {
+        saldoAnterior = sinalNeg === "-" ? -Math.abs(numero) : Math.abs(numero);
+      }
+      cartaoAtual = null;
+      yAnterior = null;
+      return;
+    }
+
+    if (/^(extrato por per[íi]odo|ordenar|compartilhar|voltar)$/i.test(linha)) {
+      return;
+    }
+
+    if (/^\d{1,2}[A-Z]{3}$/.test(linha)) {
+      return;
+    }
+
+    if (!diaAtualObj) return;
+
+    const salto = yAnterior === null ? Infinity : yAnterior - l.y;
+    if (l.novaPagina || cartaoAtual === null || salto > GAP_CARTAO) {
+      novoCartao();
+    }
+    cartaoAtual.linhas.push(linha);
+    yAnterior = l.y;
+  });
+
+  dias.forEach((dia) => {
+    dia.lancamentos = dia.cartoes
+      .map((cartao) => {
+        let valor = null;
+        const descricaoPartes = [];
+        cartao.linhas.forEach((linha) => {
+          if (valor === null && /R\$/.test(linha)) {
+            const valorMatch = linha.match(/^(.*?)\s*(-)?\s?R\$\s?([\d.,]+)\s*$/i);
+            if (valorMatch) {
+              const [, descExtra, sinalNeg, valorStr] = valorMatch;
+              const numero = parseFloat(valorStr.replace(/\./g, "").replace(",", "."));
+              if (!Number.isNaN(numero)) {
+                valor = sinalNeg === "-" ? -Math.abs(numero) : Math.abs(numero);
+                if (descExtra && descExtra.trim()) descricaoPartes.push(descExtra.trim());
+                return;
+              }
+            }
+          }
+          descricaoPartes.push(linha);
+        });
+        const descricao = descricaoPartes.join(" ").trim().replace(/\s+/g, " ");
+        if (valor === null || !descricao) return null;
+        return { descricao, valor };
+      })
+      .filter(Boolean);
+    delete dia.cartoes;
+  });
+
+  return { saldoAnterior, dias };
+}
+
 // Compara uma lista de lançamentos recém-lidos do PDF com o que já está
 // salvo no Extrato bancário e marca como "já lançado" os que baterem
 // exatamente em data + descrição + valor — útil quando o período de um
@@ -2639,6 +2756,15 @@ export default function DashboardConstrutora() {
   // (saldo inicial + créditos - débitos).
   const [saldoInicialExtrato, setSaldoInicialExtrato] = useState(0);
   const [loadingSaldoInicialExtrato, setLoadingSaldoInicialExtrato] = useState(true);
+  // Aba "Extrato em PDF" — visualização somente leitura de cada PDF
+  // importado, mantendo a divisão por dia e os saldos reais impressos no
+  // próprio extrato (Saldo Anterior, Saldo do dia); não interfere nos
+  // lançamentos contábeis da aba "Extrato bancário".
+  const [extratosPdf, setExtratosPdf] = useState([]);
+  const [loadingExtratosPdf, setLoadingExtratosPdf] = useState(true);
+  const [importingExtratoPdfView, setImportingExtratoPdfView] = useState(false);
+  const [errorExtratoPdfView, setErrorExtratoPdfView] = useState(null);
+  const [saveErrorExtratosPdf, setSaveErrorExtratosPdf] = useState(null);
   const [formExtrato, setFormExtrato] = useState({
     data: "",
     descricao: "",
@@ -2709,6 +2835,7 @@ export default function DashboardConstrutora() {
   const STORAGE_KEY_PLANO_CONTAS = "plano-contas";
   const STORAGE_KEY_CONTA_BANCO_PADRAO = "extrato-conta-banco-padrao";
   const STORAGE_KEY_SALDO_INICIAL_EXTRATO = "extrato-saldo-inicial";
+  const STORAGE_KEY_EXTRATOS_PDF = "extratos-pdf-visualizacao";
   const chaveArquivoDocumento = (id) => `documento-arquivo-${id}`;
   const chaveArquivoContratoFornecedor = (id) => `contrato-fornecedor-arquivo-${id}`;
   const chaveArquivoContratoServico = (id) => `contrato-servico-arquivo-${id}`;
@@ -2959,6 +3086,26 @@ export default function DashboardConstrutora() {
         if (!cancelled) setSaldoInicialExtrato(0);
       } finally {
         if (!cancelled) setLoadingSaldoInicialExtrato(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_EXTRATOS_PDF, false);
+        if (!cancelled) {
+          setExtratosPdf(result ? JSON.parse(result.value) : []);
+        }
+      } catch (err) {
+        if (!cancelled) setExtratosPdf([]);
+      } finally {
+        if (!cancelled) setLoadingExtratosPdf(false);
       }
     }
     load();
@@ -3587,6 +3734,55 @@ export default function DashboardConstrutora() {
     } finally {
       setPdfImportingExtrato(false);
     }
+  }
+
+  async function persistExtratosPdf(nextList) {
+    setExtratosPdf(nextList);
+    try {
+      const result = await window.storage.set(STORAGE_KEY_EXTRATOS_PDF, JSON.stringify(nextList), false);
+      if (!result) setSaveErrorExtratosPdf("Não foi possível salvar. Tente novamente.");
+      else setSaveErrorExtratosPdf(null);
+    } catch (err) {
+      setSaveErrorExtratosPdf("Não foi possível salvar. Tente novamente.");
+    }
+  }
+
+  // Importação para a aba "Extrato em PDF" — independente da importação da
+  // aba de Lançamentos (handlePdfImportExtrato): aqui não há conciliação,
+  // classificação contábil nem prévia editável, só a leitura fiel do PDF
+  // (por dia, com os saldos reais impressos nele) guardada para consulta.
+  async function handleImportExtratoPdfView(e) {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setImportingExtratoPdfView(true);
+    setErrorExtratoPdfView(null);
+    try {
+      const linhas = await extractLinesFromPdf(file);
+      const { saldoAnterior, dias } = parseExtratoPdfComSaldos(linhas);
+      if (dias.length === 0) {
+        setErrorExtratoPdfView(
+          "Não consegui reconhecer os dias/lançamentos neste PDF. O formato deste extrato pode ser diferente do esperado."
+        );
+      } else {
+        const novoExtrato = {
+          id: `extrato-pdf-${Date.now()}`,
+          nomeArquivo: file.name,
+          importadoEm: new Date().toISOString(),
+          saldoAnterior,
+          dias,
+        };
+        persistExtratosPdf([novoExtrato, ...extratosPdf]);
+      }
+    } catch (err) {
+      setErrorExtratoPdfView("Não foi possível ler esse PDF.");
+    } finally {
+      setImportingExtratoPdfView(false);
+    }
+  }
+
+  function handleRemoverExtratoPdfView(id) {
+    persistExtratosPdf(extratosPdf.filter((x) => x.id !== id));
   }
 
   function handleUpdatePreviewRow(id, campo, valor) {
@@ -4680,6 +4876,7 @@ export default function DashboardConstrutora() {
             { id: "notas", label: "Notas de compras" },
             { id: "pagar", label: "Contas a pagar" },
             { id: "extrato", label: "Extrato bancário" },
+            { id: "extrato-pdf", label: "Extrato em PDF" },
             { id: "socios", label: "Empréstimos de sócios" },
             { id: "emprestimosbancarios", label: "Empréstimos bancários" },
             { id: "documentos", label: "Documentos da empresa" },
@@ -7470,6 +7667,131 @@ export default function DashboardConstrutora() {
               do plano de contas da aba "Plano de contas") para te ajudar a lançar mais rápido no Nibo —
               sempre revise antes, principalmente em lançamentos que você ainda não tinha classificado lá.
             </p>
+          </>
+        )}
+
+        {activeTab === "extrato-pdf" && (
+          <>
+            <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
+              <p className="text-xs max-w-xl" style={{ color: "#6B6F76" }}>
+                Visualização somente leitura do extrato exatamente como foi exportado do banco/app,
+                incluindo os saldos reais impressos nele (Saldo Anterior e Saldo do dia). Não é editável
+                e não afeta os lançamentos contábeis da aba "Extrato bancário".
+              </p>
+              <label
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm cursor-pointer"
+                style={{
+                  fontFamily: "'Oswald', sans-serif",
+                  letterSpacing: "0.03em",
+                  color: "#22252A",
+                  background: "#E4E0D6",
+                }}
+              >
+                {importingExtratoPdfView ? "LENDO PDF…" : "📄 IMPORTAR PDF"}
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleImportExtratoPdfView}
+                  disabled={importingExtratoPdfView}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {saveErrorExtratosPdf && (
+              <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                {saveErrorExtratosPdf}
+              </div>
+            )}
+
+            {errorExtratoPdfView && (
+              <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                {errorExtratoPdfView}
+              </div>
+            )}
+
+            {loadingExtratosPdf ? (
+              <p className="text-sm" style={{ color: "#6B6F76" }}>Carregando…</p>
+            ) : extratosPdf.length === 0 ? (
+              <p className="text-sm" style={{ color: "#6B6F76" }}>Nenhum extrato em PDF importado ainda.</p>
+            ) : (
+              extratosPdf.map((ex) => (
+                <section
+                  key={ex.id}
+                  className="rounded-md p-5 border mb-5"
+                  style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
+                >
+                  <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                    <div>
+                      <h3
+                        className="text-sm font-semibold"
+                        style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                      >
+                        {ex.nomeArquivo}
+                      </h3>
+                      <p className="text-xs" style={{ color: "#6B6F76" }}>
+                        Importado em {new Date(ex.importadoEm).toLocaleString("pt-BR")}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {ex.saldoAnterior !== null && (
+                        <KpiCard
+                          eyebrow="Saldo anterior (real, do PDF)"
+                          value={formatBRLShort(ex.saldoAnterior)}
+                          sub={formatBRL(ex.saldoAnterior)}
+                          accent={ex.saldoAnterior >= 0 ? "#4F7A5B" : "#B23A2E"}
+                        />
+                      )}
+                      <button
+                        onClick={() => handleRemoverExtratoPdfView(ex.id)}
+                        className="text-xs px-3 py-1.5 rounded-sm"
+                        style={{ color: "#B23A2E", background: "#F8E3E0" }}
+                      >
+                        Remover
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {ex.dias.map((dia, i) => (
+                      <div key={i} className="rounded-sm p-3" style={{ background: "#FFFFFF", border: "1px solid #DCD7C9" }}>
+                        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                          <span className="text-xs font-semibold" style={{ color: "#22252A" }}>
+                            {dia.data}
+                            {dia.diaSemana ? ` — ${dia.diaSemana}` : ""}
+                          </span>
+                          {dia.saldoDoDia !== null && (
+                            <span
+                              className="text-xs font-semibold"
+                              style={{ color: dia.saldoDoDia >= 0 ? "#4F7A5B" : "#B23A2E" }}
+                            >
+                              Saldo do dia: {formatBRL(dia.saldoDoDia)}
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          {dia.lancamentos.map((l, j) => (
+                            <div
+                              key={j}
+                              className="flex items-center justify-between text-xs py-1.5 gap-3"
+                              style={{ borderTop: j > 0 ? "1px solid #EDEAE0" : "none" }}
+                            >
+                              <span style={{ color: "#22252A" }}>{l.descricao}</span>
+                              <span
+                                className="font-mono whitespace-nowrap"
+                                style={{ color: l.valor >= 0 ? "#4F7A5B" : "#B23A2E" }}
+                              >
+                                {formatBRL(l.valor)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ))
+            )}
           </>
         )}
 
