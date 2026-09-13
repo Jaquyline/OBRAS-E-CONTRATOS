@@ -801,6 +801,32 @@ function normalizarDescricaoExtrato(texto) {
     .trim();
 }
 
+// Mant\u00e9m s\u00f3 os d\u00edgitos de um texto \u2014 usado para buscar uma conta do plano de
+// contas pelo n\u00famero, ignorando pontos/h\u00edfens/barras de formata\u00e7\u00e3o (assim
+// "2002" ou "11102002" encontram o c\u00f3digo "1.1.10.200.2", e "6695" encontra
+// "CONTA: 669-5").
+function somenteDigitos(texto) {
+  return (texto || "").replace(/\D+/g, "");
+}
+
+// Verifica se uma conta do plano de contas corresponde ao texto buscado \u2014
+// tanto por palavras do c\u00f3digo/nome (ignorando acento/mai\u00fasculas, em
+// qualquer ordem, sem precisar ser um trecho cont\u00ednuo) quanto pelos d\u00edgitos
+// do n\u00famero da conta (ignorando a formata\u00e7\u00e3o com pontos/h\u00edfens/barras).
+function contaCorrespondeABusca(conta, busca) {
+  const textoBusca = normalizarDescricaoExtrato(busca);
+  if (!textoBusca) return true;
+  const alvoTexto = normalizarDescricaoExtrato(`${conta.codigo} ${conta.nome}`);
+  const palavras = textoBusca.split(" ").filter(Boolean);
+  if (palavras.every((p) => alvoTexto.includes(p))) return true;
+  const digitosBusca = somenteDigitos(busca);
+  if (digitosBusca.length >= 2) {
+    const digitosAlvo = somenteDigitos(`${conta.codigo} ${conta.nome}`);
+    if (digitosAlvo.includes(digitosBusca)) return true;
+  }
+  return false;
+}
+
 function marcarDuplicadosExtrato(lancamentosNovos, extratoExistente) {
   const existentesChaves = new Set(
     extratoExistente.map(
@@ -1762,15 +1788,12 @@ function SeletorConta({ value, onChange, planoContas, placeholder }) {
   }, [aberto]);
 
   const contaAtual = planoContas.find((c) => c.id === value) || null;
-  // Cada palavra digitada precisa aparecer em algum lugar do código+nome,
-  // mas não precisa ser na ordem digitada nem ser um trecho contínuo — assim
-  // "terrenos isla" encontra "TERRENOS A COMERCIALIZAR - ISLA PROVIDENCIA".
-  const palavrasBusca = normalizarDescricaoExtrato(busca).split(" ").filter(Boolean);
-  const opcoesFiltradas = palavrasBusca.length
-    ? planoContas.filter((c) => {
-        const alvo = normalizarDescricaoExtrato(`${c.codigo} ${c.nome}`);
-        return palavrasBusca.every((p) => alvo.includes(p));
-      })
+  // Busca por palavras do código/nome (em qualquer ordem, sem acento) OU
+  // pelos dígitos do número da conta (ignorando pontos/hífens) — assim
+  // "terrenos isla" encontra "TERRENOS A COMERCIALIZAR - ISLA PROVIDENCIA" e
+  // "2002" ou "6695" encontram a conta pelo número.
+  const opcoesFiltradas = busca.trim()
+    ? planoContas.filter((c) => contaCorrespondeABusca(c, busca))
     : planoContas;
 
   return (
@@ -9482,10 +9505,7 @@ export default function DashboardConstrutora() {
 
         {activeTab === "contabilidade" && (() => {
           const contasFiltradas = planoContas
-            .filter((c) => {
-              const alvo = normalizarDescricaoExtrato(`${c.codigo} ${c.nome}`);
-              return !buscaPlanoContas || alvo.includes(normalizarDescricaoExtrato(buscaPlanoContas));
-            })
+            .filter((c) => contaCorrespondeABusca(c, buscaPlanoContas))
             .sort((a, b) => a.codigo.localeCompare(b.codigo, "pt-BR", { numeric: true }));
           const contasBanco = planoContas.filter((c) => /banco/i.test(c.nome));
           const TIPO_LABEL = {
