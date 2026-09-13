@@ -2758,10 +2758,12 @@ export default function DashboardConstrutora() {
   // (saldo inicial + créditos - débitos).
   const [saldoInicialExtrato, setSaldoInicialExtrato] = useState(0);
   const [loadingSaldoInicialExtrato, setLoadingSaldoInicialExtrato] = useState(true);
-  // Aba "Extrato em PDF" — visualização somente leitura de cada PDF
-  // importado, mantendo a divisão por dia e os saldos reais impressos no
-  // próprio extrato (Saldo Anterior, Saldo do dia); não interfere nos
-  // lançamentos contábeis da aba "Extrato bancário".
+  // Sub-visualização "Extrato em PDF" dentro da própria aba Extrato
+  // bancário — visualização somente leitura de cada PDF importado,
+  // mantendo a divisão por dia e os saldos reais impressos no próprio
+  // extrato (Saldo Anterior, Saldo do dia); não interfere nos lançamentos
+  // contábeis (Débito/Crédito) da mesma aba.
+  const [subAbaExtrato, setSubAbaExtrato] = useState("lancamentos");
   const [extratosPdf, setExtratosPdf] = useState([]);
   const [loadingExtratosPdf, setLoadingExtratosPdf] = useState(true);
   const [importingExtratoPdfView, setImportingExtratoPdfView] = useState(false);
@@ -4878,7 +4880,6 @@ export default function DashboardConstrutora() {
             { id: "notas", label: "Notas de compras" },
             { id: "pagar", label: "Contas a pagar" },
             { id: "extrato", label: "Extrato bancário" },
-            { id: "extrato-pdf", label: "Extrato em PDF" },
             { id: "socios", label: "Empréstimos de sócios" },
             { id: "emprestimosbancarios", label: "Empréstimos bancários" },
             { id: "documentos", label: "Documentos da empresa" },
@@ -7189,57 +7190,212 @@ export default function DashboardConstrutora() {
                   className="text-sm uppercase tracking-[0.12em] font-semibold"
                   style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
                 >
-                  Extrato bancário
+                  {subAbaExtrato === "extrato-pdf" ? "Extrato bancário — Extrato em PDF" : "Extrato bancário"}
                 </h2>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <label
-                    className="text-xs font-semibold px-3 py-1.5 rounded-sm cursor-pointer"
-                    style={{
-                      fontFamily: "'Oswald', sans-serif",
-                      letterSpacing: "0.03em",
-                      color: "#22252A",
-                      background: "#E4E0D6",
-                    }}
-                  >
-                    {pdfImportingExtrato ? "LENDO PDF…" : "📄 IMPORTAR PDF"}
-                    <input
-                      type="file"
-                      accept="application/pdf"
-                      onChange={handlePdfImportExtrato}
-                      disabled={pdfImportingExtrato}
-                      className="hidden"
-                    />
-                  </label>
-                  <button
-                    onClick={() => setShowFormExtrato((s) => !s)}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-sm"
-                    style={{
-                      fontFamily: "'Oswald', sans-serif",
-                      letterSpacing: "0.03em",
-                      color: "#F5F3EC",
-                      background: "#3D6E8C",
-                    }}
-                  >
-                    {showFormExtrato ? "CANCELAR" : "+ NOVO LANÇAMENTO"}
-                  </button>
-                  <button
-                    onClick={handleExportarLancamentosContabeis}
-                    disabled={extrato.length === 0}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-sm"
-                    style={{
-                      fontFamily: "'Oswald', sans-serif",
-                      letterSpacing: "0.03em",
-                      color: "#22252A",
-                      background: "#E4E0D6",
-                      opacity: extrato.length === 0 ? 0.5 : 1,
-                    }}
-                    title="Baixa um CSV de referência com data, descrição, valor e a classificação de débito/crédito de cada lançamento"
-                  >
-                    ⬇ EXPORTAR LANÇAMENTOS CONTÁBEIS
-                  </button>
+                  <div className="flex items-center rounded-sm overflow-hidden" style={{ border: "1px solid #DCD7C9" }}>
+                    <button
+                      onClick={() => setSubAbaExtrato("lancamentos")}
+                      className="text-xs font-semibold px-3 py-1.5"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: subAbaExtrato === "lancamentos" ? "#F5F3EC" : "#22252A",
+                        background: subAbaExtrato === "lancamentos" ? "#3D6E8C" : "#E4E0D6",
+                      }}
+                    >
+                      Lançamentos
+                    </button>
+                    <button
+                      onClick={() => setSubAbaExtrato("extrato-pdf")}
+                      className="text-xs font-semibold px-3 py-1.5"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: subAbaExtrato === "extrato-pdf" ? "#F5F3EC" : "#22252A",
+                        background: subAbaExtrato === "extrato-pdf" ? "#3D6E8C" : "#E4E0D6",
+                      }}
+                    >
+                      📄 Extrato em PDF
+                    </button>
+                  </div>
+
+                  {subAbaExtrato === "lancamentos" ? (
+                    <>
+                      <label
+                        className="text-xs font-semibold px-3 py-1.5 rounded-sm cursor-pointer"
+                        style={{
+                          fontFamily: "'Oswald', sans-serif",
+                          letterSpacing: "0.03em",
+                          color: "#22252A",
+                          background: "#E4E0D6",
+                        }}
+                      >
+                        {pdfImportingExtrato ? "LENDO PDF…" : "📄 IMPORTAR PDF"}
+                        <input
+                          type="file"
+                          accept="application/pdf"
+                          onChange={handlePdfImportExtrato}
+                          disabled={pdfImportingExtrato}
+                          className="hidden"
+                        />
+                      </label>
+                      <button
+                        onClick={() => setShowFormExtrato((s) => !s)}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                        style={{
+                          fontFamily: "'Oswald', sans-serif",
+                          letterSpacing: "0.03em",
+                          color: "#F5F3EC",
+                          background: "#3D6E8C",
+                        }}
+                      >
+                        {showFormExtrato ? "CANCELAR" : "+ NOVO LANÇAMENTO"}
+                      </button>
+                      <button
+                        onClick={handleExportarLancamentosContabeis}
+                        disabled={extrato.length === 0}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                        style={{
+                          fontFamily: "'Oswald', sans-serif",
+                          letterSpacing: "0.03em",
+                          color: "#22252A",
+                          background: "#E4E0D6",
+                          opacity: extrato.length === 0 ? 0.5 : 1,
+                        }}
+                        title="Baixa um CSV de referência com data, descrição, valor e a classificação de débito/crédito de cada lançamento"
+                      >
+                        ⬇ EXPORTAR LANÇAMENTOS CONTÁBEIS
+                      </button>
+                    </>
+                  ) : (
+                    <label
+                      className="text-xs font-semibold px-3 py-1.5 rounded-sm cursor-pointer"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: "#22252A",
+                        background: "#E4E0D6",
+                      }}
+                    >
+                      {importingExtratoPdfView ? "LENDO PDF…" : "📄 IMPORTAR PDF"}
+                      <input
+                        type="file"
+                        accept="application/pdf"
+                        onChange={handleImportExtratoPdfView}
+                        disabled={importingExtratoPdfView}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
                 </div>
               </div>
 
+              {subAbaExtrato === "extrato-pdf" ? (
+                <>
+                  <p className="text-xs max-w-xl mb-4" style={{ color: "#6B6F76" }}>
+                    Visualização somente leitura do extrato exatamente como foi exportado do banco/app,
+                    incluindo os saldos reais impressos nele (Saldo Anterior e Saldo do dia). Não é
+                    editável e não afeta os lançamentos contábeis de "Lançamentos".
+                  </p>
+
+                  {saveErrorExtratosPdf && (
+                    <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                      {saveErrorExtratosPdf}
+                    </div>
+                  )}
+
+                  {errorExtratoPdfView && (
+                    <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                      {errorExtratoPdfView}
+                    </div>
+                  )}
+
+                  {loadingExtratosPdf ? (
+                    <p className="text-sm" style={{ color: "#6B6F76" }}>Carregando…</p>
+                  ) : extratosPdf.length === 0 ? (
+                    <p className="text-sm" style={{ color: "#6B6F76" }}>Nenhum extrato em PDF importado ainda.</p>
+                  ) : (
+                    extratosPdf.map((ex) => (
+                      <div
+                        key={ex.id}
+                        className="rounded-sm p-4 border mb-4"
+                        style={{ background: "#FFFFFF", borderColor: "#DCD7C9" }}
+                      >
+                        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                          <div>
+                            <h3
+                              className="text-sm font-semibold"
+                              style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                            >
+                              {ex.nomeArquivo}
+                            </h3>
+                            <p className="text-xs" style={{ color: "#6B6F76" }}>
+                              Importado em {new Date(ex.importadoEm).toLocaleString("pt-BR")}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3 flex-wrap">
+                            {ex.saldoAnterior !== null && (
+                              <KpiCard
+                                eyebrow="Saldo anterior (real, do PDF)"
+                                value={formatBRLShort(ex.saldoAnterior)}
+                                sub={formatBRL(ex.saldoAnterior)}
+                                accent={ex.saldoAnterior >= 0 ? "#4F7A5B" : "#B23A2E"}
+                              />
+                            )}
+                            <button
+                              onClick={() => handleRemoverExtratoPdfView(ex.id)}
+                              className="text-xs px-3 py-1.5 rounded-sm"
+                              style={{ color: "#B23A2E", background: "#F8E3E0" }}
+                            >
+                              Remover
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          {ex.dias.map((dia, i) => (
+                            <div key={i} className="rounded-sm p-3" style={{ background: "#F5F3EC", border: "1px solid #DCD7C9" }}>
+                              <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                                <span className="text-xs font-semibold" style={{ color: "#22252A" }}>
+                                  {dia.data}
+                                  {dia.diaSemana ? ` — ${dia.diaSemana}` : ""}
+                                </span>
+                                {dia.saldoDoDia !== null && (
+                                  <span
+                                    className="text-xs font-semibold"
+                                    style={{ color: dia.saldoDoDia >= 0 ? "#4F7A5B" : "#B23A2E" }}
+                                  >
+                                    Saldo do dia: {formatBRL(dia.saldoDoDia)}
+                                  </span>
+                                )}
+                              </div>
+                              <div>
+                                {dia.lancamentos.map((l, j) => (
+                                  <div
+                                    key={j}
+                                    className="flex items-center justify-between text-xs py-1.5 gap-3"
+                                    style={{ borderTop: j > 0 ? "1px solid #EDEAE0" : "none" }}
+                                  >
+                                    <span style={{ color: "#22252A" }}>{l.descricao}</span>
+                                    <span
+                                      className="font-mono whitespace-nowrap"
+                                      style={{ color: l.valor >= 0 ? "#4F7A5B" : "#B23A2E" }}
+                                    >
+                                      {formatBRL(l.valor)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </>
+              ) : (
+                <>
               {saveErrorExtrato && (
                 <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
                   {saveErrorExtrato}
@@ -7662,6 +7818,8 @@ export default function DashboardConstrutora() {
                   </div>
                 </>
               )}
+                </>
+              )}
             </section>
 
             <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
@@ -7675,131 +7833,6 @@ export default function DashboardConstrutora() {
               do plano de contas da aba "Plano de contas") para te ajudar a lançar mais rápido no Nibo —
               sempre revise antes, principalmente em lançamentos que você ainda não tinha classificado lá.
             </p>
-          </>
-        )}
-
-        {activeTab === "extrato-pdf" && (
-          <>
-            <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
-              <p className="text-xs max-w-xl" style={{ color: "#6B6F76" }}>
-                Visualização somente leitura do extrato exatamente como foi exportado do banco/app,
-                incluindo os saldos reais impressos nele (Saldo Anterior e Saldo do dia). Não é editável
-                e não afeta os lançamentos contábeis da aba "Extrato bancário".
-              </p>
-              <label
-                className="text-xs font-semibold px-3 py-1.5 rounded-sm cursor-pointer"
-                style={{
-                  fontFamily: "'Oswald', sans-serif",
-                  letterSpacing: "0.03em",
-                  color: "#22252A",
-                  background: "#E4E0D6",
-                }}
-              >
-                {importingExtratoPdfView ? "LENDO PDF…" : "📄 IMPORTAR PDF"}
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={handleImportExtratoPdfView}
-                  disabled={importingExtratoPdfView}
-                  className="hidden"
-                />
-              </label>
-            </div>
-
-            {saveErrorExtratosPdf && (
-              <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
-                {saveErrorExtratosPdf}
-              </div>
-            )}
-
-            {errorExtratoPdfView && (
-              <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
-                {errorExtratoPdfView}
-              </div>
-            )}
-
-            {loadingExtratosPdf ? (
-              <p className="text-sm" style={{ color: "#6B6F76" }}>Carregando…</p>
-            ) : extratosPdf.length === 0 ? (
-              <p className="text-sm" style={{ color: "#6B6F76" }}>Nenhum extrato em PDF importado ainda.</p>
-            ) : (
-              extratosPdf.map((ex) => (
-                <section
-                  key={ex.id}
-                  className="rounded-md p-5 border mb-5"
-                  style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}
-                >
-                  <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                    <div>
-                      <h3
-                        className="text-sm font-semibold"
-                        style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
-                      >
-                        {ex.nomeArquivo}
-                      </h3>
-                      <p className="text-xs" style={{ color: "#6B6F76" }}>
-                        Importado em {new Date(ex.importadoEm).toLocaleString("pt-BR")}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3 flex-wrap">
-                      {ex.saldoAnterior !== null && (
-                        <KpiCard
-                          eyebrow="Saldo anterior (real, do PDF)"
-                          value={formatBRLShort(ex.saldoAnterior)}
-                          sub={formatBRL(ex.saldoAnterior)}
-                          accent={ex.saldoAnterior >= 0 ? "#4F7A5B" : "#B23A2E"}
-                        />
-                      )}
-                      <button
-                        onClick={() => handleRemoverExtratoPdfView(ex.id)}
-                        className="text-xs px-3 py-1.5 rounded-sm"
-                        style={{ color: "#B23A2E", background: "#F8E3E0" }}
-                      >
-                        Remover
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    {ex.dias.map((dia, i) => (
-                      <div key={i} className="rounded-sm p-3" style={{ background: "#FFFFFF", border: "1px solid #DCD7C9" }}>
-                        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                          <span className="text-xs font-semibold" style={{ color: "#22252A" }}>
-                            {dia.data}
-                            {dia.diaSemana ? ` — ${dia.diaSemana}` : ""}
-                          </span>
-                          {dia.saldoDoDia !== null && (
-                            <span
-                              className="text-xs font-semibold"
-                              style={{ color: dia.saldoDoDia >= 0 ? "#4F7A5B" : "#B23A2E" }}
-                            >
-                              Saldo do dia: {formatBRL(dia.saldoDoDia)}
-                            </span>
-                          )}
-                        </div>
-                        <div>
-                          {dia.lancamentos.map((l, j) => (
-                            <div
-                              key={j}
-                              className="flex items-center justify-between text-xs py-1.5 gap-3"
-                              style={{ borderTop: j > 0 ? "1px solid #EDEAE0" : "none" }}
-                            >
-                              <span style={{ color: "#22252A" }}>{l.descricao}</span>
-                              <span
-                                className="font-mono whitespace-nowrap"
-                                style={{ color: l.valor >= 0 ? "#4F7A5B" : "#B23A2E" }}
-                              >
-                                {formatBRL(l.valor)}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              ))
-            )}
           </>
         )}
 
