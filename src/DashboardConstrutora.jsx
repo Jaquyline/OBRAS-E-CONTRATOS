@@ -405,6 +405,45 @@ const PLANO_CONTAS_PADRAO = [
   { id: "conta-5.1.10.103", codigo: "5.1.10.103", nome: "RESULTADO DO EXERCICIO", tipo: "apuracao" },
 ];
 
+// Correspondência entre o código do nosso plano de contas (classificação
+// hierárquica, ex: "1.1.10.200.2") e o código interno da própria Domínio
+// para a mesma conta (o "Código T" que aparece na tela/relatório de Plano de
+// Contas de dentro da Domínio, ex: "664") — usada para gerar o arquivo de
+// importação de lançamentos contábeis da Domínio, que identifica cada conta
+// só por esse código curto, não pela classificação. Só tem as contas cujo
+// código a pessoa já confirmou (print do relatório da Domínio); as demais
+// ficam em branco até serem preenchidas na aba "Plano de contas" (coluna
+// "Código Domínio") — dá pra usar mesmo sem essa lista, editando ali.
+const SEED_CODIGO_DOMINIO = {
+  "1.1.10.101": "5",
+  "1.1.10.200.1": "7",
+  "1.1.10.200.2": "664",
+  "1.1.10.300.1": "597",
+  "1.1.10.300.2": "1043",
+  "1.1.20.101": "602",
+  "1.1.20.103": "627",
+  "1.1.20.107": "1002",
+  "1.1.20.108": "1003",
+  "1.1.20.109": "1001",
+  "1.1.20.110": "593",
+  "1.1.20.111": "1065",
+  "1.1.20.112": "1066",
+  "1.1.20.113": "626",
+  "1.1.20.114": "603",
+  "1.1.20.115": "600",
+  "1.1.20.117": "604",
+  "1.1.20.118": "11",
+  "1.1.20.119": "628",
+  "1.1.20.200.1": "13",
+};
+
+// Código Domínio efetivo de uma conta: o que a pessoa preencheu manualmente
+// (prioridade), senão o valor semente conhecido acima, senão vazio.
+function codigoDominioDe(conta) {
+  if (!conta) return "";
+  return (conta.codigoDominio && String(conta.codigoDominio).trim()) || SEED_CODIGO_DOMINIO[conta.codigo] || "";
+}
+
 // Extração baseada em padrões de texto comuns em contratos de promessa de
 // compra e venda — funciona bem em modelos parecidos, mas pode falhar ou
 // vir incompleta se o contrato seguir outro formato. Sempre revisar antes de salvar.
@@ -2893,6 +2932,13 @@ export default function DashboardConstrutora() {
   const [selecionadosLancamentos, setSelecionadosLancamentos] = useState(() => new Set());
   const [lancamentosDesbloqueados, setLancamentosDesbloqueados] = useState(() => new Set());
 
+  // CNPJ usado no arquivo de exportação para a Domínio (cabeçalho do layout
+  // posicional) e aviso sobre lançamentos que ficaram de fora dessa
+  // exportação por falta de "Código Domínio" em alguma das contas — nenhum
+  // dos dois é salvo além do CNPJ, que fica gravado para não pedir de novo.
+  const [cnpjExportDominio, setCnpjExportDominio] = useState("");
+  const [avisoExportDominio, setAvisoExportDominio] = useState(null);
+
   // Filtros da aba Lançamentos, no mesmo estilo da Nibo (Buscar por, Data,
   // Valor, Tipo, Status) — só filtram a visualização, nada é salvo.
   const [filtroLancBusca, setFiltroLancBusca] = useState("");
@@ -3004,6 +3050,7 @@ export default function DashboardConstrutora() {
   const STORAGE_KEY_CONTA_BANCO_PADRAO = "extrato-conta-banco-padrao";
   const STORAGE_KEY_SALDO_INICIAL_EXTRATO = "extrato-saldo-inicial";
   const STORAGE_KEY_EXTRATOS_PDF = "extratos-pdf-visualizacao";
+  const STORAGE_KEY_CNPJ_DOMINIO = "extrato-cnpj-exportacao-dominio";
   const chaveArquivoDocumento = (id) => `documento-arquivo-${id}`;
   const chaveArquivoContratoFornecedor = (id) => `contrato-fornecedor-arquivo-${id}`;
   const chaveArquivoContratoServico = (id) => `contrato-servico-arquivo-${id}`;
@@ -3234,6 +3281,24 @@ export default function DashboardConstrutora() {
         if (!cancelled) setContaBancoPadraoId("");
       } finally {
         if (!cancelled) setLoadingContaBancoPadrao(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_CNPJ_DOMINIO, false);
+        if (!cancelled) {
+          setCnpjExportDominio(result ? result.value : "");
+        }
+      } catch (err) {
+        if (!cancelled) setCnpjExportDominio("");
       }
     }
     load();
@@ -4105,6 +4170,135 @@ export default function DashboardConstrutora() {
     URL.revokeObjectURL(url);
   }
 
+  // Exportação no layout posicional (largura fixa) que a Domínio Sistemas
+  // exige para importar lançamentos contábeis — decodificado a partir de um
+  // arquivo real que a pessoa já importou com sucesso lá. Cada lançamento
+  // "Lançado" (Débito e Crédito preenchidos) vira um registro "02" (data)
+  // seguido de dois registros "03": um para o lado Crédito e um para o lado
+  // Débito, cada um com o "Código Domínio" da conta (não é o mesmo código do
+  // nosso plano de contas) e o valor em centavos. O arquivo é fechado com um
+  // registro "01" no início (CNPJ e período) e um "99" no final.
+  function pad0Esquerda(valor, tamanho) {
+    return String(valor).padStart(tamanho, "0").slice(-tamanho);
+  }
+  function padEspacosDireita(valor, tamanho) {
+    return String(valor).slice(0, tamanho).padEnd(tamanho, " ");
+  }
+  function somenteDigitos(valor) {
+    return String(valor || "").replace(/\D/g, "");
+  }
+
+  function handleExportarLancamentosDominio() {
+    const candidatos = extrato.filter((l) => l.contaDebitoId && l.contaCreditoId);
+    const ordenados = candidatos
+      .slice()
+      .sort((a, b) => (parseDateBR(a.data) || 0) - (parseDateBR(b.data) || 0));
+
+    const semCodigo = [];
+    const registros = [];
+    let seq = 1;
+    let dataMin = null;
+    let dataMax = null;
+
+    ordenados.forEach((l) => {
+      const contaDebito = planoContas.find((c) => c.id === l.contaDebitoId);
+      const contaCredito = planoContas.find((c) => c.id === l.contaCreditoId);
+      const codDebito = codigoDominioDe(contaDebito);
+      const codCredito = codigoDominioDe(contaCredito);
+      if (!codDebito || !codCredito) {
+        semCodigo.push(l);
+        return;
+      }
+      const dataObj = parseDateBR(l.data);
+      if (dataObj) {
+        if (!dataMin || dataObj < dataMin) dataMin = dataObj;
+        if (!dataMax || dataObj > dataMax) dataMax = dataObj;
+      }
+
+      const dataFormatada = padEspacosDireita(l.data || "", 10);
+      registros.push("02" + pad0Esquerda(seq, 7) + "V" + dataFormatada + " ".repeat(130));
+      seq++;
+
+      const valorCentavos = Math.round(Math.abs(Number(l.valor) || 0) * 100);
+      const valorFmt = pad0Esquerda(valorCentavos, 15);
+      const descricaoFmt = padEspacosDireita(l.descricao || "", 512);
+
+      // Lado Crédito: código na "conta crédito" (posições 16-22), zeros na débito.
+      registros.push(
+        "03" +
+          pad0Esquerda(seq, 7) +
+          "0000000" +
+          pad0Esquerda(codCredito, 7) +
+          valorFmt +
+          "0000000" +
+          descricaoFmt +
+          "0000101" +
+          " ".repeat(100)
+      );
+      seq++;
+
+      // Lado Débito: código na "conta débito" (posições 9-15), zeros na crédito.
+      registros.push(
+        "03" +
+          pad0Esquerda(seq, 7) +
+          pad0Esquerda(codDebito, 7) +
+          "0000000" +
+          valorFmt +
+          "0000000" +
+          descricaoFmt +
+          "0000101" +
+          " ".repeat(100)
+      );
+      seq++;
+    });
+
+    if (registros.length === 0) {
+      setAvisoExportDominio(
+        semCodigo.length > 0
+          ? `Nenhum lançamento pôde ser exportado: ${semCodigo.length} lançamento(s) "Lançado(s)" está(ão) com uma conta (Débito e/ou Crédito) sem "Código Domínio" preenchido no Plano de Contas.`
+          : "Não há lançamentos com Débito e Crédito preenchidos (\"Lançado\") para exportar."
+      );
+      return;
+    }
+
+    const cnpjDigitos = somenteDigitos(cnpjExportDominio);
+    if (cnpjDigitos.length !== 14) {
+      setAvisoExportDominio(
+        'Preencha o CNPJ (14 dígitos) usado nessa empresa dentro da Domínio, no campo acima do botão, antes de exportar.'
+      );
+      return;
+    }
+    const cnpjFmt = pad0Esquerda(cnpjDigitos, 14);
+    const dataInicialFmt = dataMin ? formatDateBR(dataMin) : "";
+    const dataFinalFmt = dataMax ? formatDateBR(dataMax) : "";
+    const cabecalho =
+      "01" +
+      "0000101" +
+      cnpjFmt +
+      padEspacosDireita(dataInicialFmt, 10) +
+      padEspacosDireita(dataFinalFmt, 10) +
+      "N" +
+      "0500000017";
+    const rodape = "9".repeat(100);
+
+    const conteudo = [cabecalho, ...registros, rodape].join("\r\n") + "\r\n";
+    const blob = new Blob([conteudo], { type: "text/plain;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `lancamentos-dominio-${new Date().toISOString().slice(0, 10)}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    setAvisoExportDominio(
+      semCodigo.length > 0
+        ? `Arquivo gerado com ${registros.length / 3} lançamento(s). ${semCodigo.length} lançamento(s) ficaram de fora por falta de "Código Domínio" em alguma conta (preencha na aba Plano de Contas e exporte de novo).`
+        : null
+    );
+  }
+
   async function persistPlanoContas(nextList) {
     setPlanoContas(nextList);
     try {
@@ -4154,6 +4348,15 @@ export default function DashboardConstrutora() {
       await window.storage.set(STORAGE_KEY_CONTA_BANCO_PADRAO, id, false);
     } catch (err) {
       // silencioso — é só uma preferência de conveniência para a sugestão automática
+    }
+  }
+
+  async function persistCnpjExportDominio(valor) {
+    setCnpjExportDominio(valor);
+    try {
+      await window.storage.set(STORAGE_KEY_CNPJ_DOMINIO, valor, false);
+    } catch (err) {
+      // silencioso — mesmo padrão da conta bancária padrão
     }
   }
 
@@ -7469,6 +7672,21 @@ export default function DashboardConstrutora() {
                       >
                         ⬇ EXPORTAR LANÇAMENTOS CONTÁBEIS
                       </button>
+                      <button
+                        onClick={handleExportarLancamentosDominio}
+                        disabled={extrato.length === 0}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                        style={{
+                          fontFamily: "'Oswald', sans-serif",
+                          letterSpacing: "0.03em",
+                          color: "#F5F3EC",
+                          background: "#4F7A5B",
+                          opacity: extrato.length === 0 ? 0.5 : 1,
+                        }}
+                        title="Gera o TXT no formato que a Domínio Sistemas espera para importar lançamentos contábeis"
+                      >
+                        ⬇ EXPORTAR PARA DOMÍNIO
+                      </button>
                     </>
                   ) : (
                     <label
@@ -7599,6 +7817,27 @@ export default function DashboardConstrutora() {
                 </>
               ) : (
                 <>
+              <div
+                className="mb-3 flex flex-wrap items-center gap-2 text-xs px-3 py-2 rounded-sm"
+                style={{ color: "#22252A", background: "#EFEBDF" }}
+              >
+                <span>CNPJ da empresa dentro da Domínio (para o arquivo de exportação):</span>
+                <input
+                  type="text"
+                  value={cnpjExportDominio}
+                  onChange={(e) => persistCnpjExportDominio(e.target.value)}
+                  placeholder="00.000.000/0000-00"
+                  className="text-xs px-2 py-1 rounded-sm"
+                  style={{ border: "1px solid #DCD7C9", color: "#22252A", fontFamily: "'IBM Plex Mono', monospace", width: "160px" }}
+                />
+              </div>
+
+              {avisoExportDominio && (
+                <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#7A5B1E", background: "#F5EBD8" }}>
+                  {avisoExportDominio}
+                </div>
+              )}
+
               {saveErrorExtrato && (
                 <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
                   {saveErrorExtrato}
@@ -9970,17 +10209,20 @@ export default function DashboardConstrutora() {
                 </form>
               )}
 
-              <div className="hidden sm:grid grid-cols-[1fr_2.4fr_1fr_auto] gap-2 px-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+              <div className="hidden sm:grid grid-cols-[1fr_2fr_0.9fr_0.9fr_auto] gap-2 px-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                 <span>Código</span>
                 <span>Nome</span>
                 <span>Tipo</span>
+                <span title="Código interno da conta dentro da Domínio (não é o mesmo código do plano de contas) — usado para gerar o arquivo de importação de lançamentos contábeis da Domínio">
+                  Código Domínio
+                </span>
                 <span></span>
               </div>
               <div className="space-y-1.5">
                 {contasFiltradas.map((c) => (
                   <div
                     key={c.id}
-                    className="grid grid-cols-2 sm:grid-cols-[1fr_2.4fr_1fr_auto] gap-2 items-center rounded-sm px-2 py-1.5"
+                    className="grid grid-cols-2 sm:grid-cols-[1fr_2fr_0.9fr_0.9fr_auto] gap-2 items-center rounded-sm px-2 py-1.5"
                     style={{ border: "1px solid #E4E0D6" }}
                   >
                     <input
@@ -10012,6 +10254,16 @@ export default function DashboardConstrutora() {
                         </option>
                       ))}
                     </select>
+                    <input
+                      type="text"
+                      value={c.codigoDominio || ""}
+                      onChange={(e) => handleUpdateContaPlanoCampo(c.id, "codigoDominio", e.target.value)}
+                      onBlur={handlePersistPlanoContasBlur}
+                      placeholder={SEED_CODIGO_DOMINIO[c.codigo] ? `sugestão: ${SEED_CODIGO_DOMINIO[c.codigo]}` : "—"}
+                      title="Código interno da conta dentro da Domínio (não é o mesmo código do plano de contas) — usado para gerar o arquivo de importação de lançamentos contábeis da Domínio"
+                      className="text-xs px-2 py-1.5 rounded-sm"
+                      style={{ border: "1px solid #DCD7C9", color: "#22252A", fontFamily: "'IBM Plex Mono', monospace", width: "100%", minWidth: 0 }}
+                    />
                     <button
                       onClick={() => handleDeleteContaPlano(c.id)}
                       className="text-xs w-fit px-2"
