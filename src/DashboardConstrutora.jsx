@@ -1622,6 +1622,20 @@ function tipoExtratoConfig(valor) {
     : { label: "Débito", color: "#B23A2E", bg: "#F8E3E0" };
 }
 
+// Status de classificação contábil de um lançamento — igual ao modelo do
+// Nibo: "Pendente" enquanto faltar Débito e/ou Crédito, "Lançado" assim que
+// os dois estiverem preenchidos. Não é salvo à parte — é calculado na hora a
+// partir de contaDebitoId/contaCreditoId, então muda sozinho assim que a
+// pessoa classifica a conta que faltava.
+const statusClassificacaoConfig = {
+  lancado: { label: "Lançado", color: "#4F7A5B", bg: "#E8EEE8" },
+  pendente: { label: "Pendente", color: "#B4590C", bg: "#FBEBDB" },
+};
+
+function statusClassificacaoContabil(l) {
+  return l.contaDebitoId && l.contaCreditoId ? "lancado" : "pendente";
+}
+
 const tipoSocioConfig = {
   aporte: { label: "Aporte (empréstimo ao caixa)", color: "#4F7A5B", bg: "#E8EEE8" },
   devolucao: { label: "Devolução ao sócio", color: "#B23A2E", bg: "#F8E3E0" },
@@ -7594,6 +7608,18 @@ export default function DashboardConstrutora() {
                             {cfg.label}
                           </button>
                           <div className="flex flex-col items-start gap-1">
+                            {!l.jaLancado && (() => {
+                              const statusCfg = statusClassificacaoConfig[statusClassificacaoContabil(l)];
+                              return (
+                                <span
+                                  className="text-[9.5px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded-full w-fit"
+                                  style={{ color: statusCfg.color, background: statusCfg.bg }}
+                                  title="Muda para Lançado sozinho assim que Débito e Crédito estiverem preenchidos"
+                                >
+                                  {statusCfg.label}
+                                </span>
+                              );
+                            })()}
                             {l.jaLancado && (
                               <span
                                 className="text-[9.5px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded-full w-fit"
@@ -7765,11 +7791,12 @@ export default function DashboardConstrutora() {
                 </div>
               ) : (
                 <>
-                  <div className="hidden sm:grid grid-cols-[0.7fr_2.2fr_0.7fr_0.55fr_0.8fr_1.3fr_1fr_1fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[0.7fr_2fr_0.7fr_0.55fr_0.65fr_0.8fr_1.3fr_1fr_1fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Data</span>
                     <span>Descrição</span>
                     <span>Valor</span>
                     <span>Tipo</span>
+                    <span>Status</span>
                     <span>Sócio</span>
                     <span>Vincular a</span>
                     <span>Débito</span>
@@ -7783,12 +7810,13 @@ export default function DashboardConstrutora() {
                       .sort((a, b) => (parseDateBR(b.data) || 0) - (parseDateBR(a.data) || 0))
                       .map((l) => {
                         const cfg = tipoExtratoConfig(l.valor);
+                        const statusCfg = statusClassificacaoConfig[statusClassificacaoContabil(l)];
                         const opcoesParcela = opcoesParcelaReceberPara(l.id, l.parcelaReceberId);
                         const opcoesConta = opcoesContaPagarPara(l.id, l.contaPagarId);
                         return (
                           <div
                             key={l.id}
-                            className="grid grid-cols-2 sm:grid-cols-[0.7fr_2.2fr_0.7fr_0.55fr_0.8fr_1.3fr_1fr_1fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                            className="grid grid-cols-2 sm:grid-cols-[0.7fr_2fr_0.7fr_0.55fr_0.65fr_0.8fr_1.3fr_1fr_1fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
                             <span
@@ -7810,6 +7838,13 @@ export default function DashboardConstrutora() {
                               style={{ color: cfg.color, background: cfg.bg }}
                             >
                               {cfg.label}
+                            </span>
+                            <span
+                              className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
+                              style={{ color: statusCfg.color, background: statusCfg.bg }}
+                              title="Muda para Lançado sozinho assim que Débito e Crédito estiverem preenchidos"
+                            >
+                              {statusCfg.label}
                             </span>
                             <select
                               value={l.socio || ""}
