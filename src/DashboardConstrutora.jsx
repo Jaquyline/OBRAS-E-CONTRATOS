@@ -410,10 +410,11 @@ const PLANO_CONTAS_PADRAO = [
 // para a mesma conta (o "Código T" que aparece na tela/relatório de Plano de
 // Contas de dentro da Domínio, ex: "664") — usada para gerar o arquivo de
 // importação de lançamentos contábeis da Domínio, que identifica cada conta
-// só por esse código curto, não pela classificação. Só tem as contas cujo
-// código a pessoa já confirmou (print do relatório da Domínio); as demais
-// ficam em branco até serem preenchidas na aba "Plano de contas" (coluna
-// "Código Domínio") — dá pra usar mesmo sem essa lista, editando ali.
+// só por esse código curto, não pela classificação. Preenchida a partir do
+// relatório completo de Plano de Contas exportado em PDF de dentro da
+// Domínio (todas as ~314 contas analíticas do plano batem com uma linha
+// desse relatório) — a coluna "Código Domínio" na aba Plano de contas
+// continua editável para o caso de alguma conta nova ser criada depois.
 const SEED_CODIGO_DOMINIO = {
   "1.1.10.101": "5",
   "1.1.10.200.1": "7",
@@ -435,6 +436,300 @@ const SEED_CODIGO_DOMINIO = {
   "1.1.20.118": "11",
   "1.1.20.119": "628",
   "1.1.20.200.1": "13",
+  "1.1.30.201": "585",
+  "1.1.30.202": "647",
+  "1.1.30.300.1": "18",
+  "1.1.30.300.2": "19",
+  "1.1.30.300.3": "584",
+  "1.1.30.400.1": "537",
+  "1.1.40.101": "595",
+  "1.1.40.102": "596",
+  "1.1.40.103": "617",
+  "1.1.40.104": "24",
+  "1.1.40.105": "23",
+  "1.1.40.106": "22",
+  "1.1.40.107": "25",
+  "1.1.40.108": "594",
+  "1.1.60.102": "1004",
+  "1.1.60.103": "28",
+  "1.1.60.104": "1068",
+  "1.1.60.105": "672",
+  "1.1.60.106": "671",
+  "1.1.60.301": "675",
+  "1.1.60.302": "678",
+  "1.1.60.303": "676",
+  "1.1.60.304": "679",
+  "1.1.60.305": "677",
+  "1.1.60.306": "680",
+  "1.1.60.307": "681",
+  "1.1.60.308": "682",
+  "1.1.60.309": "683",
+  "1.2.10.101": "630",
+  "1.2.10.102": "582",
+  "1.2.10.103": "583",
+  "1.2.10.104": "32",
+  "1.2.20.100.1": "48",
+  "1.2.30.101": "40",
+  "1.2.30.102": "589",
+  "1.2.30.103": "37",
+  "1.2.30.104": "558",
+  "1.2.30.105": "36",
+  "1.2.30.107": "1005",
+  "1.2.30.108": "39",
+  "1.2.30.201": "44",
+  "1.2.30.202": "590",
+  "1.2.30.203": "43",
+  "1.2.30.204": "42",
+  "1.2.30.205": "557",
+  "1.4.10.101": "548",
+  "1.5.10.100.1": "588",
+  "2.1.10.101": "1033",
+  "2.1.10.102": "1049",
+  "2.1.10.103": "1058",
+  "2.1.10.104": "567",
+  "2.1.10.105": "643",
+  "2.1.10.107": "1006",
+  "2.1.10.108": "570",
+  "2.1.10.111": "1045",
+  "2.1.10.112": "1008",
+  "2.1.10.114": "1009",
+  "2.1.10.115": "1007",
+  "2.1.10.116": "1030",
+  "2.1.10.117": "1044",
+  "2.1.10.118": "655",
+  "2.1.10.119": "1047",
+  "2.1.10.120": "574",
+  "2.1.10.121": "646",
+  "2.1.10.122": "1031",
+  "2.1.10.123": "566",
+  "2.1.10.125": "1073",
+  "2.1.10.126": "1037",
+  "2.1.10.127": "565",
+  "2.1.10.128": "1010",
+  "2.1.10.129": "1059",
+  "2.1.10.130": "636",
+  "2.1.10.131": "665",
+  "2.1.10.132": "638",
+  "2.1.10.133": "1064",
+  "2.1.10.134": "1052",
+  "2.1.10.135": "1032",
+  "2.1.10.136": "1046",
+  "2.1.10.137": "1062",
+  "2.1.10.138": "1070",
+  "2.1.10.139": "1069",
+  "2.1.10.140": "644",
+  "2.1.10.141": "656",
+  "2.1.10.142": "1050",
+  "2.1.10.144": "1011",
+  "2.1.10.145": "1048",
+  "2.1.10.146": "659",
+  "2.1.10.147": "639",
+  "2.1.10.148": "625",
+  "2.1.10.149": "1061",
+  "2.1.10.150": "1057",
+  "2.1.10.151": "663",
+  "2.1.10.152": "662",
+  "2.1.10.153": "633",
+  "2.1.10.154": "1036",
+  "2.1.10.155": "1063",
+  "2.1.10.156": "572",
+  "2.1.10.158": "1012",
+  "2.1.10.159": "641",
+  "2.1.10.160": "660",
+  "2.1.10.162": "1015",
+  "2.1.10.163": "1028",
+  "2.1.10.164": "674",
+  "2.1.10.165": "1038",
+  "2.1.10.166": "1060",
+  "2.1.10.167": "634",
+  "2.1.10.168": "642",
+  "2.1.10.169": "637",
+  "2.1.10.170": "635",
+  "2.1.10.171": "1027",
+  "2.1.10.173": "1013",
+  "2.1.10.174": "1055",
+  "2.1.10.175": "1075",
+  "2.1.10.176": "1029",
+  "2.1.10.177": "658",
+  "2.1.10.178": "1026",
+  "2.1.10.179": "1025",
+  "2.1.10.180": "1054",
+  "2.1.10.181": "1071",
+  "2.1.10.182": "568",
+  "2.1.10.183": "1074",
+  "2.1.10.184": "1056",
+  "2.1.10.185": "1051",
+  "2.1.10.186": "645",
+  "2.1.10.187": "1072",
+  "2.1.10.188": "1053",
+  "2.1.10.189": "1034",
+  "2.1.10.190": "1035",
+  "2.1.10.201": "57",
+  "2.1.10.202": "56",
+  "2.1.10.203": "58",
+  "2.1.10.204": "55",
+  "2.1.10.205": "60",
+  "2.1.10.206": "54",
+  "2.1.10.207": "59",
+  "2.1.10.301": "65",
+  "2.1.10.302": "64",
+  "2.1.10.303": "66",
+  "2.1.10.304": "63",
+  "2.1.10.305": "62",
+  "2.1.10.401": "611",
+  "2.1.10.402": "610",
+  "2.1.10.403": "614",
+  "2.1.10.404": "613",
+  "2.1.10.405": "615",
+  "2.1.10.406": "612",
+  "2.1.10.501": "71",
+  "2.1.10.502": "581",
+  "2.1.10.503": "69",
+  "2.1.10.504": "72",
+  "2.1.10.505": "657",
+  "2.1.10.506": "68",
+  "2.1.10.507": "580",
+  "2.1.10.508": "73",
+  "2.1.10.509": "74",
+  "2.1.10.510": "1022",
+  "2.1.10.511": "70",
+  "2.1.10.512": "75",
+  "2.1.10.603": "77",
+  "2.1.10.604": "219",
+  "2.1.10.701": "79",
+  "2.1.10.702": "544",
+  "2.1.10.703": "559",
+  "2.2.10.101": "618",
+  "2.2.10.102": "84",
+  "2.2.20.101": "621",
+  "2.2.20.102": "631",
+  "2.2.20.201": "1020",
+  "2.2.20.301": "1041",
+  "2.2.20.302": "1042",
+  "2.4.10.101": "89",
+  "2.4.10.102": "88",
+  "2.4.10.200.1": "606",
+  "2.4.20.100.1": "92",
+  "2.4.20.200.1": "94",
+  "2.4.20.300.1": "96",
+  "2.4.20.300.2": "97",
+  "2.4.30.101": "100",
+  "2.4.30.103": "1021",
+  "2.4.30.104": "654",
+  "2.4.40.101": "670",
+  "2.4.40.102": "667",
+  "2.5.10.101": "551",
+  "3.1.10.101": "108",
+  "3.1.10.201": "110",
+  "3.1.10.300.1": "112",
+  "3.1.10.300.2": "113",
+  "3.1.10.401": "116",
+  "3.1.10.402": "119",
+  "3.1.10.403": "117",
+  "3.1.10.404": "118",
+  "3.1.10.405": "115",
+  "3.1.10.501": "122",
+  "3.1.10.502": "123",
+  "3.1.10.503": "673",
+  "3.1.10.504": "579",
+  "3.1.10.505": "124",
+  "3.1.10.506": "121",
+  "3.1.10.601": "1039",
+  "3.1.10.602": "127",
+  "3.1.10.603": "126",
+  "3.1.10.604": "128",
+  "3.1.10.605": "129",
+  "3.1.10.701": "553",
+  "3.1.20.101": "132",
+  "3.1.20.102": "133",
+  "3.1.20.201": "592",
+  "4.1.10.101": "140",
+  "4.1.10.102": "147",
+  "4.1.10.103": "144",
+  "4.1.10.104": "143",
+  "4.1.10.105": "150",
+  "4.1.10.106": "608",
+  "4.1.10.107": "141",
+  "4.1.10.108": "142",
+  "4.1.10.109": "148",
+  "4.1.10.110": "149",
+  "4.1.10.111": "138",
+  "4.1.10.112": "146",
+  "4.1.10.113": "139",
+  "4.1.10.114": "145",
+  "4.1.10.201": "153",
+  "4.1.10.202": "525",
+  "4.1.10.203": "152",
+  "4.1.10.301": "1067",
+  "4.1.10.302": "155",
+  "4.1.10.303": "156",
+  "4.1.10.304": "632",
+  "4.1.10.305": "533",
+  "4.1.10.306": "157",
+  "4.1.10.307": "562",
+  "4.1.10.308": "561",
+  "4.1.10.309": "629",
+  "4.1.10.310": "158",
+  "4.1.10.312": "1016",
+  "4.1.10.401": "163",
+  "4.1.10.402": "162",
+  "4.1.10.403": "161",
+  "4.1.10.404": "160",
+  "4.1.10.501": "165",
+  "4.1.10.502": "170",
+  "4.1.10.503": "607",
+  "4.1.10.504": "179",
+  "4.1.10.505": "175",
+  "4.1.10.506": "168",
+  "4.1.10.507": "171",
+  "4.1.10.508": "182",
+  "4.1.10.509": "640",
+  "4.1.10.510": "181",
+  "4.1.10.511": "173",
+  "4.1.10.512": "190",
+  "4.1.10.513": "178",
+  "4.1.10.514": "184",
+  "4.1.10.515": "166",
+  "4.1.10.516": "180",
+  "4.1.10.517": "177",
+  "4.1.10.518": "172",
+  "4.1.10.519": "183",
+  "4.1.10.520": "186",
+  "4.1.10.521": "176",
+  "4.1.10.522": "169",
+  "4.1.10.523": "187",
+  "4.1.10.524": "527",
+  "4.1.10.525": "174",
+  "4.1.10.526": "185",
+  "4.1.10.527": "601",
+  "4.1.10.528": "189",
+  "4.1.10.530": "167",
+  "4.1.10.531": "188",
+  "4.1.10.601": "192",
+  "4.1.10.602": "194",
+  "4.1.10.603": "193",
+  "4.1.10.701": "598",
+  "4.1.10.702": "197",
+  "4.1.10.703": "198",
+  "4.1.10.704": "196",
+  "4.1.10.801": "201",
+  "4.1.10.802": "203",
+  "4.1.10.803": "204",
+  "4.1.10.804": "200",
+  "4.1.10.805": "202",
+  "4.1.10.806": "563",
+  "4.1.10.901": "207",
+  "4.1.10.902": "209",
+  "4.1.10.903": "554",
+  "4.1.10.904": "212",
+  "4.1.10.905": "210",
+  "4.1.10.906": "206",
+  "4.1.10.907": "211",
+  "4.1.10.908": "208",
+  "4.1.10.909": "218",
+  "4.1.11.101": "1024",
+  "5.1.10.101": "556",
+  "5.1.10.103": "1018",
 };
 
 // Código Domínio efetivo de uma conta: o que a pessoa preencheu manualmente
@@ -2933,8 +3228,12 @@ export default function DashboardConstrutora() {
   const [lancamentosDesbloqueados, setLancamentosDesbloqueados] = useState(() => new Set());
 
   // Aviso sobre lançamentos que ficaram de fora da exportação para a Domínio
-  // por falta de "Código Domínio" em alguma das contas — não é salvo.
+  // por falta de "Código Domínio" em alguma das contas — não é salvo. Período
+  // usado só nessa exportação (separado do filtro da tabela, para não se
+  // misturar com Busca/Valor/Tipo/Status) — deixe vazio para exportar tudo.
   const [avisoExportDominio, setAvisoExportDominio] = useState(null);
+  const [exportDominioDataDe, setExportDominioDataDe] = useState("");
+  const [exportDominioDataAte, setExportDominioDataAte] = useState("");
 
   // Filtros da aba Lançamentos, no mesmo estilo da Nibo (Buscar por, Data,
   // Valor, Tipo, Status) — só filtram a visualização, nada é salvo.
@@ -4137,14 +4436,14 @@ export default function DashboardConstrutora() {
   }
 
   function handleExportarLancamentosDominio() {
-    // Usa o mesmo período do filtro "Data de" / "Data até" da barra de
-    // filtros acima da tabela de Lançamentos — assim dá pra exportar só o
-    // período desejado (ex: só o mês que ainda não foi importado na
+    // Período próprio dessa exportação (campos "De" / "Até" ao lado do
+    // botão, separados do filtro geral da tabela) — assim dá pra exportar só
+    // o período desejado (ex: só o mês que ainda não foi importado na
     // Domínio), em vez de mandar tudo de novo e duplicar lançamentos que já
-    // foram importados antes. Deixe os dois filtros vazios para exportar
+    // foram importados antes. Deixe os dois campos vazios para exportar
     // todos os lançamentos "Lançados".
-    const filtroDataDeObj = filtroLancDataDe ? new Date(filtroLancDataDe + "T00:00:00") : null;
-    const filtroDataAteObj = filtroLancDataAte ? new Date(filtroLancDataAte + "T23:59:59") : null;
+    const filtroDataDeObj = exportDominioDataDe ? new Date(exportDominioDataDe + "T00:00:00") : null;
+    const filtroDataAteObj = exportDominioDataAte ? new Date(exportDominioDataAte + "T23:59:59") : null;
     const candidatos = extrato.filter((l) => {
       if (!l.contaDebitoId || !l.contaCreditoId) return false;
       const dataLanc = parseDateBR(l.data);
@@ -4217,7 +4516,7 @@ export default function DashboardConstrutora() {
       seq++;
     });
 
-    const filtroPeriodoAtivo = filtroLancDataDe || filtroLancDataAte;
+    const filtroPeriodoAtivo = exportDominioDataDe || exportDominioDataAte;
     const nomesContasSemCodigo = Array.from(contasSemCodigo.values())
       .map((c) => c.nome)
       .join(", ");
@@ -4256,7 +4555,7 @@ export default function DashboardConstrutora() {
 
     const qtdExportada = registros.length / 3;
     const periodoTexto = filtroPeriodoAtivo
-      ? ` (período: ${filtroLancDataDe || "início"} até ${filtroLancDataAte || "hoje"})`
+      ? ` (período: ${exportDominioDataDe || "início"} até ${exportDominioDataAte || "hoje"})`
       : " (todos os lançamentos Lançados, sem filtro de período)";
     setAvisoExportDominio(
       `Arquivo gerado com ${qtdExportada} lançamento(s)${periodoTexto}.` +
@@ -5267,7 +5566,6 @@ export default function DashboardConstrutora() {
             { id: "documentos", label: "Documentos da empresa" },
             { id: "fornecedores", label: "Contratos de fornecedores" },
             { id: "servicos", label: "Contratos de prestação de serviços" },
-            { id: "contabilidade", label: "Plano de contas" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -7572,7 +7870,13 @@ export default function DashboardConstrutora() {
                   className="text-sm uppercase tracking-[0.12em] font-semibold"
                   style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
                 >
-                  {subAbaExtrato === "extrato-pdf" ? "Extrato bancário — Extrato em PDF" : "Extrato bancário"}
+                  {subAbaExtrato === "extrato-pdf"
+                    ? "Extrato bancário — Extrato em PDF"
+                    : subAbaExtrato === "exportar-dominio"
+                    ? "Extrato bancário — Exportar para Domínio"
+                    : subAbaExtrato === "plano-contas"
+                    ? "Extrato bancário — Plano de contas"
+                    : "Extrato bancário"}
                 </h2>
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="flex items-center rounded-sm overflow-hidden" style={{ border: "1px solid #DCD7C9" }}>
@@ -7600,39 +7904,46 @@ export default function DashboardConstrutora() {
                     >
                       📄 Extrato em PDF
                     </button>
+                    <button
+                      onClick={() => setSubAbaExtrato("exportar-dominio")}
+                      className="text-xs font-semibold px-3 py-1.5"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: subAbaExtrato === "exportar-dominio" ? "#F5F3EC" : "#22252A",
+                        background: subAbaExtrato === "exportar-dominio" ? "#4F7A5B" : "#E4E0D6",
+                      }}
+                    >
+                      ⬇ Exportar Domínio
+                    </button>
+                    <button
+                      onClick={() => setSubAbaExtrato("plano-contas")}
+                      className="text-xs font-semibold px-3 py-1.5"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: subAbaExtrato === "plano-contas" ? "#F5F3EC" : "#22252A",
+                        background: subAbaExtrato === "plano-contas" ? "#3D6E8C" : "#E4E0D6",
+                      }}
+                    >
+                      Plano de contas
+                    </button>
                   </div>
 
                   {subAbaExtrato === "lancamentos" ? (
-                    <>
-                      <button
-                        onClick={() => setShowFormExtrato((s) => !s)}
-                        className="text-xs font-semibold px-3 py-1.5 rounded-sm"
-                        style={{
-                          fontFamily: "'Oswald', sans-serif",
-                          letterSpacing: "0.03em",
-                          color: "#F5F3EC",
-                          background: "#3D6E8C",
-                        }}
-                      >
-                        {showFormExtrato ? "CANCELAR" : "+ NOVO LANÇAMENTO"}
-                      </button>
-                      <button
-                        onClick={handleExportarLancamentosDominio}
-                        disabled={extrato.length === 0}
-                        className="text-xs font-semibold px-3 py-1.5 rounded-sm"
-                        style={{
-                          fontFamily: "'Oswald', sans-serif",
-                          letterSpacing: "0.03em",
-                          color: "#F5F3EC",
-                          background: "#4F7A5B",
-                          opacity: extrato.length === 0 ? 0.5 : 1,
-                        }}
-                        title="Gera o TXT no formato que a Domínio Sistemas espera para importar lançamentos contábeis. Usa o período do filtro Data de/Data até logo abaixo (deixe vazio para exportar tudo)."
-                      >
-                        ⬇ EXPORTAR PARA DOMÍNIO
-                      </button>
-                    </>
-                  ) : (
+                    <button
+                      onClick={() => setShowFormExtrato((s) => !s)}
+                      className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: "#F5F3EC",
+                        background: "#3D6E8C",
+                      }}
+                    >
+                      {showFormExtrato ? "CANCELAR" : "+ NOVO LANÇAMENTO"}
+                    </button>
+                  ) : subAbaExtrato === "extrato-pdf" ? (
                     <label
                       className="text-xs font-semibold px-3 py-1.5 rounded-sm cursor-pointer"
                       style={{
@@ -7651,7 +7962,7 @@ export default function DashboardConstrutora() {
                         className="hidden"
                       />
                     </label>
-                  )}
+                  ) : null}
                 </div>
               </div>
 
@@ -7759,14 +8070,282 @@ export default function DashboardConstrutora() {
                     ))
                   )}
                 </>
-              ) : (
+              ) : subAbaExtrato === "exportar-dominio" ? (
                 <>
-              {avisoExportDominio && (
-                <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#7A5B1E", background: "#F5EBD8" }}>
-                  {avisoExportDominio}
-                </div>
-              )}
+                  <p className="text-xs max-w-xl mb-4" style={{ color: "#6B6F76" }}>
+                    Gera o arquivo TXT no formato posicional que a Domínio Sistemas espera para
+                    importar os lançamentos contábeis. Escolha um período abaixo para exportar só
+                    aquelas datas (evita reimportar e duplicar na Domínio o que já foi enviado antes)
+                    — deixe os dois campos vazios para exportar todos os lançamentos já "Lançados"
+                    (Débito e Crédito preenchidos). Cada conta usada precisa ter o "Código Domínio"
+                    preenchido na aba Plano de Contas; quem não tiver fica de fora, com aviso.
+                  </p>
 
+                  <div className="flex items-end gap-3 flex-wrap mb-4">
+                    <div>
+                      <label className="block text-[10px] uppercase tracking-wide font-semibold mb-1" style={{ color: "#8A8D93" }}>
+                        Data de
+                      </label>
+                      <input
+                        type="date"
+                        value={exportDominioDataDe}
+                        onChange={(e) => setExportDominioDataDe(e.target.value)}
+                        className="text-xs px-2 py-1.5 rounded-sm"
+                        style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase tracking-wide font-semibold mb-1" style={{ color: "#8A8D93" }}>
+                        Data até
+                      </label>
+                      <input
+                        type="date"
+                        value={exportDominioDataAte}
+                        onChange={(e) => setExportDominioDataAte(e.target.value)}
+                        className="text-xs px-2 py-1.5 rounded-sm"
+                        style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                      />
+                    </div>
+                    <button
+                      onClick={handleExportarLancamentosDominio}
+                      disabled={extrato.length === 0}
+                      className="text-xs font-semibold px-3 py-2 rounded-sm"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: "#F5F3EC",
+                        background: "#4F7A5B",
+                        opacity: extrato.length === 0 ? 0.5 : 1,
+                      }}
+                    >
+                      ⬇ EXPORTAR PARA DOMÍNIO
+                    </button>
+                  </div>
+
+                  {avisoExportDominio && (
+                    <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#7A5B1E", background: "#F5EBD8" }}>
+                      {avisoExportDominio}
+                    </div>
+                  )}
+                </>
+              ) : subAbaExtrato === "plano-contas" ? (() => {
+                const contasFiltradas = planoContas
+                  .filter((c) => contaCorrespondeABusca(c, buscaPlanoContas))
+                  .sort((a, b) => a.codigo.localeCompare(b.codigo, "pt-BR", { numeric: true }));
+                const contasBanco = planoContas.filter((c) => /banco/i.test(c.nome));
+                const TIPO_LABEL = {
+                  ativo: "Ativo",
+                  passivo: "Passivo",
+                  receita: "Receita",
+                  despesa: "Despesa",
+                  apuracao: "Apuração",
+                };
+                return (
+                <>
+                  <div className="flex flex-wrap gap-3 mb-8">
+                    <KpiCard eyebrow="Contas cadastradas" value={`${planoContas.length}`} sub="no plano de contas" />
+                    <KpiCard
+                      eyebrow="Contas de banco"
+                      value={`${contasBanco.length}`}
+                      sub={contasBanco.length ? contasBanco.map((c) => c.nome).join(", ").slice(0, 60) : "nenhuma identificada"}
+                    />
+                  </div>
+
+                  <section className="rounded-md p-5 border mb-6" style={{ background: "#FFFFFF", borderColor: "#DCD7C9" }}>
+                    <h2
+                      className="text-sm uppercase tracking-[0.12em] font-semibold mb-3"
+                      style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                    >
+                      Conta bancária padrão do extrato
+                    </h2>
+                    <p className="text-xs mb-3" style={{ color: "#6B6F76" }}>
+                      Usada para preencher automaticamente o lado "Banco" (Débito ou Crédito, conforme o lançamento
+                      for entrada ou saída) ao sugerir a classificação contábil de cada lançamento do extrato. Se a
+                      empresa tiver mais de uma conta bancária no plano de contas, escolha aqui qual delas o extrato
+                      bancário do painel representa.
+                    </p>
+                    <select
+                      value={contaBancoPadraoId}
+                      onChange={(e) => persistContaBancoPadrao(e.target.value)}
+                      className="text-sm px-3 py-2 rounded-sm border"
+                      style={{ borderColor: "#DCD7C9", color: "#22252A", width: "100%", maxWidth: "480px", minWidth: 0 }}
+                    >
+                      <option value="">Selecione a conta bancária...</option>
+                      {planoContas
+                        .filter((c) => c.tipo === "ativo")
+                        .sort((a, b) => a.codigo.localeCompare(b.codigo, "pt-BR", { numeric: true }))
+                        .map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.nome}
+                          </option>
+                        ))}
+                    </select>
+                  </section>
+
+                  <section className="rounded-md p-5 border" style={{ background: "#FFFFFF", borderColor: "#DCD7C9" }}>
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <h2
+                        className="text-sm uppercase tracking-[0.12em] font-semibold"
+                        style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+                      >
+                        Plano de contas
+                      </h2>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <input
+                          type="text"
+                          placeholder="Buscar por código ou nome..."
+                          value={buscaPlanoContas}
+                          onChange={(e) => setBuscaPlanoContas(e.target.value)}
+                          className="text-xs px-3 py-1.5 rounded-sm border"
+                          style={{ borderColor: "#DCD7C9", color: "#22252A", width: "220px", minWidth: 0 }}
+                        />
+                        <button
+                          onClick={() => setShowFormPlanoContas((s) => !s)}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                          style={{
+                            fontFamily: "'Oswald', sans-serif",
+                            letterSpacing: "0.03em",
+                            color: "#F5F3EC",
+                            background: "#3D6E8C",
+                          }}
+                        >
+                          {showFormPlanoContas ? "CANCELAR" : "+ NOVA CONTA"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {saveErrorPlanoContas && (
+                      <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                        {saveErrorPlanoContas}
+                      </div>
+                    )}
+
+                    {showFormPlanoContas && (
+                      <form
+                        onSubmit={handleAddContaPlano}
+                        className="mb-5 p-4 rounded-sm grid grid-cols-1 sm:grid-cols-[1fr_2fr_1fr_auto] gap-2"
+                        style={{ background: "#F5F3EC", border: "1px solid #3D6E8C" }}
+                      >
+                        <input
+                          type="text"
+                          placeholder="Código (ex: 4.1.10.512)"
+                          value={formPlanoContas.codigo}
+                          onChange={(e) => setFormPlanoContas({ ...formPlanoContas, codigo: e.target.value })}
+                          className="text-sm px-3 py-2 rounded-sm"
+                          style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                        />
+                        <input
+                          type="text"
+                          placeholder="Nome da conta"
+                          value={formPlanoContas.nome}
+                          onChange={(e) => setFormPlanoContas({ ...formPlanoContas, nome: e.target.value })}
+                          className="text-sm px-3 py-2 rounded-sm"
+                          style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                        />
+                        <select
+                          value={formPlanoContas.tipo}
+                          onChange={(e) => setFormPlanoContas({ ...formPlanoContas, tipo: e.target.value })}
+                          className="text-sm px-3 py-2 rounded-sm"
+                          style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                        >
+                          {Object.entries(TIPO_LABEL).map(([valor, label]) => (
+                            <option key={valor} value={valor}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="submit"
+                          className="text-xs font-semibold px-3 py-2 rounded-sm"
+                          style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#E1590C" }}
+                        >
+                          ADICIONAR
+                        </button>
+                      </form>
+                    )}
+
+                    <div className="hidden sm:grid grid-cols-[1fr_2fr_0.9fr_0.9fr_auto] gap-2 px-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                      <span>Código</span>
+                      <span>Nome</span>
+                      <span>Tipo</span>
+                      <span title="Código interno da conta dentro da Domínio (não é o mesmo código do plano de contas) — usado para gerar o arquivo de importação de lançamentos contábeis da Domínio">
+                        Código Domínio
+                      </span>
+                      <span></span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {contasFiltradas.map((c) => (
+                        <div
+                          key={c.id}
+                          className="grid grid-cols-2 sm:grid-cols-[1fr_2fr_0.9fr_0.9fr_auto] gap-2 items-center rounded-sm px-2 py-1.5"
+                          style={{ border: "1px solid #E4E0D6" }}
+                        >
+                          <input
+                            type="text"
+                            value={c.codigo}
+                            onChange={(e) => handleUpdateContaPlanoCampo(c.id, "codigo", e.target.value)}
+                            onBlur={handlePersistPlanoContasBlur}
+                            className="text-xs px-2 py-1.5 rounded-sm"
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A", fontFamily: "'IBM Plex Mono', monospace", width: "100%", minWidth: 0 }}
+                          />
+                          <input
+                            type="text"
+                            value={c.nome}
+                            onChange={(e) => handleUpdateContaPlanoCampo(c.id, "nome", e.target.value)}
+                            onBlur={handlePersistPlanoContasBlur}
+                            className="text-xs px-2 py-1.5 rounded-sm"
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                          />
+                          <select
+                            value={c.tipo}
+                            onChange={(e) => handleUpdateContaPlanoCampo(c.id, "tipo", e.target.value)}
+                            onBlur={handlePersistPlanoContasBlur}
+                            className="text-xs px-2 py-1.5 rounded-sm"
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
+                          >
+                            {Object.entries(TIPO_LABEL).map(([valor, label]) => (
+                              <option key={valor} value={valor}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="text"
+                            value={c.codigoDominio || ""}
+                            onChange={(e) => handleUpdateContaPlanoCampo(c.id, "codigoDominio", e.target.value)}
+                            onBlur={handlePersistPlanoContasBlur}
+                            placeholder={SEED_CODIGO_DOMINIO[c.codigo] ? `sugestão: ${SEED_CODIGO_DOMINIO[c.codigo]}` : "—"}
+                            title="Código interno da conta dentro da Domínio (não é o mesmo código do plano de contas) — usado para gerar o arquivo de importação de lançamentos contábeis da Domínio"
+                            className="text-xs px-2 py-1.5 rounded-sm"
+                            style={{ border: "1px solid #DCD7C9", color: "#22252A", fontFamily: "'IBM Plex Mono', monospace", width: "100%", minWidth: 0 }}
+                          />
+                          <button
+                            onClick={() => handleDeleteContaPlano(c.id)}
+                            className="text-xs w-fit px-2"
+                            style={{ color: "#B23A2E" }}
+                            title="Excluir conta"
+                          >
+                            Excluir
+                          </button>
+                        </div>
+                      ))}
+                      {contasFiltradas.length === 0 && (
+                        <p className="text-xs px-2 py-3" style={{ color: "#8A8D93" }}>
+                          Nenhuma conta encontrada{buscaPlanoContas ? " para essa busca" : ""}.
+                        </p>
+                      )}
+                    </div>
+                  </section>
+
+                  <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+                    Este plano de contas começou com uma cópia do plano de contas informado, mas é totalmente seu:
+                    adicione, renomeie ou remova contas sempre que precisar — as mudanças ficam salvas automaticamente
+                    e passam a valer nas sugestões de classificação do extrato bancário.
+                  </p>
+                </>
+                );
+              })() : (
+                <>
               {saveErrorExtrato && (
                 <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
                   {saveErrorExtrato}
@@ -10002,223 +10581,6 @@ export default function DashboardConstrutora() {
           </>
         )}
 
-        {activeTab === "contabilidade" && (() => {
-          const contasFiltradas = planoContas
-            .filter((c) => contaCorrespondeABusca(c, buscaPlanoContas))
-            .sort((a, b) => a.codigo.localeCompare(b.codigo, "pt-BR", { numeric: true }));
-          const contasBanco = planoContas.filter((c) => /banco/i.test(c.nome));
-          const TIPO_LABEL = {
-            ativo: "Ativo",
-            passivo: "Passivo",
-            receita: "Receita",
-            despesa: "Despesa",
-            apuracao: "Apuração",
-          };
-          return (
-          <>
-            <div className="flex flex-wrap gap-3 mb-8">
-              <KpiCard eyebrow="Contas cadastradas" value={`${planoContas.length}`} sub="no plano de contas" />
-              <KpiCard
-                eyebrow="Contas de banco"
-                value={`${contasBanco.length}`}
-                sub={contasBanco.length ? contasBanco.map((c) => c.nome).join(", ").slice(0, 60) : "nenhuma identificada"}
-              />
-            </div>
-
-            <section className="rounded-md p-5 border mb-6" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
-              <h2
-                className="text-sm uppercase tracking-[0.12em] font-semibold mb-3"
-                style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
-              >
-                Conta bancária padrão do extrato
-              </h2>
-              <p className="text-xs mb-3" style={{ color: "#6B6F76" }}>
-                Usada para preencher automaticamente o lado "Banco" (Débito ou Crédito, conforme o lançamento
-                for entrada ou saída) ao sugerir a classificação contábil de cada lançamento do extrato. Se a
-                empresa tiver mais de uma conta bancária no plano de contas, escolha aqui qual delas o extrato
-                bancário do painel representa.
-              </p>
-              <select
-                value={contaBancoPadraoId}
-                onChange={(e) => persistContaBancoPadrao(e.target.value)}
-                className="text-sm px-3 py-2 rounded-sm border"
-                style={{ borderColor: "#DCD7C9", color: "#22252A", width: "100%", maxWidth: "480px", minWidth: 0 }}
-              >
-                <option value="">Selecione a conta bancária...</option>
-                {planoContas
-                  .filter((c) => c.tipo === "ativo")
-                  .sort((a, b) => a.codigo.localeCompare(b.codigo, "pt-BR", { numeric: true }))
-                  .map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nome}
-                    </option>
-                  ))}
-              </select>
-            </section>
-
-            <section className="rounded-md p-5 border" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
-              <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                <h2
-                  className="text-sm uppercase tracking-[0.12em] font-semibold"
-                  style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
-                >
-                  Plano de contas
-                </h2>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <input
-                    type="text"
-                    placeholder="Buscar por código ou nome..."
-                    value={buscaPlanoContas}
-                    onChange={(e) => setBuscaPlanoContas(e.target.value)}
-                    className="text-xs px-3 py-1.5 rounded-sm border"
-                    style={{ borderColor: "#DCD7C9", color: "#22252A", width: "220px", minWidth: 0 }}
-                  />
-                  <button
-                    onClick={() => setShowFormPlanoContas((s) => !s)}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-sm"
-                    style={{
-                      fontFamily: "'Oswald', sans-serif",
-                      letterSpacing: "0.03em",
-                      color: "#F5F3EC",
-                      background: "#3D6E8C",
-                    }}
-                  >
-                    {showFormPlanoContas ? "CANCELAR" : "+ NOVA CONTA"}
-                  </button>
-                </div>
-              </div>
-
-              {saveErrorPlanoContas && (
-                <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
-                  {saveErrorPlanoContas}
-                </div>
-              )}
-
-              {showFormPlanoContas && (
-                <form
-                  onSubmit={handleAddContaPlano}
-                  className="mb-5 p-4 rounded-sm grid grid-cols-1 sm:grid-cols-[1fr_2fr_1fr_auto] gap-2"
-                  style={{ background: "#FFFFFF", border: "1px solid #3D6E8C" }}
-                >
-                  <input
-                    type="text"
-                    placeholder="Código (ex: 4.1.10.512)"
-                    value={formPlanoContas.codigo}
-                    onChange={(e) => setFormPlanoContas({ ...formPlanoContas, codigo: e.target.value })}
-                    className="text-sm px-3 py-2 rounded-sm"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Nome da conta"
-                    value={formPlanoContas.nome}
-                    onChange={(e) => setFormPlanoContas({ ...formPlanoContas, nome: e.target.value })}
-                    className="text-sm px-3 py-2 rounded-sm"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
-                  />
-                  <select
-                    value={formPlanoContas.tipo}
-                    onChange={(e) => setFormPlanoContas({ ...formPlanoContas, tipo: e.target.value })}
-                    className="text-sm px-3 py-2 rounded-sm"
-                    style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
-                  >
-                    {Object.entries(TIPO_LABEL).map(([valor, label]) => (
-                      <option key={valor} value={valor}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="submit"
-                    className="text-xs font-semibold px-3 py-2 rounded-sm"
-                    style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#E1590C" }}
-                  >
-                    ADICIONAR
-                  </button>
-                </form>
-              )}
-
-              <div className="hidden sm:grid grid-cols-[1fr_2fr_0.9fr_0.9fr_auto] gap-2 px-2 pb-1.5 text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
-                <span>Código</span>
-                <span>Nome</span>
-                <span>Tipo</span>
-                <span title="Código interno da conta dentro da Domínio (não é o mesmo código do plano de contas) — usado para gerar o arquivo de importação de lançamentos contábeis da Domínio">
-                  Código Domínio
-                </span>
-                <span></span>
-              </div>
-              <div className="space-y-1.5">
-                {contasFiltradas.map((c) => (
-                  <div
-                    key={c.id}
-                    className="grid grid-cols-2 sm:grid-cols-[1fr_2fr_0.9fr_0.9fr_auto] gap-2 items-center rounded-sm px-2 py-1.5"
-                    style={{ border: "1px solid #E4E0D6" }}
-                  >
-                    <input
-                      type="text"
-                      value={c.codigo}
-                      onChange={(e) => handleUpdateContaPlanoCampo(c.id, "codigo", e.target.value)}
-                      onBlur={handlePersistPlanoContasBlur}
-                      className="text-xs px-2 py-1.5 rounded-sm"
-                      style={{ border: "1px solid #DCD7C9", color: "#22252A", fontFamily: "'IBM Plex Mono', monospace", width: "100%", minWidth: 0 }}
-                    />
-                    <input
-                      type="text"
-                      value={c.nome}
-                      onChange={(e) => handleUpdateContaPlanoCampo(c.id, "nome", e.target.value)}
-                      onBlur={handlePersistPlanoContasBlur}
-                      className="text-xs px-2 py-1.5 rounded-sm"
-                      style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
-                    />
-                    <select
-                      value={c.tipo}
-                      onChange={(e) => handleUpdateContaPlanoCampo(c.id, "tipo", e.target.value)}
-                      onBlur={handlePersistPlanoContasBlur}
-                      className="text-xs px-2 py-1.5 rounded-sm"
-                      style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
-                    >
-                      {Object.entries(TIPO_LABEL).map(([valor, label]) => (
-                        <option key={valor} value={valor}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="text"
-                      value={c.codigoDominio || ""}
-                      onChange={(e) => handleUpdateContaPlanoCampo(c.id, "codigoDominio", e.target.value)}
-                      onBlur={handlePersistPlanoContasBlur}
-                      placeholder={SEED_CODIGO_DOMINIO[c.codigo] ? `sugestão: ${SEED_CODIGO_DOMINIO[c.codigo]}` : "—"}
-                      title="Código interno da conta dentro da Domínio (não é o mesmo código do plano de contas) — usado para gerar o arquivo de importação de lançamentos contábeis da Domínio"
-                      className="text-xs px-2 py-1.5 rounded-sm"
-                      style={{ border: "1px solid #DCD7C9", color: "#22252A", fontFamily: "'IBM Plex Mono', monospace", width: "100%", minWidth: 0 }}
-                    />
-                    <button
-                      onClick={() => handleDeleteContaPlano(c.id)}
-                      className="text-xs w-fit px-2"
-                      style={{ color: "#B23A2E" }}
-                      title="Excluir conta"
-                    >
-                      Excluir
-                    </button>
-                  </div>
-                ))}
-                {contasFiltradas.length === 0 && (
-                  <p className="text-xs px-2 py-3" style={{ color: "#8A8D93" }}>
-                    Nenhuma conta encontrada{buscaPlanoContas ? " para essa busca" : ""}.
-                  </p>
-                )}
-              </div>
-            </section>
-
-            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
-              Este plano de contas começou com uma cópia do plano de contas informado, mas é totalmente seu:
-              adicione, renomeie ou remova contas sempre que precisar — as mudanças ficam salvas automaticamente
-              e passam a valer nas sugestões de classificação do extrato bancário.
-            </p>
-          </>
-          );
-        })()}
         </>
         )}
       </div>
