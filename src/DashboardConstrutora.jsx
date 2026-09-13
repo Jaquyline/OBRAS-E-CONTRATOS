@@ -2932,11 +2932,8 @@ export default function DashboardConstrutora() {
   const [selecionadosLancamentos, setSelecionadosLancamentos] = useState(() => new Set());
   const [lancamentosDesbloqueados, setLancamentosDesbloqueados] = useState(() => new Set());
 
-  // CNPJ usado no arquivo de exportação para a Domínio (cabeçalho do layout
-  // posicional) e aviso sobre lançamentos que ficaram de fora dessa
-  // exportação por falta de "Código Domínio" em alguma das contas — nenhum
-  // dos dois é salvo além do CNPJ, que fica gravado para não pedir de novo.
-  const [cnpjExportDominio, setCnpjExportDominio] = useState("");
+  // Aviso sobre lançamentos que ficaram de fora da exportação para a Domínio
+  // por falta de "Código Domínio" em alguma das contas — não é salvo.
   const [avisoExportDominio, setAvisoExportDominio] = useState(null);
 
   // Filtros da aba Lançamentos, no mesmo estilo da Nibo (Buscar por, Data,
@@ -3050,7 +3047,6 @@ export default function DashboardConstrutora() {
   const STORAGE_KEY_CONTA_BANCO_PADRAO = "extrato-conta-banco-padrao";
   const STORAGE_KEY_SALDO_INICIAL_EXTRATO = "extrato-saldo-inicial";
   const STORAGE_KEY_EXTRATOS_PDF = "extratos-pdf-visualizacao";
-  const STORAGE_KEY_CNPJ_DOMINIO = "extrato-cnpj-exportacao-dominio";
   const chaveArquivoDocumento = (id) => `documento-arquivo-${id}`;
   const chaveArquivoContratoFornecedor = (id) => `contrato-fornecedor-arquivo-${id}`;
   const chaveArquivoContratoServico = (id) => `contrato-servico-arquivo-${id}`;
@@ -3281,24 +3277,6 @@ export default function DashboardConstrutora() {
         if (!cancelled) setContaBancoPadraoId("");
       } finally {
         if (!cancelled) setLoadingContaBancoPadrao(false);
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const result = await window.storage.get(STORAGE_KEY_CNPJ_DOMINIO, false);
-        if (!cancelled) {
-          setCnpjExportDominio(result ? result.value : "");
-        }
-      } catch (err) {
-        if (!cancelled) setCnpjExportDominio("");
       }
     }
     load();
@@ -4178,6 +4156,7 @@ export default function DashboardConstrutora() {
   // Débito, cada um com o "Código Domínio" da conta (não é o mesmo código do
   // nosso plano de contas) e o valor em centavos. O arquivo é fechado com um
   // registro "01" no início (CNPJ e período) e um "99" no final.
+  const CNPJ_EMPRESA_DOMINIO = "21.203.244/0001-41";
   function pad0Esquerda(valor, tamanho) {
     return String(valor).padStart(tamanho, "0").slice(-tamanho);
   }
@@ -4261,14 +4240,7 @@ export default function DashboardConstrutora() {
       return;
     }
 
-    const cnpjDigitos = somenteDigitos(cnpjExportDominio);
-    if (cnpjDigitos.length !== 14) {
-      setAvisoExportDominio(
-        'Preencha o CNPJ (14 dígitos) usado nessa empresa dentro da Domínio, no campo acima do botão, antes de exportar.'
-      );
-      return;
-    }
-    const cnpjFmt = pad0Esquerda(cnpjDigitos, 14);
+    const cnpjFmt = pad0Esquerda(somenteDigitos(CNPJ_EMPRESA_DOMINIO), 14);
     const dataInicialFmt = dataMin ? formatDateBR(dataMin) : "";
     const dataFinalFmt = dataMax ? formatDateBR(dataMax) : "";
     const cabecalho =
@@ -4351,14 +4323,6 @@ export default function DashboardConstrutora() {
     }
   }
 
-  async function persistCnpjExportDominio(valor) {
-    setCnpjExportDominio(valor);
-    try {
-      await window.storage.set(STORAGE_KEY_CNPJ_DOMINIO, valor, false);
-    } catch (err) {
-      // silencioso — mesmo padrão da conta bancária padrão
-    }
-  }
 
   async function persistSaldoInicialExtrato(valor) {
     const numero = Number(valor) || 0;
@@ -7817,21 +7781,6 @@ export default function DashboardConstrutora() {
                 </>
               ) : (
                 <>
-              <div
-                className="mb-3 flex flex-wrap items-center gap-2 text-xs px-3 py-2 rounded-sm"
-                style={{ color: "#22252A", background: "#EFEBDF" }}
-              >
-                <span>CNPJ da empresa dentro da Domínio (para o arquivo de exportação):</span>
-                <input
-                  type="text"
-                  value={cnpjExportDominio}
-                  onChange={(e) => persistCnpjExportDominio(e.target.value)}
-                  placeholder="00.000.000/0000-00"
-                  className="text-xs px-2 py-1 rounded-sm"
-                  style={{ border: "1px solid #DCD7C9", color: "#22252A", fontFamily: "'IBM Plex Mono', monospace", width: "160px" }}
-                />
-              </div>
-
               {avisoExportDominio && (
                 <div className="mb-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#7A5B1E", background: "#F5EBD8" }}>
                   {avisoExportDominio}
