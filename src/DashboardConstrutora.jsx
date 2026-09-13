@@ -1711,6 +1711,8 @@ function ReportView({
   parcelasVencidas,
   extrato,
   saldoExtrato,
+  saldoInicialExtrato,
+  saldoFinalExtrato,
   totalCreditosExtrato,
   totalDebitosExtrato,
   movimentosSocios,
@@ -1823,9 +1825,10 @@ function ReportView({
       {
         titulo: "Extrato bancário",
         linhas: [
-          ["Saldo do extrato", formatBRL(saldoExtrato)],
+          ["Saldo inicial", formatBRL(saldoInicialExtrato)],
           ["Total de créditos", formatBRL(totalCreditosExtrato)],
           ["Total de débitos", formatBRL(totalDebitosExtrato)],
+          ["Saldo final", formatBRL(saldoFinalExtrato)],
         ],
       },
       {
@@ -1998,9 +2001,10 @@ function ReportView({
   } else if (tipo === "extrato") {
     titulo = "Relatório — Extrato Bancário";
     kpis = [
-      { label: "Saldo do extrato", value: formatBRL(saldoExtrato), accent: saldoExtrato >= 0 ? "#4F7A5B" : "#B23A2E" },
+      { label: "Saldo inicial", value: formatBRL(saldoInicialExtrato) },
       { label: "Total de créditos", value: formatBRL(totalCreditosExtrato), accent: "#4F7A5B" },
       { label: "Total de débitos", value: formatBRL(totalDebitosExtrato), accent: "#B23A2E" },
+      { label: "Saldo final", value: formatBRL(saldoFinalExtrato), accent: saldoFinalExtrato >= 0 ? "#4F7A5B" : "#B23A2E" },
     ];
     tabelas = [
       {
@@ -2629,6 +2633,12 @@ export default function DashboardConstrutora() {
   // mais de uma conta bancária no plano de contas.
   const [contaBancoPadraoId, setContaBancoPadraoId] = useState("");
   const [loadingContaBancoPadrao, setLoadingContaBancoPadrao] = useState(true);
+  // Saldo inicial do extrato bancário — informado manualmente pelo usuário
+  // (o extrato do banco normalmente mostra esse valor no topo, antes do
+  // primeiro lançamento do período); usado para calcular o saldo final
+  // (saldo inicial + créditos - débitos).
+  const [saldoInicialExtrato, setSaldoInicialExtrato] = useState(0);
+  const [loadingSaldoInicialExtrato, setLoadingSaldoInicialExtrato] = useState(true);
   const [formExtrato, setFormExtrato] = useState({
     data: "",
     descricao: "",
@@ -2698,6 +2708,7 @@ export default function DashboardConstrutora() {
   const STORAGE_KEY_EMPRESTIMOS_BANCARIOS = "emprestimos-bancarios";
   const STORAGE_KEY_PLANO_CONTAS = "plano-contas";
   const STORAGE_KEY_CONTA_BANCO_PADRAO = "extrato-conta-banco-padrao";
+  const STORAGE_KEY_SALDO_INICIAL_EXTRATO = "extrato-saldo-inicial";
   const chaveArquivoDocumento = (id) => `documento-arquivo-${id}`;
   const chaveArquivoContratoFornecedor = (id) => `contrato-fornecedor-arquivo-${id}`;
   const chaveArquivoContratoServico = (id) => `contrato-servico-arquivo-${id}`;
@@ -2928,6 +2939,26 @@ export default function DashboardConstrutora() {
         if (!cancelled) setContaBancoPadraoId("");
       } finally {
         if (!cancelled) setLoadingContaBancoPadrao(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_SALDO_INICIAL_EXTRATO, false);
+        if (!cancelled) {
+          setSaldoInicialExtrato(result ? Number(result.value) || 0 : 0);
+        }
+      } catch (err) {
+        if (!cancelled) setSaldoInicialExtrato(0);
+      } finally {
+        if (!cancelled) setLoadingSaldoInicialExtrato(false);
       }
     }
     load();
@@ -3706,6 +3737,16 @@ export default function DashboardConstrutora() {
     }
   }
 
+  async function persistSaldoInicialExtrato(valor) {
+    const numero = Number(valor) || 0;
+    setSaldoInicialExtrato(numero);
+    try {
+      await window.storage.set(STORAGE_KEY_SALDO_INICIAL_EXTRATO, String(numero), false);
+    } catch (err) {
+      // silencioso — mesmo padrão do conta bancária padrão
+    }
+  }
+
   async function persistSocios(nextList) {
     setEmprestimosSocios(nextList);
     try {
@@ -4430,6 +4471,7 @@ export default function DashboardConstrutora() {
   const saldoExtrato = extrato.reduce((s, l) => s + l.valor, 0);
   const totalCreditosExtrato = extrato.filter((l) => l.valor >= 0).reduce((s, l) => s + l.valor, 0);
   const totalDebitosExtrato = extrato.filter((l) => l.valor < 0).reduce((s, l) => s + Math.abs(l.valor), 0);
+  const saldoFinalExtrato = Number(saldoInicialExtrato || 0) + saldoExtrato;
 
   // Lançamentos do extrato bancário marcados com um sócio contam como
   // empréstimo/devolução automaticamente (crédito = aporte, débito =
@@ -4591,6 +4633,8 @@ export default function DashboardConstrutora() {
             parcelasVencidas={parcelasVencidas}
             extrato={extrato}
             saldoExtrato={saldoExtrato}
+            saldoInicialExtrato={saldoInicialExtrato}
+            saldoFinalExtrato={saldoFinalExtrato}
             totalCreditosExtrato={totalCreditosExtrato}
             totalDebitosExtrato={totalDebitosExtrato}
             movimentosSocios={movimentosSocios}
@@ -6892,15 +6936,42 @@ export default function DashboardConstrutora() {
               </button>
             </div>
 
+            <div className="flex items-center gap-3 mb-3 flex-wrap">
+              <label
+                className="text-xs font-semibold"
+                style={{ color: "#6B6F76", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em" }}
+              >
+                SALDO INICIAL DO EXTRATO
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                key={loadingSaldoInicialExtrato ? "loading" : String(saldoInicialExtrato)}
+                defaultValue={saldoInicialExtrato}
+                onBlur={(e) => persistSaldoInicialExtrato(e.target.value)}
+                className="text-sm px-2 py-1 rounded-sm border"
+                style={{ width: "160px", minWidth: 0, borderColor: "#DCD7C9" }}
+                placeholder="0,00"
+              />
+              <span className="text-xs" style={{ color: "#6B6F76" }}>
+                informe o saldo que a conta tinha antes do primeiro lançamento do período (aparece no topo do extrato do banco)
+              </span>
+            </div>
+
             <div className="flex flex-wrap gap-3 mb-8">
               <KpiCard
-                eyebrow="Saldo do extrato"
-                value={formatBRLShort(saldoExtrato)}
-                sub={formatBRL(saldoExtrato)}
-                accent={saldoExtrato >= 0 ? "#4F7A5B" : "#B23A2E"}
+                eyebrow="Saldo inicial"
+                value={formatBRLShort(saldoInicialExtrato)}
+                sub={formatBRL(saldoInicialExtrato)}
               />
               <KpiCard eyebrow="Total de créditos" value={formatBRLShort(totalCreditosExtrato)} sub={formatBRL(totalCreditosExtrato)} accent="#4F7A5B" />
               <KpiCard eyebrow="Total de débitos" value={formatBRLShort(totalDebitosExtrato)} sub={formatBRL(totalDebitosExtrato)} accent="#B23A2E" />
+              <KpiCard
+                eyebrow="Saldo final"
+                value={formatBRLShort(saldoFinalExtrato)}
+                sub={formatBRL(saldoFinalExtrato)}
+                accent={saldoFinalExtrato >= 0 ? "#4F7A5B" : "#B23A2E"}
+              />
               <KpiCard eyebrow="Lançamentos" value={`${extrato.length}`} sub="no extrato" />
             </div>
 
