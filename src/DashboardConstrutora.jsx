@@ -5498,8 +5498,8 @@ export default function DashboardConstrutora() {
                           className="grid grid-cols-2 sm:grid-cols-[1.2fr_1fr_1fr_1.3fr_0.8fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                           style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                         >
-                          <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{c.unidade}</span>
-                          <span className="text-sm" style={{ color: "#22252A" }}>{c.comprador}</span>
+                          <span className="text-sm font-semibold truncate min-w-0" title={c.unidade} style={{ color: "#22252A" }}>{c.unidade}</span>
+                          <span className="text-sm truncate min-w-0" title={c.comprador} style={{ color: "#22252A" }}>{c.comprador}</span>
                           <span
                             className="text-sm"
                             style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
@@ -5928,8 +5928,8 @@ export default function DashboardConstrutora() {
                           className="grid grid-cols-2 sm:grid-cols-[1.4fr_1fr_1fr_1fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                           style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                         >
-                          <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{n.fornecedor}</span>
-                          <span className="text-sm" style={{ color: "#22252A" }}>{n.obra}</span>
+                          <span className="text-sm font-semibold truncate min-w-0" title={n.fornecedor} style={{ color: "#22252A" }}>{n.fornecedor}</span>
+                          <span className="text-sm truncate min-w-0" title={n.obra} style={{ color: "#22252A" }}>{n.obra}</span>
                           <span
                             className="text-sm"
                             style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
@@ -6146,8 +6146,8 @@ export default function DashboardConstrutora() {
                             className="grid grid-cols-2 sm:grid-cols-[0.9fr_0.7fr_0.5fr_0.65fr_0.45fr_0.45fr_0.7fr_0.75fr_0.7fr_1.1fr_auto] gap-2 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
-                            <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{c.fornecedor}</span>
-                            <span className="text-sm" style={{ color: "#22252A" }}>{c.obra}</span>
+                            <span className="text-sm font-semibold truncate min-w-0" title={c.fornecedor} style={{ color: "#22252A" }}>{c.fornecedor}</span>
+                            <span className="text-sm truncate min-w-0" title={c.obra} style={{ color: "#22252A" }}>{c.obra}</span>
                             <span
                               className="text-xs"
                               style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
@@ -6610,7 +6610,7 @@ export default function DashboardConstrutora() {
                             >
                               {l.data}
                             </span>
-                            <span className="text-sm" style={{ color: "#22252A" }}>{l.descricao}</span>
+                            <span className="text-sm truncate min-w-0" title={l.descricao} style={{ color: "#22252A" }}>{l.descricao}</span>
                             <span
                               className="text-sm"
                               style={{ color: l.valor >= 0 ? "#4F7A5B" : "#B23A2E", fontFamily: "'IBM Plex Mono', monospace" }}
@@ -6927,7 +6927,7 @@ export default function DashboardConstrutora() {
                             className="grid grid-cols-2 sm:grid-cols-[1fr_1.1fr_0.8fr_0.7fr_0.9fr_1fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
-                            <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{e.socio}</span>
+                            <span className="text-sm font-semibold truncate min-w-0" title={e.socio} style={{ color: "#22252A" }}>{e.socio}</span>
                             <span
                               className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
                               style={{ color: cfg.color, background: cfg.bg }}
@@ -7538,7 +7538,7 @@ export default function DashboardConstrutora() {
                           className="grid grid-cols-2 sm:grid-cols-[1.3fr_0.9fr_0.8fr_0.8fr_0.9fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                           style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                         >
-                          <span className="text-sm font-semibold" style={{ color: "#22252A" }}>{d.nome}</span>
+                          <span className="text-sm font-semibold truncate min-w-0" title={d.nome} style={{ color: "#22252A" }}>{d.nome}</span>
                           <span
                             className="text-xs"
                             style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
