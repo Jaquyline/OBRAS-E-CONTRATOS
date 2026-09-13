@@ -4157,6 +4157,13 @@ export default function DashboardConstrutora() {
   // nosso plano de contas) e o valor em centavos. O arquivo é fechado com um
   // registro "01" no início (CNPJ e período) e um "99" no final.
   const CNPJ_EMPRESA_DOMINIO = "21.203.244/0001-41";
+  // Código interno da J & G INCORPORADORA dentro da Domínio (aparece no topo
+  // da tela da Domínio, ex: "J & G INCORPORADORA - 123") — precisa bater com
+  // a empresa que estiver ativa lá na hora de importar, senão a Domínio
+  // recusa o arquivo com "empresa a ser importada é diferente da atualmente
+  // ativa". É diferente do "Código Domínio" de cada conta (esse é o código
+  // da empresa como um todo).
+  const CODIGO_EMPRESA_DOMINIO = "123";
   function pad0Esquerda(valor, tamanho) {
     return String(valor).padStart(tamanho, "0").slice(-tamanho);
   }
@@ -4211,7 +4218,7 @@ export default function DashboardConstrutora() {
           valorFmt +
           "0000000" +
           descricaoFmt +
-          "0000101" +
+          pad0Esquerda(CODIGO_EMPRESA_DOMINIO, 7) +
           " ".repeat(100)
       );
       seq++;
@@ -4225,7 +4232,7 @@ export default function DashboardConstrutora() {
           valorFmt +
           "0000000" +
           descricaoFmt +
-          "0000101" +
+          pad0Esquerda(CODIGO_EMPRESA_DOMINIO, 7) +
           " ".repeat(100)
       );
       seq++;
@@ -4245,7 +4252,7 @@ export default function DashboardConstrutora() {
     const dataFinalFmt = dataMax ? formatDateBR(dataMax) : "";
     const cabecalho =
       "01" +
-      "0000101" +
+      pad0Esquerda(CODIGO_EMPRESA_DOMINIO, 7) +
       cnpjFmt +
       padEspacosDireita(dataInicialFmt, 10) +
       padEspacosDireita(dataFinalFmt, 10) +
