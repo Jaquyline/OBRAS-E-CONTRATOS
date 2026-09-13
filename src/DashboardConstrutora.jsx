@@ -2494,6 +2494,31 @@ export default function DashboardConstrutora() {
     persistCustosItens(custosItens);
   }
 
+  // Item de custo extra, adicionado livremente pelo usuário dentro de uma
+  // etapa — além dos itens fixos do modelo da planilha. Fica marcado com
+  // `extra: true` para que o nome e a unidade também fiquem editáveis (nos
+  // itens do modelo, só Quantidade/Valor Unitário/Gasto Real/Observações são
+  // editáveis) e para exibir o botão de remover.
+  function handleAddCustoItemExtra(etapa) {
+    const novoItem = {
+      id: `custo-extra-${Date.now()}`,
+      obra: obraCustoSelecionada,
+      etapa,
+      item: "",
+      unidade: "",
+      quantidade: "",
+      valorUnitario: "",
+      gastoReal: "",
+      observacoes: "",
+      extra: true,
+    };
+    persistCustosItens([...custosItens, novoItem]);
+  }
+
+  function handleDeleteCustoItem(id) {
+    persistCustosItens(custosItens.filter((it) => it.id !== id));
+  }
+
   function handleAddContrato(e) {
     e.preventDefault();
     if (!form.unidade || !form.comprador || !form.valor) return;
@@ -4623,6 +4648,8 @@ export default function DashboardConstrutora() {
                 Preencha Quantidade, Valor Unitário e Gasto Real — Orçado, Saldo e % Executado são
                 calculados automaticamente. Mesmo modelo da planilha enviada. Itens com o ícone 🔗 têm o
                 Gasto Real vindo de parcelas pagas vinculadas na aba Contas a pagar — não editável aqui.
+                Use "+ Adicionar item" no final de cada etapa para incluir um custo que não está no
+                modelo — o nome e a unidade desses itens extras também ficam editáveis.
               </p>
 
               {loadingCustos ? (
@@ -4676,7 +4703,29 @@ export default function DashboardConstrutora() {
                                     style={{ borderBottom: "1px solid #F0EEE6" }}
                                   >
                                     <div className="flex flex-col gap-0.5">
-                                      <span className="text-sm" style={{ color: "#22252A" }}>{it.item}</span>
+                                      {it.extra ? (
+                                        <div className="flex items-center gap-1">
+                                          <input
+                                            placeholder="Nome do item"
+                                            value={it.item}
+                                            onChange={(e) => handleUpdateCustoItemCampo(it.id, "item", e.target.value)}
+                                            onBlur={handlePersistCustosBlur}
+                                            className="text-sm px-1.5 py-1 rounded-sm outline-none flex-1 min-w-0"
+                                            style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDeleteCustoItem(it.id)}
+                                            title="Remover item"
+                                            className="text-xs shrink-0 px-1"
+                                            style={{ color: "#B23A2E" }}
+                                          >
+                                            ✕
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <span className="text-sm" style={{ color: "#22252A" }}>{it.item}</span>
+                                      )}
                                       <input
                                         placeholder="Observações (opcional)"
                                         value={it.observacoes}
@@ -4686,7 +4735,18 @@ export default function DashboardConstrutora() {
                                         style={{ border: "1px solid #E4E0D6", color: "#8A8D93" }}
                                       />
                                     </div>
-                                    <span className="text-xs" style={{ color: "#6B6F76" }}>{it.unidade}</span>
+                                    {it.extra ? (
+                                      <input
+                                        placeholder="un."
+                                        value={it.unidade}
+                                        onChange={(e) => handleUpdateCustoItemCampo(it.id, "unidade", e.target.value)}
+                                        onBlur={handlePersistCustosBlur}
+                                        className="text-xs px-1 py-1 rounded-sm outline-none w-full"
+                                        style={{ border: "1px solid #DCD7C9", color: "#22252A" }}
+                                      />
+                                    ) : (
+                                      <span className="text-xs" style={{ color: "#6B6F76" }}>{it.unidade}</span>
+                                    )}
                                     <input
                                       type="number"
                                       value={it.quantidade}
@@ -4754,6 +4814,15 @@ export default function DashboardConstrutora() {
                                   </div>
                                 );
                               })}
+
+                              <button
+                                type="button"
+                                onClick={() => handleAddCustoItemExtra(etapa)}
+                                className="w-full text-left text-xs font-semibold px-1.5 py-2 rounded-sm mt-1"
+                                style={{ color: "#3D6E8C", border: "1px dashed #C7BFA8", background: "#FBFAF6" }}
+                              >
+                                + Adicionar item
+                              </button>
 
                               <div
                                 className="grid grid-cols-2 sm:grid-cols-[1.7fr_0.4fr_0.6fr_0.8fr_0.8fr_0.8fr_0.8fr_0.5fr] gap-1.5 sm:gap-2 items-center rounded-sm px-1.5 py-2 mt-1"
