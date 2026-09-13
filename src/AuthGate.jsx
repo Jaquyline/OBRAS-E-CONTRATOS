@@ -80,7 +80,19 @@ export default function AuthGate({ children }) {
   }
 
   async function handleLogout() {
-    await supabase.auth.signOut();
+    // Antes, se a chamada ao Supabase falhasse por qualquer motivo (rede,
+    // firewall, sessão já expirada, etc.), o clique não fazia nada visível —
+    // não havia tratamento de erro nem uma forma de sair do painel sem essa
+    // chamada ter sucesso. Agora sempre volta pra tela de login ao clicar,
+    // mesmo que o aviso ao servidor falhe.
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) console.error("Erro ao sair:", error);
+    } catch (err) {
+      console.error("Erro ao sair:", err);
+    } finally {
+      setSession(null);
+    }
   }
 
   async function handleRecover(e) {
