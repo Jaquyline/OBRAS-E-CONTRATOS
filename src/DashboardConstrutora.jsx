@@ -7932,25 +7932,31 @@ export default function DashboardConstrutora() {
                 className="text-xs font-semibold"
                 style={{ color: "#6B6F76", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em" }}
               >
-                SALDO INICIAL DAS APLICAÇÕES
+                SALDO ATUAL DAS APLICAÇÕES
               </label>
               <input
                 type="text"
                 inputMode="decimal"
-                key={loadingSaldoInicialAplicacoes ? "loading" : String(saldoInicialAplicacoes)}
-                defaultValue={formatMoedaInputBR(saldoInicialAplicacoes)}
+                key={loadingSaldoInicialAplicacoes ? "loading" : String(saldoAplicacoes)}
+                defaultValue={formatMoedaInputBR(saldoAplicacoes)}
                 onFocus={(e) => e.target.select()}
                 onBlur={(e) => {
-                  const numero = parseMoedaInputBR(e.target.value);
-                  persistSaldoInicialAplicacoes(numero);
-                  e.target.value = formatMoedaInputBR(numero);
+                  // O que a pessoa digita aqui é o saldo de HOJE (ex.: o que ela lançou
+                  // agora). Guardamos por baixo dos panos um "ponto de partida" ajustado
+                  // (valor digitado − movimentação de aplicação/resgate já classificada
+                  // até agora), para que o card mostre exatamente o valor digitado neste
+                  // momento e, dali pra frente, some/subtraia sozinho a cada novo
+                  // resgate/aplicação classificado no extrato.
+                  const alvo = parseMoedaInputBR(e.target.value);
+                  persistSaldoInicialAplicacoes(alvo - movimentoAplicacoes);
+                  e.target.value = formatMoedaInputBR(alvo);
                 }}
                 className="text-sm px-2 py-1 rounded-sm border text-right"
                 style={{ width: "160px", minWidth: 0, borderColor: "#DCD7C9", fontFamily: "'IBM Plex Mono', monospace" }}
                 placeholder="R$ 0,00"
               />
               <span className="text-xs" style={{ color: "#6B6F76" }}>
-                informe o saldo que já estava aplicado antes do primeiro lançamento — depois disso o valor é atualizado sozinho a cada aplicação/resgate classificado no extrato
+                informe o saldo atual da aplicação agora — a partir deste momento o valor é atualizado sozinho (soma aplicação, subtrai resgate) a cada lançamento do extrato classificado como tal
               </span>
             </div>
 
