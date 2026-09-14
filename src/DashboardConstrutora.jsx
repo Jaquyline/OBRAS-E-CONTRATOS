@@ -739,6 +739,14 @@ function codigoDominioDe(conta) {
   return (conta.codigoDominio && String(conta.codigoDominio).trim()) || SEED_CODIGO_DOMINIO[conta.codigo] || "";
 }
 
+// Nome da conta com o Código Domínio na frente (ex.: "664 — Caixa Geral"),
+// para exibir nos seletores de Débito/Crédito. Sem código conhecido, mostra só o nome.
+function formatarContaComCodigoDominio(conta) {
+  if (!conta) return "";
+  const cod = codigoDominioDe(conta);
+  return cod ? `${cod} — ${conta.nome}` : conta.nome;
+}
+
 // Extração baseada em padrões de texto comuns em contratos de promessa de
 // compra e venda — funciona bem em modelos parecidos, mas pode falhar ou
 // vir incompleta se o contrato seguir outro formato. Sempre revisar antes de salvar.
@@ -2133,7 +2141,7 @@ function SeletorConta({ value, onChange, planoContas, placeholder, disabled }) {
   return (
     <div className="relative" ref={containerRef} style={{ width: "100%", minWidth: 0 }}>
       <input
-        value={aberto ? busca : contaAtual ? contaAtual.nome : ""}
+        value={aberto ? busca : contaAtual ? formatarContaComCodigoDominio(contaAtual) : ""}
         onChange={(e) => {
           setBusca(e.target.value);
           setAberto(true);
@@ -2199,7 +2207,7 @@ function SeletorConta({ value, onChange, planoContas, placeholder, disabled }) {
               onMouseLeave={(e) => (e.currentTarget.style.background = c.id === value ? "#E4EBEF" : "transparent")}
               title={`${c.codigo} — ${c.nome}`}
             >
-              {c.nome}
+              {formatarContaComCodigoDominio(c)}
             </div>
           ))}
         </div>
@@ -2315,6 +2323,7 @@ function ReportView({
   saldoFinalExtrato,
   totalCreditosExtrato,
   totalDebitosExtrato,
+  saldoAplicacoes,
   movimentosSocios,
   saldoPorSocio,
   saldoComSocios,
@@ -2430,6 +2439,7 @@ function ReportView({
           ["Total de créditos", formatBRL(totalCreditosExtrato)],
           ["Total de débitos", formatBRL(totalDebitosExtrato)],
           ["Saldo final", formatBRL(saldoFinalExtrato)],
+          ["Saldo em aplicações", formatBRL(saldoAplicacoes)],
         ],
       },
       {
@@ -2607,6 +2617,7 @@ function ReportView({
       { label: "Total de créditos", value: formatBRL(totalCreditosExtrato), accent: "#4F7A5B" },
       { label: "Total de débitos", value: formatBRL(totalDebitosExtrato), accent: "#B23A2E" },
       { label: "Saldo final", value: formatBRL(saldoFinalExtrato), accent: saldoFinalExtrato >= 0 ? "#4F7A5B" : "#B23A2E" },
+      { label: "Saldo em aplicações", value: formatBRL(saldoAplicacoes), accent: saldoAplicacoes >= 0 ? "#4F7A5B" : "#B23A2E" },
     ];
     tabelas = [
       {
@@ -3264,6 +3275,13 @@ export default function DashboardConstrutora() {
   // (saldo inicial + créditos - débitos).
   const [saldoInicialExtrato, setSaldoInicialExtrato] = useState(0);
   const [loadingSaldoInicialExtrato, setLoadingSaldoInicialExtrato] = useState(true);
+  // Saldo inicial da(s) conta(s) de aplicações financeiras (informado
+  // manualmente, mesmo esquema do saldo inicial do extrato); o saldo atual
+  // é recalculado sozinho somando aplicações e subtraindo resgates
+  // identificados nos lançamentos já classificados do extrato (quando a
+  // contrapartida do Débito/Crédito é uma conta cujo nome contém "aplic").
+  const [saldoInicialAplicacoes, setSaldoInicialAplicacoes] = useState(0);
+  const [loadingSaldoInicialAplicacoes, setLoadingSaldoInicialAplicacoes] = useState(true);
   // Sub-visualização "Extrato em PDF" dentro da própria aba Extrato
   // bancário — visualização somente leitura de cada PDF importado,
   // mantendo a divisão por dia e os saldos reais impressos no próprio
@@ -3345,6 +3363,7 @@ export default function DashboardConstrutora() {
   const STORAGE_KEY_PLANO_CONTAS = "plano-contas";
   const STORAGE_KEY_CONTA_BANCO_PADRAO = "extrato-conta-banco-padrao";
   const STORAGE_KEY_SALDO_INICIAL_EXTRATO = "extrato-saldo-inicial";
+  const STORAGE_KEY_SALDO_INICIAL_APLICACOES = "extrato-saldo-inicial-aplicacoes";
   const STORAGE_KEY_EXTRATOS_PDF = "extratos-pdf-visualizacao";
   const chaveArquivoDocumento = (id) => `documento-arquivo-${id}`;
   const chaveArquivoContratoFornecedor = (id) => `contrato-fornecedor-arquivo-${id}`;
@@ -3596,6 +3615,26 @@ export default function DashboardConstrutora() {
         if (!cancelled) setSaldoInicialExtrato(0);
       } finally {
         if (!cancelled) setLoadingSaldoInicialExtrato(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_SALDO_INICIAL_APLICACOES, false);
+        if (!cancelled) {
+          setSaldoInicialAplicacoes(result ? Number(result.value) || 0 : 0);
+        }
+      } catch (err) {
+        if (!cancelled) setSaldoInicialAplicacoes(0);
+      } finally {
+        if (!cancelled) setLoadingSaldoInicialAplicacoes(false);
       }
     }
     load();
@@ -4628,6 +4667,16 @@ export default function DashboardConstrutora() {
     }
   }
 
+  async function persistSaldoInicialAplicacoes(valor) {
+    const numero = Number(valor) || 0;
+    setSaldoInicialAplicacoes(numero);
+    try {
+      await window.storage.set(STORAGE_KEY_SALDO_INICIAL_APLICACOES, String(numero), false);
+    } catch (err) {
+      // silencioso — mesmo padrão do saldo inicial do extrato
+    }
+  }
+
   async function persistSocios(nextList) {
     setEmprestimosSocios(nextList);
     try {
@@ -5354,6 +5403,22 @@ export default function DashboardConstrutora() {
   const totalDebitosExtrato = extrato.filter((l) => l.valor < 0).reduce((s, l) => s + Math.abs(l.valor), 0);
   const saldoFinalExtrato = Number(saldoInicialExtrato || 0) + saldoExtrato;
 
+  // Saldo em contas de aplicações financeiras — some sozinho a partir dos
+  // lançamentos do extrato já classificados (Débito e Crédito preenchidos):
+  // quando o Débito é uma conta de aplicação, é dinheiro saindo do banco
+  // para lá (aplicação, soma aqui); quando o Crédito é uma conta de
+  // aplicação, é um resgate voltando para o banco (subtrai daqui).
+  const movimentoAplicacoes = extrato.reduce((soma, l) => {
+    if (!l.contaDebitoId || !l.contaCreditoId) return soma;
+    const contaDebito = planoContas.find((c) => c.id === l.contaDebitoId);
+    const contaCredito = planoContas.find((c) => c.id === l.contaCreditoId);
+    const valorAbs = Math.abs(Number(l.valor) || 0);
+    if (contaDebito && /aplic/i.test(contaDebito.nome || "")) return soma + valorAbs;
+    if (contaCredito && /aplic/i.test(contaCredito.nome || "")) return soma - valorAbs;
+    return soma;
+  }, 0);
+  const saldoAplicacoes = Number(saldoInicialAplicacoes || 0) + movimentoAplicacoes;
+
   // Lançamentos do extrato bancário marcados com um sócio contam como
   // empréstimo/devolução automaticamente (crédito = aporte, débito =
   // devolução), sem duplicar o registro manual — cada movimento é contado
@@ -5518,6 +5583,7 @@ export default function DashboardConstrutora() {
             saldoFinalExtrato={saldoFinalExtrato}
             totalCreditosExtrato={totalCreditosExtrato}
             totalDebitosExtrato={totalDebitosExtrato}
+            saldoAplicacoes={saldoAplicacoes}
             movimentosSocios={movimentosSocios}
             saldoPorSocio={saldoPorSocio}
             saldoComSocios={saldoComSocios}
@@ -7838,6 +7904,28 @@ export default function DashboardConstrutora() {
               </span>
             </div>
 
+            <div className="flex items-center gap-3 mb-3 flex-wrap">
+              <label
+                className="text-xs font-semibold"
+                style={{ color: "#6B6F76", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em" }}
+              >
+                SALDO INICIAL DAS APLICAÇÕES
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                key={loadingSaldoInicialAplicacoes ? "loading" : String(saldoInicialAplicacoes)}
+                defaultValue={saldoInicialAplicacoes}
+                onBlur={(e) => persistSaldoInicialAplicacoes(e.target.value)}
+                className="text-sm px-2 py-1 rounded-sm border"
+                style={{ width: "160px", minWidth: 0, borderColor: "#DCD7C9" }}
+                placeholder="0,00"
+              />
+              <span className="text-xs" style={{ color: "#6B6F76" }}>
+                informe o saldo que já estava aplicado antes do primeiro lançamento — depois disso o valor é atualizado sozinho a cada aplicação/resgate classificado no extrato
+              </span>
+            </div>
+
             <div className="flex flex-wrap gap-3 mb-8">
               <KpiCard
                 eyebrow="Saldo inicial"
@@ -7849,6 +7937,12 @@ export default function DashboardConstrutora() {
                 value={formatBRLShort(saldoExtrato)}
                 sub={formatBRL(saldoExtrato)}
                 accent={saldoExtrato >= 0 ? "#4F7A5B" : "#B23A2E"}
+              />
+              <KpiCard
+                eyebrow="Saldo em aplicações"
+                value={formatBRLShort(saldoAplicacoes)}
+                sub={formatBRL(saldoAplicacoes)}
+                accent={saldoAplicacoes >= 0 ? "#4F7A5B" : "#B23A2E"}
               />
               <KpiCard eyebrow="Total de créditos" value={formatBRLShort(totalCreditosExtrato)} sub={formatBRL(totalCreditosExtrato)} accent="#4F7A5B" />
               <KpiCard eyebrow="Total de débitos" value={formatBRLShort(totalDebitosExtrato)} sub={formatBRL(totalDebitosExtrato)} accent="#B23A2E" />
