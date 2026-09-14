@@ -1922,6 +1922,24 @@ const formatBRLShort = (v) => {
   return formatBRL(v);
 };
 
+// Texto formatado "R$ 802.333,00" para preencher um campo de saldo editável
+// (ponto separando milhar, vírgula separando centavos, como no extrato do banco).
+function formatMoedaInputBR(valor) {
+  const numero = Number(valor) || 0;
+  return `R$ ${numero.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// Converte o texto digitado (aceita "802.333,00", "802333,00", "802333" ou
+// mesmo colado com "R$"/espaços) de volta para número.
+function parseMoedaInputBR(texto) {
+  if (texto == null) return 0;
+  const limpo = String(texto).trim().replace(/[^\d,.-]/g, "");
+  if (!limpo) return 0;
+  const normalizado = limpo.includes(",") ? limpo.replace(/\./g, "").replace(",", ".") : limpo;
+  const numero = parseFloat(normalizado);
+  return Number.isFinite(numero) ? numero : 0;
+}
+
 const statusConfig = {
   ativo: { label: "Ativo", color: "#4F7A5B", bg: "#E8EEE8" },
   vencendo: { label: "Vencendo", color: "#B4590C", bg: "#FBEBDB" },
@@ -7890,14 +7908,19 @@ export default function DashboardConstrutora() {
                 SALDO INICIAL DO EXTRATO
               </label>
               <input
-                type="number"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 key={loadingSaldoInicialExtrato ? "loading" : String(saldoInicialExtrato)}
-                defaultValue={saldoInicialExtrato}
-                onBlur={(e) => persistSaldoInicialExtrato(e.target.value)}
-                className="text-sm px-2 py-1 rounded-sm border"
-                style={{ width: "160px", minWidth: 0, borderColor: "#DCD7C9" }}
-                placeholder="0,00"
+                defaultValue={formatMoedaInputBR(saldoInicialExtrato)}
+                onFocus={(e) => e.target.select()}
+                onBlur={(e) => {
+                  const numero = parseMoedaInputBR(e.target.value);
+                  persistSaldoInicialExtrato(numero);
+                  e.target.value = formatMoedaInputBR(numero);
+                }}
+                className="text-sm px-2 py-1 rounded-sm border text-right"
+                style={{ width: "160px", minWidth: 0, borderColor: "#DCD7C9", fontFamily: "'IBM Plex Mono', monospace" }}
+                placeholder="R$ 0,00"
               />
               <span className="text-xs" style={{ color: "#6B6F76" }}>
                 informe o saldo que a conta tinha antes do primeiro lançamento do período (aparece no topo do extrato do banco)
@@ -7912,14 +7935,19 @@ export default function DashboardConstrutora() {
                 SALDO INICIAL DAS APLICAÇÕES
               </label>
               <input
-                type="number"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
                 key={loadingSaldoInicialAplicacoes ? "loading" : String(saldoInicialAplicacoes)}
-                defaultValue={saldoInicialAplicacoes}
-                onBlur={(e) => persistSaldoInicialAplicacoes(e.target.value)}
-                className="text-sm px-2 py-1 rounded-sm border"
-                style={{ width: "160px", minWidth: 0, borderColor: "#DCD7C9" }}
-                placeholder="0,00"
+                defaultValue={formatMoedaInputBR(saldoInicialAplicacoes)}
+                onFocus={(e) => e.target.select()}
+                onBlur={(e) => {
+                  const numero = parseMoedaInputBR(e.target.value);
+                  persistSaldoInicialAplicacoes(numero);
+                  e.target.value = formatMoedaInputBR(numero);
+                }}
+                className="text-sm px-2 py-1 rounded-sm border text-right"
+                style={{ width: "160px", minWidth: 0, borderColor: "#DCD7C9", fontFamily: "'IBM Plex Mono', monospace" }}
+                placeholder="R$ 0,00"
               />
               <span className="text-xs" style={{ color: "#6B6F76" }}>
                 informe o saldo que já estava aplicado antes do primeiro lançamento — depois disso o valor é atualizado sozinho a cada aplicação/resgate classificado no extrato
