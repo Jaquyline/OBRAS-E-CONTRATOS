@@ -3225,7 +3225,11 @@ export default function DashboardConstrutora({ userEmail }) {
   // acesso de cada e-mail de login a cada empresa é controlado aqui;
   // e-mails não listados veem as duas (mesmo comportamento de antes de
   // existir a SGO).
-  const EMPRESAS_INFO = {
+  // Valores de partida (usados só para "semear" a configuração editável na
+  // primeira vez que cada chave é carregada — depois disso, quem manda é o
+  // que estiver salvo no Supabase, editável na Visão geral em "Pessoas e
+  // acessos" / "Empresas").
+  const SEED_EMPRESAS_INFO = {
     jg: {
       nome: "J & G Incorporadora Ltda",
       cnpj: "21.203.244/0001-41",
@@ -3251,16 +3255,139 @@ export default function DashboardConstrutora({ userEmail }) {
     ],
     sgo: [{ id: "galpao-cunha", nome: "Galpão Cunha", status: "em_andamento", avancoFisico: 0 }],
   };
-  const ACESSO_EMPRESAS_POR_EMAIL = {
+  const SEED_ACESSO_EMPRESAS_POR_EMAIL = {
     "joaobb_@hotmail.com": ["jg"],
     "financeirojgincorporadora@gmail.com": ["jg", "sgo"],
     "fzanell@hotmail.com": ["sgo"],
   };
+  const STORAGE_KEY_ACESSOS_EMPRESAS = "acessos-empresas-por-email";
+  const STORAGE_KEY_EMPRESAS_INFO_CONFIG = "empresas-info-config";
+
+  // acessosConfig: lista editável [{ email, nome, empresas: ["jg","sgo"] }].
+  // empresasInfoConfig: { jg: {nome,cnpj,socios,label}, sgo: {...} } editável.
+  // Começam null (carregando); até carregar, usa-se o SEED pra não travar a
+  // tela — isso é só o ponto de partida, não um limite fixo de empresas.
+  const [acessosConfig, setAcessosConfig] = useState(null);
+  const [empresasInfoConfig, setEmpresasInfoConfig] = useState(null);
+
+  const EMPRESAS_INFO = empresasInfoConfig || SEED_EMPRESAS_INFO;
+  const ACESSO_EMPRESAS_POR_EMAIL = acessosConfig
+    ? acessosConfig.reduce((acc, p) => {
+        acc[(p.email || "").trim().toLowerCase()] = p.empresas && p.empresas.length ? p.empresas : ["jg", "sgo"];
+        return acc;
+      }, {})
+    : SEED_ACESSO_EMPRESAS_POR_EMAIL;
   const emailLoginNormalizado = (userEmail || "").trim().toLowerCase();
   const empresasPermitidas = ACESSO_EMPRESAS_POR_EMAIL[emailLoginNormalizado] || ["jg", "sgo"];
   const [empresaAtual, setEmpresaAtual] = useState(() =>
     empresasPermitidas.includes("jg") ? "jg" : empresasPermitidas[0]
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [resultAcessos, resultEmpresas] = await Promise.all([
+        window.storage.get(STORAGE_KEY_ACESSOS_EMPRESAS),
+        window.storage.get(STORAGE_KEY_EMPRESAS_INFO_CONFIG),
+      ]);
+      if (cancelled) return;
+      if (resultAcessos && resultAcessos.value) {
+        setAcessosConfig(JSON.parse(resultAcessos.value));
+      } else {
+        setAcessosConfig(
+          Object.entries(SEED_ACESSO_EMPRESAS_POR_EMAIL).map(([email, empresas]) => ({
+            email,
+            nome: "",
+            empresas,
+          }))
+        );
+      }
+      if (resultEmpresas && resultEmpresas.value) {
+        setEmpresasInfoConfig(JSON.parse(resultEmpresas.value));
+      } else {
+        setEmpresasInfoConfig(SEED_EMPRESAS_INFO);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function salvarAcessosConfig(novaLista) {
+    setAcessosConfig(novaLista);
+    window.storage.set(STORAGE_KEY_ACESSOS_EMPRESAS, JSON.stringify(novaLista));
+  }
+
+  const [novaPessoaEmail, setNovaPessoaEmail] = useState("");
+  const [novaPessoaNome, setNovaPessoaNome] = useState("");
+  const [novaPessoaEmpresas, setNovaPessoaEmpresas] = useState([]);
+
+  function handleAdicionarPessoaAcesso() {
+    const email = novaPessoaEmail.trim().toLowerCase();
+    if (!email) return;
+    const lista = acessosConfig || [];
+    if (lista.some((p) => p.email === email)) {
+      alert("Esse e-mail já está na lista abaixo — edite o acesso dele ali.");
+      return;
+    }
+    salvarAcessosConfig([
+      ...lista,
+      {
+        email,
+        nome: novaPessoaNome.trim(),
+        empresas: novaPessoaEmpresas.length ? novaPessoaEmpresas : Object.keys(EMPRESAS_INFO),
+      },
+    ]);
+    setNovaPessoaEmail("");
+    setNovaPessoaNome("");
+    setNovaPessoaEmpresas([]);
+  }
+
+  function handleToggleEmpresaNovaPessoa(empresaId) {
+    setNovaPessoaEmpresas((atual) =>
+      atual.includes(empresaId) ? atual.filter((e) => e !== empresaId) : [...atual, empresaId]
+    );
+  }
+
+  function handleToggleEmpresaPessoa(email, empresaId) {
+    salvarAcessosConfig(
+      (acessosConfig || []).map((p) => {
+        if (p.email !== email) return p;
+        const jaTem = p.empresas.includes(empresaId);
+        return { ...p, empresas: jaTem ? p.empresas.filter((e) => e !== empresaId) : [...p.empresas, empresaId] };
+      })
+    );
+  }
+
+  function handleEditarNomePessoaAcesso(email, nome) {
+    salvarAcessosConfig((acessosConfig || []).map((p) => (p.email === email ? { ...p, nome } : p)));
+  }
+
+  function handleRemoverPessoaAcesso(email) {
+    if (
+      !window.confirm(
+        "Remover o acesso configurado desse e-mail? Sem uma linha aqui, ele passa a ver todas as empresas (padrão)."
+      )
+    )
+      return;
+    salvarAcessosConfig((acessosConfig || []).filter((p) => p.email !== email));
+  }
+
+  function handleEditarEmpresaInfo(empresaId, campo, valor) {
+    const atual = empresasInfoConfig || SEED_EMPRESAS_INFO;
+    const novoConfig = { ...atual, [empresaId]: { ...atual[empresaId], [campo]: valor } };
+    setEmpresasInfoConfig(novoConfig);
+    window.storage.set(STORAGE_KEY_EMPRESAS_INFO_CONFIG, JSON.stringify(novoConfig));
+  }
+
+  function handleEditarSociosEmpresa(empresaId, sociosTexto) {
+    handleEditarEmpresaInfo(
+      empresaId,
+      "socios",
+      sociosTexto.split(",").map((s) => s.trim()).filter(Boolean)
+    );
+  }
   const prefixoEmpresa = empresaAtual === "sgo" ? "sgo__" : "";
   const empresaInfo = EMPRESAS_INFO[empresaAtual];
   // Sombra deliberada das constantes de módulo de mesmo nome (obrasIniciais,
@@ -5951,7 +6078,7 @@ export default function DashboardConstrutora({ userEmail }) {
               className="text-sm uppercase tracking-[0.12em] font-semibold mb-4 cursor-pointer"
               style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
             >
-              Isla Catalina — orçado × realizado <span style={{ color: "#8A8D93", fontWeight: 400 }}>›</span>
+              Obras — orçado × realizado <span style={{ color: "#8A8D93", fontWeight: 400 }}>›</span>
             </h2>
             <div className="space-y-4">
               {obrasComRealizado.map((o) => {
@@ -6228,6 +6355,176 @@ export default function DashboardConstrutora({ userEmail }) {
           Protótipo com dados fictícios — clique em uma obra para ver detalhes do orçamento. O fluxo de
           caixa detalhado ficou na aba própria "Fluxo de caixa".
         </p>
+
+        {empresasPermitidas.length > 1 && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-8">
+            {/* Pessoas e acessos */}
+            <section className="rounded-md p-5 border" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
+              <h2
+                className="text-sm uppercase tracking-[0.12em] font-semibold mb-1"
+                style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Pessoas e acessos
+              </h2>
+              <p className="text-xs mb-4" style={{ color: "#8A8D93" }}>
+                Quem loga com qual e-mail vê quais empresas. Mude aqui — não precisa pedir pra alterar no código.
+              </p>
+              <div className="space-y-2 mb-4">
+                {(acessosConfig || []).map((p) => (
+                  <div
+                    key={p.email}
+                    className="rounded-sm p-2.5 border flex flex-col gap-2"
+                    style={{ background: "#FFFFFF", borderColor: "#E4DFCF" }}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <input
+                        value={p.nome}
+                        onChange={(e) => handleEditarNomePessoaAcesso(p.email, e.target.value)}
+                        placeholder="Nome (opcional)"
+                        className="text-sm font-semibold bg-transparent outline-none flex-1"
+                        style={{ color: "#22252A" }}
+                      />
+                      <button
+                        onClick={() => handleRemoverPessoaAcesso(p.email)}
+                        className="text-xs shrink-0"
+                        style={{ color: "#B23A2E" }}
+                      >
+                        remover
+                      </button>
+                    </div>
+                    <div className="text-xs" style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}>
+                      {p.email}
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {Object.entries(EMPRESAS_INFO).map(([empresaId, info]) => {
+                        const marcado = p.empresas.includes(empresaId);
+                        return (
+                          <button
+                            key={empresaId}
+                            onClick={() => handleToggleEmpresaPessoa(p.email, empresaId)}
+                            className="text-xs font-semibold px-2.5 py-1 rounded-full border"
+                            style={{
+                              color: marcado ? "#22252A" : "#9BA0A6",
+                              background: marcado ? "#E1590C" : "transparent",
+                              borderColor: marcado ? "#E1590C" : "#DCD7C9",
+                            }}
+                          >
+                            {marcado ? "✓ " : ""}
+                            {info.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {(acessosConfig || []).length === 0 && (
+                  <p className="text-xs" style={{ color: "#8A8D93" }}>
+                    Nenhum e-mail cadastrado ainda — quem logar sem estar na lista vê todas as empresas.
+                  </p>
+                )}
+              </div>
+              <div className="rounded-sm p-2.5 border space-y-2" style={{ borderColor: "#DCD7C9", borderStyle: "dashed" }}>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    value={novaPessoaNome}
+                    onChange={(e) => setNovaPessoaNome(e.target.value)}
+                    placeholder="Nome (opcional)"
+                    className="text-sm px-2 py-1 rounded-sm border flex-1 min-w-[120px]"
+                    style={{ borderColor: "#DCD7C9" }}
+                  />
+                  <input
+                    value={novaPessoaEmail}
+                    onChange={(e) => setNovaPessoaEmail(e.target.value)}
+                    placeholder="e-mail de login"
+                    className="text-sm px-2 py-1 rounded-sm border flex-1 min-w-[160px]"
+                    style={{ borderColor: "#DCD7C9" }}
+                  />
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {Object.entries(EMPRESAS_INFO).map(([empresaId, info]) => {
+                    const marcado = novaPessoaEmpresas.includes(empresaId);
+                    return (
+                      <button
+                        key={empresaId}
+                        onClick={() => handleToggleEmpresaNovaPessoa(empresaId)}
+                        className="text-xs font-semibold px-2.5 py-1 rounded-full border"
+                        style={{
+                          color: marcado ? "#22252A" : "#9BA0A6",
+                          background: marcado ? "#E1590C" : "transparent",
+                          borderColor: marcado ? "#E1590C" : "#DCD7C9",
+                        }}
+                      >
+                        {marcado ? "✓ " : ""}
+                        {info.label}
+                      </button>
+                    );
+                  })}
+                  <button
+                    onClick={handleAdicionarPessoaAcesso}
+                    disabled={!novaPessoaEmail.trim()}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-sm ml-auto"
+                    style={{
+                      color: "#22252A",
+                      background: novaPessoaEmail.trim() ? "#E1590C" : "#E4DFCF",
+                    }}
+                  >
+                    + Adicionar pessoa
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {/* Empresas */}
+            <section className="rounded-md p-5 border" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
+              <h2
+                className="text-sm uppercase tracking-[0.12em] font-semibold mb-1"
+                style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Empresas
+              </h2>
+              <p className="text-xs mb-4" style={{ color: "#8A8D93" }}>
+                Nome, CNPJ e sócios de cada empresa — usados nos relatórios e assinaturas.
+              </p>
+              <div className="space-y-3">
+                {Object.entries(EMPRESAS_INFO).map(([empresaId, info]) => (
+                  <div
+                    key={empresaId}
+                    className="rounded-sm p-3 border space-y-2"
+                    style={{ background: "#FFFFFF", borderColor: "#E4DFCF" }}
+                  >
+                    <div
+                      className="text-[10px] uppercase tracking-wide font-semibold"
+                      style={{ color: "#8A8D93" }}
+                    >
+                      {info.label}
+                    </div>
+                    <input
+                      value={info.nome}
+                      onChange={(e) => handleEditarEmpresaInfo(empresaId, "nome", e.target.value)}
+                      placeholder="Nome / razão social"
+                      className="text-sm font-semibold w-full bg-transparent outline-none"
+                      style={{ color: "#22252A" }}
+                    />
+                    <input
+                      value={info.cnpj}
+                      onChange={(e) => handleEditarEmpresaInfo(empresaId, "cnpj", e.target.value)}
+                      placeholder="CNPJ"
+                      className="text-xs w-full bg-transparent outline-none"
+                      style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
+                    />
+                    <input
+                      defaultValue={info.socios.join(", ")}
+                      onBlur={(e) => handleEditarSociosEmpresa(empresaId, e.target.value)}
+                      placeholder="Sócios, separados por vírgula"
+                      className="text-xs w-full bg-transparent outline-none border-t pt-2"
+                      style={{ color: "#22252A", borderColor: "#E4DFCF" }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        )}
         </>
         )}
 
@@ -7126,7 +7423,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 sub={totalVGV > 0 ? `${Math.round((totalRecebidoCV / totalVGV) * 100)}% do VGV` : "—"}
                 accent="#3D6E8C"
               />
-              <KpiCard eyebrow="Unidades vendidas" value={`${contratosCV.length}`} sub="Isla Catalina" />
+              <KpiCard eyebrow="Unidades vendidas" value={`${contratosCV.length}`} sub={empresaInfo.label} />
               <KpiCard
                 eyebrow="Pagamentos atrasados"
                 value={`${unidadesAtrasadas}`}
