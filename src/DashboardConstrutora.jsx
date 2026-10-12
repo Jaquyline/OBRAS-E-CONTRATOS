@@ -3244,142 +3244,161 @@ function TelaAdminUsuariosEEmpresas({
   onEntrarEmpresa,
 }) {
   const podeAdicionar = novaPessoaEmail.trim() && novaPessoaSenha.trim().length >= 6 && !criandoPessoa;
+  const idsEmpresas = Object.keys(empresasInfo);
+
+  function Checkbox({ marcado, onClick }) {
+    return (
+      <button
+        onClick={onClick}
+        className="w-5 h-5 rounded-sm flex items-center justify-center shrink-0"
+        style={{
+          background: marcado ? "#16A34A" : "#11141A",
+          border: "1px solid " + (marcado ? "#16A34A" : "#3A3E45"),
+        }}
+      >
+        {marcado && (
+          <span className="text-white text-[12px] leading-none" style={{ fontWeight: 700 }}>
+            ✓
+          </span>
+        )}
+      </button>
+    );
+  }
+
   return (
     <div className="no-print">
       <div
-        className="text-[11px] uppercase tracking-[0.2em] font-semibold mb-1"
-        style={{ color: "#E1590C", fontFamily: "'Oswald', sans-serif" }}
+        className="rounded-md p-5 sm:p-6 border mb-5"
+        style={{ background: "#171A21", borderColor: "#2E323A" }}
       >
-        Área de administração
-      </div>
-      <h1
-        className="text-3xl sm:text-4xl font-semibold text-white tracking-tight mb-6"
-        style={{ fontFamily: "'Oswald', sans-serif" }}
-      >
-        Usuários e permissões
-      </h1>
-
-      <section className="rounded-md p-5 border mb-6" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
-        <p className="text-xs mb-4" style={{ color: "#6B6F76" }}>
-          Só você vê esta tela. Preencha nome, e-mail e senha e clique em Adicionar pessoa — isso cria o login de
-          verdade. Depois marque quais empresas essa pessoa pode ver. Clique no nome para editar, ou em "trocar
-          senha" se a pessoa esquecer.
+        <h1
+          className="text-lg font-semibold text-white mb-1"
+          style={{ fontFamily: "'Oswald', sans-serif" }}
+        >
+          Usuários e permissões
+        </h1>
+        <p className="text-xs mb-4" style={{ color: "#8A8D93" }}>
+          Só você vê este painel. Para dar acesso a alguém, preencha nome, e-mail e senha e clique em Adicionar.
+          Depois marque as empresas que a pessoa pode usar. Clique no nome para editar, ou em "Trocar senha" se a
+          pessoa esquecer.
         </p>
 
-        <div className="rounded-sm p-3 border space-y-2 mb-5" style={{ borderColor: "#DCD7C9", borderStyle: "dashed" }}>
-          <div className="flex items-center gap-2 flex-wrap">
-            <input
-              value={novaPessoaNome}
-              onChange={(e) => setNovaPessoaNome(e.target.value)}
-              placeholder="nome"
-              className="text-sm px-2 py-1.5 rounded-sm border flex-1 min-w-[140px]"
-              style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}
-            />
-            <input
-              value={novaPessoaEmail}
-              onChange={(e) => setNovaPessoaEmail(e.target.value)}
-              placeholder="e-mail de login"
-              className="text-sm px-2 py-1.5 rounded-sm border flex-1 min-w-[180px]"
-              style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}
-            />
-            <input
-              value={novaPessoaSenha}
-              onChange={(e) => setNovaPessoaSenha(e.target.value)}
-              placeholder="senha (mín. 6)"
-              type="password"
-              className="text-sm px-2 py-1.5 rounded-sm border flex-1 min-w-[140px]"
-              style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}
-            />
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            {Object.entries(empresasInfo).map(([empresaId, info]) => {
-              const marcado = novaPessoaEmpresas.includes(empresaId);
-              return (
-                <button
-                  key={empresaId}
-                  onClick={() => onToggleEmpresaNovaPessoa(empresaId)}
-                  className="text-xs font-semibold px-2.5 py-1 rounded-full border"
-                  style={{
-                    color: marcado ? "#22252A" : "#9BA0A6",
-                    background: marcado ? "#E1590C" : "transparent",
-                    borderColor: marcado ? "#E1590C" : "#DCD7C9",
-                  }}
+        <div className="flex flex-col sm:flex-row gap-2 mb-6">
+          <input
+            value={novaPessoaNome}
+            onChange={(e) => setNovaPessoaNome(e.target.value)}
+            placeholder="nome"
+            className="text-sm px-3 py-2 rounded-sm border flex-1 text-white outline-none"
+            style={{ background: "#11141A", borderColor: "#2E323A" }}
+          />
+          <input
+            value={novaPessoaEmail}
+            onChange={(e) => setNovaPessoaEmail(e.target.value)}
+            placeholder="usuário (e-mail)"
+            className="text-sm px-3 py-2 rounded-sm border flex-1 text-white outline-none"
+            style={{ background: "#11141A", borderColor: "#2E323A" }}
+          />
+          <input
+            value={novaPessoaSenha}
+            onChange={(e) => setNovaPessoaSenha(e.target.value)}
+            placeholder="senha (mín. 6)"
+            type="password"
+            className="text-sm px-3 py-2 rounded-sm border flex-1 text-white outline-none"
+            style={{ background: "#11141A", borderColor: "#2E323A" }}
+          />
+          <button
+            onClick={onAdicionarPessoa}
+            disabled={!podeAdicionar}
+            className="text-sm font-semibold px-5 py-2 rounded-sm shrink-0"
+            style={{ color: "#0B1A12", background: podeAdicionar ? "#16A34A" : "#2E323A" }}
+          >
+            {criandoPessoa ? "Criando…" : "Adicionar"}
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left" style={{ borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #2E323A" }}>
+                <th
+                  className="text-[11px] uppercase tracking-wide font-semibold pb-2 pr-4"
+                  style={{ color: "#8A8D93" }}
                 >
-                  {marcado ? "✓ " : ""}
-                  {info.label}
-                </button>
-              );
-            })}
-            <button
-              onClick={onAdicionarPessoa}
-              disabled={!podeAdicionar}
-              className="text-xs font-semibold px-3 py-1.5 rounded-sm ml-auto"
-              style={{ color: "#22252A", background: podeAdicionar ? "#E1590C" : "#E4DFCF" }}
-            >
-              {criandoPessoa ? "Criando…" : "+ Adicionar pessoa"}
-            </button>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          {(acessosConfig || []).map((p) => (
-            <div
-              key={p.email}
-              className="rounded-sm p-2.5 border flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
-              style={{ background: "#FFFFFF", borderColor: "#E4DFCF" }}
-            >
-              <div className="min-w-0">
-                <input
-                  value={p.nome}
-                  onChange={(e) => onEditarNome(p.email, e.target.value)}
-                  placeholder="Nome (opcional)"
-                  className="text-sm font-semibold bg-transparent outline-none w-full"
-                  style={{ color: "#22252A" }}
-                />
-                <div className="text-xs" style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}>
-                  {p.email}
-                </div>
-                <button onClick={() => onTrocarSenha(p.email)} className="text-xs" style={{ color: "#3D6E8C" }}>
-                  trocar senha
-                </button>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                {Object.entries(empresasInfo).map(([empresaId, info]) => {
-                  const marcado = p.empresas.includes(empresaId);
-                  return (
+                  Login
+                </th>
+                {idsEmpresas.map((empresaId) => (
+                  <th
+                    key={empresaId}
+                    className="text-[11px] uppercase tracking-wide font-semibold pb-2 px-3 text-center"
+                    style={{ color: "#8A8D93" }}
+                  >
+                    {empresasInfo[empresaId].label}
+                  </th>
+                ))}
+                <th className="pb-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {(acessosConfig || []).map((p) => (
+                <tr key={p.email} style={{ borderBottom: "1px solid #22252A" }}>
+                  <td className="py-3 pr-4 align-top">
+                    <input
+                      value={p.nome}
+                      onChange={(e) => onEditarNome(p.email, e.target.value)}
+                      placeholder="(sem nome)"
+                      className="text-sm font-semibold bg-transparent outline-none w-full text-white"
+                    />
+                    <div className="text-xs" style={{ color: "#8A8D93" }}>
+                      {p.email}
+                    </div>
                     <button
-                      key={empresaId}
-                      onClick={() => onToggleEmpresaPessoa(p.email, empresaId)}
-                      className="text-xs font-semibold px-2.5 py-1 rounded-full border"
-                      style={{
-                        color: marcado ? "#22252A" : "#9BA0A6",
-                        background: marcado ? "#E1590C" : "transparent",
-                        borderColor: marcado ? "#E1590C" : "#DCD7C9",
-                      }}
+                      onClick={() => onTrocarSenha(p.email)}
+                      className="text-xs"
+                      style={{ color: "#38BDF8" }}
                     >
-                      {marcado ? "✓ " : ""}
-                      {info.label}
+                      Trocar senha
                     </button>
-                  );
-                })}
-                <button onClick={() => onRemoverPessoa(p.email)} className="text-xs shrink-0" style={{ color: "#B23A2E" }}>
-                  remover acesso
-                </button>
-              </div>
-            </div>
-          ))}
-          {(acessosConfig || []).length === 0 && (
-            <p className="text-xs" style={{ color: "#8A8D93" }}>
-              Nenhum e-mail cadastrado ainda — quem logar sem estar na lista vê todas as empresas.
-            </p>
-          )}
+                  </td>
+                  {idsEmpresas.map((empresaId) => (
+                    <td key={empresaId} className="py-3 px-3 text-center align-top">
+                      <div className="flex justify-center">
+                        <Checkbox
+                          marcado={p.empresas.includes(empresaId)}
+                          onClick={() => onToggleEmpresaPessoa(p.email, empresaId)}
+                        />
+                      </div>
+                    </td>
+                  ))}
+                  <td className="py-3 pl-2 align-top text-right">
+                    <button
+                      onClick={() => onRemoverPessoa(p.email)}
+                      className="text-xs"
+                      style={{ color: "#EF4444" }}
+                    >
+                      remover
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {(acessosConfig || []).length === 0 && (
+                <tr>
+                  <td colSpan={idsEmpresas.length + 2} className="py-4 text-xs" style={{ color: "#8A8D93" }}>
+                    Nenhum e-mail cadastrado ainda — quem logar sem estar na lista vê todas as empresas.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
-      </section>
+      </div>
 
-      <section className="rounded-md p-5 border mb-6" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
+      <div
+        className="rounded-md p-5 sm:p-6 border mb-5"
+        style={{ background: "#171A21", borderColor: "#2E323A" }}
+      >
         <h2
-          className="text-sm uppercase tracking-[0.12em] font-semibold mb-1"
-          style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+          className="text-sm font-semibold text-white mb-1"
+          style={{ fontFamily: "'Oswald', sans-serif" }}
         >
           Empresas
         </h2>
@@ -3387,53 +3406,60 @@ function TelaAdminUsuariosEEmpresas({
           Nome, CNPJ e sócios de cada empresa — usados nos relatórios e assinaturas.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {Object.entries(empresasInfo).map(([empresaId, info]) => (
-            <div
-              key={empresaId}
-              className="rounded-sm p-3 border space-y-2"
-              style={{ background: "#FFFFFF", borderColor: "#E4DFCF" }}
-            >
-              <div className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
-                {info.label}
+          {idsEmpresas.map((empresaId) => {
+            const info = empresasInfo[empresaId];
+            return (
+              <div
+                key={empresaId}
+                className="rounded-sm p-3 border space-y-2"
+                style={{ background: "#11141A", borderColor: "#2E323A" }}
+              >
+                <div className="text-[10px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  {info.label}
+                </div>
+                <input
+                  value={info.nome}
+                  onChange={(e) => onEditarEmpresaInfo(empresaId, "nome", e.target.value)}
+                  placeholder="Nome / razão social"
+                  className="text-sm font-semibold w-full bg-transparent outline-none text-white"
+                />
+                <input
+                  value={info.cnpj}
+                  onChange={(e) => onEditarEmpresaInfo(empresaId, "cnpj", e.target.value)}
+                  placeholder="CNPJ"
+                  className="text-xs w-full bg-transparent outline-none"
+                  style={{ color: "#8A8D93", fontFamily: "'IBM Plex Mono', monospace" }}
+                />
+                <input
+                  defaultValue={info.socios.join(", ")}
+                  onBlur={(e) => onEditarSociosEmpresa(empresaId, e.target.value)}
+                  placeholder="Sócios, separados por vírgula"
+                  className="text-xs w-full bg-transparent outline-none border-t pt-2"
+                  style={{ color: "#C8CBD1", borderColor: "#2E323A" }}
+                />
               </div>
-              <input
-                value={info.nome}
-                onChange={(e) => onEditarEmpresaInfo(empresaId, "nome", e.target.value)}
-                placeholder="Nome / razão social"
-                className="text-sm font-semibold w-full bg-transparent outline-none"
-                style={{ color: "#22252A" }}
-              />
-              <input
-                value={info.cnpj}
-                onChange={(e) => onEditarEmpresaInfo(empresaId, "cnpj", e.target.value)}
-                placeholder="CNPJ"
-                className="text-xs w-full bg-transparent outline-none"
-                style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
-              />
-              <input
-                defaultValue={info.socios.join(", ")}
-                onBlur={(e) => onEditarSociosEmpresa(empresaId, e.target.value)}
-                placeholder="Sócios, separados por vírgula"
-                className="text-xs w-full bg-transparent outline-none border-t pt-2"
-                style={{ color: "#22252A", borderColor: "#E4DFCF" }}
-              />
-            </div>
-          ))}
+            );
+          })}
         </div>
-      </section>
+      </div>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-sm" style={{ color: "#9BA0A6" }}>
+        <span className="text-sm" style={{ color: "#8A8D93" }}>
           Entrar no painel de:
         </span>
-        {Object.entries(empresasInfo).map(([empresaId, info]) => (
+        {idsEmpresas.map((empresaId) => (
           <button
             key={empresaId}
             onClick={() => onEntrarEmpresa(empresaId)}
             className="text-sm font-semibold px-4 py-2 rounded-sm"
-            style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#22252A", background: "#E1590C" }}
+            style={{
+              fontFamily: "'Oswald', sans-serif",
+              letterSpacing: "0.03em",
+              color: "#22252A",
+              background: "#E1590C",
+            }}
           >
-            {info.label} ›
+            {empresasInfo[empresaId].label} ›
           </button>
         ))}
       </div>
