@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import forge from "node-forge";
 import { supabase, criarClienteParaNovoLogin } from "./lib/supabaseClient.js";
 
 // ---- Importação de PDF: extração por padrão de texto (sem IA) ----
@@ -4477,7 +4478,101 @@ export default function DashboardConstrutora({ userEmail }) {
   const [obraEscolhidaPorNota, setObraEscolhidaPorNota] = useState({});
   const [notasLevadasParaCusto, setNotasLevadasParaCusto] = useState({});
 
+  // Certificado digital — guardado pelo próprio painel (sem precisar de
+  // terminal nem do painel da Supabase): a pessoa escolhe o arquivo .pfx e
+  // digita a senha aqui; a extração do certificado e da chave acontece no
+  // próprio navegador (biblioteca "node-forge"), e só o resultado (em PEM,
+  // sem a senha) é salvo na nuvem — exatamente como as outras configurações
+  // do painel (tabela kv_store, só acessível a quem está logado). A senha
+  // digitada aqui nunca é salva em lugar nenhum.
+  const STORAGE_KEY_CERTIFICADO_FISCAL = "certificado-fiscal-jg";
+  const [certificadoFiscal, setCertificadoFiscal] = useState(null);
+  const [loadingCertificadoFiscal, setLoadingCertificadoFiscal] = useState(true);
+  const [salvandoCertificadoFiscal, setSalvandoCertificadoFiscal] = useState(false);
+  const [erroCertificadoFiscal, setErroCertificadoFiscal] = useState(null);
+  const [senhaCertificadoFiscal, setSenhaCertificadoFiscal] = useState("");
+  const [arquivoCertificadoFiscal, setArquivoCertificadoFiscal] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await window.storage.get(STORAGE_KEY_CERTIFICADO_FISCAL, false);
+      if (cancelled) return;
+      setCertificadoFiscal(result ? JSON.parse(result.value) : null);
+      setLoadingCertificadoFiscal(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleSalvarCertificadoFiscal() {
+    if (!arquivoCertificadoFiscal) {
+      setErroCertificadoFiscal("Escolha o arquivo do certificado (.pfx ou .p12) primeiro.");
+      return;
+    }
+    if (!senhaCertificadoFiscal) {
+      setErroCertificadoFiscal("Digite a senha do certificado.");
+      return;
+    }
+    setSalvandoCertificadoFiscal(true);
+    setErroCertificadoFiscal(null);
+    try {
+      const buffer = await arquivoCertificadoFiscal.arrayBuffer();
+      const binario = forge.util.binary.raw.encode(new Uint8Array(buffer));
+      const asn1 = forge.asn1.fromDer(binario);
+      const p12 = forge.pkcs12.pkcs12FromAsn1(asn1, false, senhaCertificadoFiscal);
+
+      const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
+      const certBag = (certBags[forge.pki.oids.certBag] || [])[0];
+      const keyBagsShrouded = p12.getBags({ bagType: forge.pki.oids.pkcs8ShroudedKeyBag });
+      const keyBag =
+        (keyBagsShrouded[forge.pki.oids.pkcs8ShroudedKeyBag] || [])[0] ||
+        (p12.getBags({ bagType: forge.pki.oids.keyBag })[forge.pki.oids.keyBag] || [])[0];
+
+      if (!certBag || !certBag.cert || !keyBag || !keyBag.key) {
+        throw new Error("Não encontrei certificado e chave dentro do arquivo.");
+      }
+
+      const certPem = forge.pki.certificateToPem(certBag.cert);
+      const keyPem = forge.pki.privateKeyToPem(keyBag.key);
+      const validoAte = certBag.cert.validity.notAfter.toISOString();
+      const validoDe = certBag.cert.validity.notBefore.toISOString();
+      const titular = certBag.cert.subject.getField("CN")?.value || "";
+
+      const novoCertificado = {
+        certPem,
+        keyPem,
+        nomeArquivo: arquivoCertificadoFiscal.name,
+        titular,
+        validoDe,
+        validoAte,
+        salvoEm: new Date().toISOString(),
+      };
+      await window.storage.set(STORAGE_KEY_CERTIFICADO_FISCAL, JSON.stringify(novoCertificado), false);
+      setCertificadoFiscal(novoCertificado);
+      setSenhaCertificadoFiscal("");
+      setArquivoCertificadoFiscal(null);
+    } catch (err) {
+      setErroCertificadoFiscal(
+        "Não consegui abrir o certificado com essa senha — confira se a senha está certa e se o arquivo é o .pfx (ou .p12) do certificado."
+      );
+    } finally {
+      setSalvandoCertificadoFiscal(false);
+    }
+  }
+
+  function handleRemoverCertificadoFiscal() {
+    window.storage.delete(STORAGE_KEY_CERTIFICADO_FISCAL, false);
+    setCertificadoFiscal(null);
+  }
+
   async function handleBuscarNotasFiscais() {
+    if (!certificadoFiscal) {
+      setErroBuscaNotasFiscais('Envie o certificado digital na seção "Certificado digital" abaixo antes de buscar as notas.');
+      return;
+    }
     setBuscandoNotasFiscais(true);
     setErroBuscaNotasFiscais(null);
     try {
@@ -11644,6 +11739,81 @@ export default function DashboardConstrutora({ userEmail }) {
 
         {activeTab === "fiscal" && (
           <>
+            <section className="rounded-md p-5 border mb-5" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
+              <h2
+                className="text-sm uppercase tracking-[0.12em] font-semibold mb-1"
+                style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Certificado digital
+              </h2>
+              <p className="text-xs mb-4" style={{ color: "#8A8D93" }}>
+                Envie o arquivo do certificado (.pfx ou .p12) e digite a senha dele. A extração acontece aqui
+                mesmo no seu navegador — a senha não é salva em nenhum lugar, só o certificado já processado
+                fica guardado (protegido por login) para a busca de notas poder usá-lo.
+              </p>
+
+              {loadingCertificadoFiscal ? (
+                <div className="text-xs" style={{ color: "#8A8D93" }}>Carregando…</div>
+              ) : certificadoFiscal ? (
+                <div className="flex items-center justify-between flex-wrap gap-3 px-3 py-3 rounded-sm" style={{ background: "#E8EEE8", border: "1px solid #C9D9C9" }}>
+                  <div className="text-xs" style={{ color: "#22252A" }}>
+                    <div className="font-semibold">✓ Certificado carregado — {certificadoFiscal.nomeArquivo}</div>
+                    {certificadoFiscal.titular && <div style={{ color: "#4F7A5B" }}>{certificadoFiscal.titular}</div>}
+                    <div style={{ color: "#8A8D93" }}>
+                      Válido até {new Date(certificadoFiscal.validoAte).toLocaleDateString("pt-BR")}
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleRemoverCertificadoFiscal}
+                    className="text-xs font-semibold"
+                    style={{ color: "#B23A2E" }}
+                  >
+                    Remover / trocar certificado
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-end gap-3 flex-wrap">
+                  <div>
+                    <label className="text-xs font-semibold uppercase tracking-wide block mb-1" style={{ color: "#8A8D93" }}>
+                      Arquivo (.pfx / .p12)
+                    </label>
+                    <input
+                      type="file"
+                      accept=".pfx,.p12"
+                      onChange={(e) => setArquivoCertificadoFiscal(e.target.files?.[0] || null)}
+                      className="text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold uppercase tracking-wide block mb-1" style={{ color: "#8A8D93" }}>
+                      Senha do certificado
+                    </label>
+                    <input
+                      type="password"
+                      value={senhaCertificadoFiscal}
+                      onChange={(e) => setSenhaCertificadoFiscal(e.target.value)}
+                      className="text-sm px-3 py-2 rounded-sm border outline-none"
+                      style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}
+                    />
+                  </div>
+                  <button
+                    onClick={handleSalvarCertificadoFiscal}
+                    disabled={salvandoCertificadoFiscal}
+                    className="text-sm font-semibold px-4 py-2 rounded-sm"
+                    style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#4F7A5B" }}
+                  >
+                    {salvandoCertificadoFiscal ? "Salvando…" : "Salvar certificado"}
+                  </button>
+                </div>
+              )}
+
+              {erroCertificadoFiscal && (
+                <div className="mt-3 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                  {erroCertificadoFiscal}
+                </div>
+              )}
+            </section>
+
             <section className="rounded-md p-5 border mb-5" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
               <h2
                 className="text-sm uppercase tracking-[0.12em] font-semibold mb-1"
