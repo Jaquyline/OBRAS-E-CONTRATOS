@@ -328,7 +328,7 @@ export default function AuthGate({ children }) {
           Sair ({session.user.email})
         </button>
       </div>
-      {children}
+      {React.cloneElement(children, { userEmail: session.user.email })}
     </div>
   );
 }

@@ -1494,6 +1494,7 @@ function gerarParcelasReceber(contrato) {
     parcelas.push({
       id: `${contrato.id}-r${i + 1}`,
       contratoId: contrato.id,
+      obra: contrato.obra,
       unidade: contrato.unidade,
       comprador: contrato.comprador,
       parcela: `${i + 1}/${n}`,
@@ -1642,10 +1643,89 @@ const ETAPAS_CUSTO = [
   },
 ];
 
-function gerarCustosItensIniciais(obraNome) {
+// Modelo de etapas para um galpão (estrutura metálica/industrial) — usado
+// pela SGO (obra Galpão Cunha), que é um empreendimento bem diferente de um
+// prédio residencial: sem unidades pra vender, com taxas/projetos e
+// despesas correntes (IPTU, condomínio) tendo um peso maior no dia a dia.
+const ETAPAS_CUSTO_GALPAO = [
+  {
+    etapa: "1. Projetos e Taxas",
+    itens: [
+      { item: "Taxa de abertura de empresa", unidade: "vb" },
+      { item: "Projeto arquitetônico", unidade: "vb" },
+      { item: "Projeto preventivo (bombeiros)", unidade: "vb" },
+      { item: "Projeto hidrossanitário", unidade: "vb" },
+      { item: "Projeto elétrico", unidade: "vb" },
+      { item: "Projeto estrutural", unidade: "vb" },
+      { item: "ART/RRT e responsabilidade técnica", unidade: "vb" },
+      { item: "Taxa de análise", unidade: "vb" },
+      { item: "Taxa de alvará", unidade: "vb" },
+      { item: "Taxa de expediente de alvará", unidade: "vb" },
+      { item: "Taxa de bombeiro", unidade: "vb" },
+    ],
+  },
+  {
+    etapa: "2. Terraplenagem e Fundação",
+    itens: [
+      { item: "Sondagem do solo (SPT)", unidade: "vb" },
+      { item: "Terraplenagem", unidade: "m³" },
+      { item: "Fundação (sapatas/radier)", unidade: "m³" },
+      { item: "Impermeabilização da fundação", unidade: "m²" },
+    ],
+  },
+  {
+    etapa: "3. Estrutura Metálica",
+    itens: [
+      { item: "Estrutura metálica (fornecimento)", unidade: "kg" },
+      { item: "Montagem da estrutura metálica", unidade: "vb" },
+      { item: "Pintura anticorrosiva/galvanização", unidade: "m²" },
+    ],
+  },
+  {
+    etapa: "4. Fechamento e Cobertura",
+    itens: [
+      { item: "Fechamento lateral (alvenaria/telha metálica)", unidade: "m²" },
+      { item: "Cobertura (telhas)", unidade: "m²" },
+      { item: "Calhas e rufos", unidade: "m" },
+      { item: "Esquadrias (portões/portas)", unidade: "un" },
+    ],
+  },
+  {
+    etapa: "5. Instalações Elétricas e Hidrossanitárias",
+    itens: [
+      { item: "Infraestrutura elétrica", unidade: "vb" },
+      { item: "Quadro de distribuição", unidade: "un" },
+      { item: "Instalações hidrossanitárias", unidade: "vb" },
+      { item: "Iluminação", unidade: "vb" },
+    ],
+  },
+  {
+    etapa: "6. Piso e Acabamento",
+    itens: [
+      { item: "Piso industrial (concreto/contrapiso)", unidade: "m²" },
+      { item: "Pintura", unidade: "m²" },
+      { item: "Acabamentos gerais", unidade: "vb" },
+    ],
+  },
+  {
+    etapa: "7. Administração e Despesas Correntes",
+    itens: [
+      { item: "IPTU", unidade: "mês" },
+      { item: "Condomínio", unidade: "mês" },
+      { item: "Administração da obra", unidade: "mês" },
+      { item: "Taxas diversas", unidade: "vb" },
+    ],
+  },
+  {
+    etapa: "8. Reserva Técnica",
+    itens: [{ item: "Contingência (imprevistos)", unidade: "vb" }],
+  },
+];
+
+function gerarCustosItensIniciais(obraNome, etapasModelo = ETAPAS_CUSTO) {
   const itens = [];
   let seq = 1;
-  ETAPAS_CUSTO.forEach(({ etapa, itens: itensEtapa }) => {
+  etapasModelo.forEach(({ etapa, itens: itensEtapa }) => {
     itensEtapa.forEach(({ item, unidade }) => {
       itens.push({
         id: `custo-${seq}`,
@@ -1663,6 +1743,39 @@ function gerarCustosItensIniciais(obraNome) {
   });
   return itens;
 }
+
+// Despesas reais da SGO (obra Galpão Cunha) já lançadas pela planilha
+// PLANILHA_CUSTOS.numbers enviada pela usuária — cada linha é um gasto que já
+// aconteceu, por isso vai preenchido em "gastoReal" (não em "valorUnitario",
+// que é para orçamento/previsão). Os 3 últimos itens (condomínio e IPTU de
+// outubro + 2ª parcela do projeto elétrico) ainda estão com o rateio entre os
+// sócios Gabriel e Getúlio pendente de acerto, mas a despesa em si já ocorreu.
+const SEED_CUSTOS_GALPAO_CUNHA = [
+  { id: "galpao-seed-1", obra: "Galpão Cunha", etapa: "1. Projetos e Taxas", item: "Taxa de abertura de empresa", unidade: "vb", quantidade: "", valorUnitario: "", gastoReal: "168", observacoes: "", extra: true },
+  { id: "galpao-seed-2", obra: "Galpão Cunha", etapa: "1. Projetos e Taxas", item: "Projetos arquitetônico, preventivo e hidrossanitário (parcela 1 de 3)", unidade: "vb", quantidade: "", valorUnitario: "", gastoReal: "4500", observacoes: "", extra: true },
+  { id: "galpao-seed-3", obra: "Galpão Cunha", etapa: "7. Administração e Despesas Correntes", item: "IPTU mês abril", unidade: "mês", quantidade: "", valorUnitario: "", gastoReal: "359.52", observacoes: "", extra: true },
+  { id: "galpao-seed-4", obra: "Galpão Cunha", etapa: "7. Administração e Despesas Correntes", item: "Condomínio abril", unidade: "mês", quantidade: "", valorUnitario: "", gastoReal: "509.11", observacoes: "Pago em 01/04/2026", extra: true },
+  { id: "galpao-seed-5", obra: "Galpão Cunha", etapa: "1. Projetos e Taxas", item: "Taxa de análise", unidade: "vb", quantidade: "", valorUnitario: "", gastoReal: "25.26", observacoes: "", extra: true },
+  { id: "galpao-seed-6", obra: "Galpão Cunha", etapa: "1. Projetos e Taxas", item: "Projetos arquitetônico, preventivo e hidrossanitário (parcela 2 de 3)", unidade: "vb", quantidade: "", valorUnitario: "", gastoReal: "6000", observacoes: "", extra: true },
+  { id: "galpao-seed-7", obra: "Galpão Cunha", etapa: "7. Administração e Despesas Correntes", item: "Condomínio maio", unidade: "mês", quantidade: "", valorUnitario: "", gastoReal: "509.11", observacoes: "Pago em 01/05/2026", extra: true },
+  { id: "galpao-seed-8", obra: "Galpão Cunha", etapa: "7. Administração e Despesas Correntes", item: "IPTU mês maio", unidade: "mês", quantidade: "", valorUnitario: "", gastoReal: "359.52", observacoes: "Pago em 01/05/2026", extra: true },
+  { id: "galpao-seed-9", obra: "Galpão Cunha", etapa: "7. Administração e Despesas Correntes", item: "Condomínio junho", unidade: "mês", quantidade: "", valorUnitario: "", gastoReal: "509.11", observacoes: "Pago em 01/06/2026", extra: true },
+  { id: "galpao-seed-10", obra: "Galpão Cunha", etapa: "7. Administração e Despesas Correntes", item: "IPTU mês junho", unidade: "mês", quantidade: "", valorUnitario: "", gastoReal: "359.52", observacoes: "Pago em 01/06/2026", extra: true },
+  { id: "galpao-seed-11", obra: "Galpão Cunha", etapa: "1. Projetos e Taxas", item: "Taxa de bombeiro", unidade: "vb", quantidade: "", valorUnitario: "", gastoReal: "1120.37", observacoes: "Pago em 01/06/2026", extra: true },
+  { id: "galpao-seed-12", obra: "Galpão Cunha", etapa: "7. Administração e Despesas Correntes", item: "Condomínio julho", unidade: "mês", quantidade: "", valorUnitario: "", gastoReal: "604.53", observacoes: "Pago em 01/07/2026", extra: true },
+  { id: "galpao-seed-13", obra: "Galpão Cunha", etapa: "7. Administração e Despesas Correntes", item: "IPTU mês julho", unidade: "mês", quantidade: "", valorUnitario: "", gastoReal: "359.52", observacoes: "Pago em 01/07/2026", extra: true },
+  { id: "galpao-seed-14", obra: "Galpão Cunha", etapa: "1. Projetos e Taxas", item: "Taxa de alvará", unidade: "vb", quantidade: "", valorUnitario: "", gastoReal: "1537.24", observacoes: "Pago em 01/07/2026", extra: true },
+  { id: "galpao-seed-15", obra: "Galpão Cunha", etapa: "1. Projetos e Taxas", item: "Taxa de expediente de alvará", unidade: "vb", quantidade: "", valorUnitario: "", gastoReal: "25.26", observacoes: "Pago em 01/07/2026", extra: true },
+  { id: "galpao-seed-16", obra: "Galpão Cunha", etapa: "7. Administração e Despesas Correntes", item: "Condomínio mês agosto", unidade: "mês", quantidade: "", valorUnitario: "", gastoReal: "662.53", observacoes: "", extra: true },
+  { id: "galpao-seed-17", obra: "Galpão Cunha", etapa: "1. Projetos e Taxas", item: "Última parcela dos projetos arq., prev. e hidro (parcela 3 de 3)", unidade: "vb", quantidade: "", valorUnitario: "", gastoReal: "4500", observacoes: "", extra: true },
+  { id: "galpao-seed-18", obra: "Galpão Cunha", etapa: "7. Administração e Despesas Correntes", item: "IPTU mês agosto", unidade: "mês", quantidade: "", valorUnitario: "", gastoReal: "359.52", observacoes: "", extra: true },
+  { id: "galpao-seed-19", obra: "Galpão Cunha", etapa: "7. Administração e Despesas Correntes", item: "Condomínio mês setembro", unidade: "mês", quantidade: "", valorUnitario: "", gastoReal: "908.30", observacoes: "", extra: true },
+  { id: "galpao-seed-20", obra: "Galpão Cunha", etapa: "7. Administração e Despesas Correntes", item: "IPTU mês setembro", unidade: "mês", quantidade: "", valorUnitario: "", gastoReal: "359.52", observacoes: "", extra: true },
+  { id: "galpao-seed-21", obra: "Galpão Cunha", etapa: "1. Projetos e Taxas", item: "Projeto elétrico (parcela 1 de 2)", unidade: "vb", quantidade: "", valorUnitario: "", gastoReal: "2000", observacoes: "", extra: true },
+  { id: "galpao-seed-22", obra: "Galpão Cunha", etapa: "7. Administração e Despesas Correntes", item: "Condomínio mês outubro", unidade: "mês", quantidade: "", valorUnitario: "", gastoReal: "908.30", observacoes: "Rateio entre os sócios ainda pendente de acerto", extra: true },
+  { id: "galpao-seed-23", obra: "Galpão Cunha", etapa: "7. Administração e Despesas Correntes", item: "IPTU mês outubro", unidade: "mês", quantidade: "", valorUnitario: "", gastoReal: "359.52", observacoes: "Rateio entre os sócios ainda pendente de acerto", extra: true },
+  { id: "galpao-seed-24", obra: "Galpão Cunha", etapa: "1. Projetos e Taxas", item: "Projeto elétrico (parcela 2 de 2)", unidade: "vb", quantidade: "", valorUnitario: "", gastoReal: "2000", observacoes: "Rateio entre os sócios ainda pendente de acerto", extra: true },
+];
 
 const defaultCustosItens = gerarCustosItensIniciais(NOMES_OBRAS[0]);
 
@@ -2312,6 +2425,8 @@ function ReportTable({ titulo, columns, rows }) {
 function ReportView({
   tipo,
   onFechar,
+  empresaInfo,
+  etapasCusto,
   obraCustoSelecionada,
   itensObraCustoAtual,
   totalGeralObraCusto,
@@ -2841,9 +2956,9 @@ function ReportView({
           className="text-sm font-semibold"
           style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
         >
-          J &amp; G Incorporadora Ltda
+          {empresaInfo.nome}
         </p>
-        <p className="text-xs mb-3" style={{ color: "#6B6F76" }}>CNPJ 21.203.244/0001-41</p>
+        <p className="text-xs mb-3" style={{ color: "#6B6F76" }}>CNPJ {empresaInfo.cnpj}</p>
         <h1
           className="text-xl font-semibold"
           style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
@@ -2914,7 +3029,7 @@ function ReportView({
                   <span>% Exec.</span>
                 </div>
                 <div className="space-y-1">
-                  {ETAPAS_CUSTO.map(({ etapa }) => {
+                  {etapasCusto.map(({ etapa }) => {
                     const resumo = resumoCustoItens(itensObraCustoAtual.filter((it) => it.etapa === etapa));
                     return (
                       <div
@@ -2954,7 +3069,7 @@ function ReportView({
                 >
                   Itens do orçamento
                 </h3>
-                {ETAPAS_CUSTO.map(({ etapa }) => {
+                {etapasCusto.map(({ etapa }) => {
                   const itensEtapa = itensObraCustoAtual.filter((it) => it.etapa === etapa);
                   if (itensEtapa.length === 0) return null;
                   const resumo = resumoCustoItens(itensEtapa);
@@ -3086,27 +3201,86 @@ function ReportView({
           Balneário Camboriú/SC, {dataExtenso}.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-10">
-          <div className="text-center">
-            <div style={{ borderTop: "1px solid #22252A" }} className="pt-2">
-              <span className="text-sm font-semibold" style={{ color: "#22252A" }}>
-                Gabriel Oltramari Neto
-              </span>
+          {empresaInfo.socios.map((nomeSocio) => (
+            <div className="text-center" key={nomeSocio}>
+              <div style={{ borderTop: "1px solid #22252A" }} className="pt-2">
+                <span className="text-sm font-semibold" style={{ color: "#22252A" }}>
+                  {nomeSocio}
+                </span>
+              </div>
             </div>
-          </div>
-          <div className="text-center">
-            <div style={{ borderTop: "1px solid #22252A" }} className="pt-2">
-              <span className="text-sm font-semibold" style={{ color: "#22252A" }}>
-                João Gabriel Herdt
-              </span>
-            </div>
-          </div>
+          ))}
         </div>
       </div>
     </div>
   );
 }
 
-export default function DashboardConstrutora() {
+export default function DashboardConstrutora({ userEmail }) {
+  // ---- Multi-empresa: J&G (obras Isla Catalina / Residencial Isla
+  // Providência) e SGO Empreendimentos Ltda (obra Galpão Cunha) — dados,
+  // obras e sócios completamente separados por empresa; cada chave de
+  // armazenamento da SGO leva o prefixo "sgo__" (J&G continua sem prefixo,
+  // preservando os dados já existentes sem precisar de migração). O
+  // acesso de cada e-mail de login a cada empresa é controlado aqui;
+  // e-mails não listados veem as duas (mesmo comportamento de antes de
+  // existir a SGO).
+  const EMPRESAS_INFO = {
+    jg: {
+      nome: "J & G Incorporadora Ltda",
+      cnpj: "21.203.244/0001-41",
+      socios: ["Gabriel Oltramari Neto", "João Gabriel Herdt"],
+      label: "J&G",
+    },
+    sgo: {
+      nome: "SGO Empreendimentos Ltda",
+      cnpj: "65.580.502/0001-84",
+      socios: ["Gabriel Oltramari Neto", "Getúlio"],
+      label: "SGO",
+    },
+  };
+  const OBRAS_INICIAIS_POR_EMPRESA = {
+    jg: [
+      { id: "ic", nome: "Isla Catalina", status: "em_andamento", avancoFisico: 0 },
+      {
+        id: "ip",
+        nome: "Residencial Isla Providência",
+        status: "concluida",
+        nota: "Última unidade em comercialização",
+      },
+    ],
+    sgo: [{ id: "galpao-cunha", nome: "Galpão Cunha", status: "em_andamento", avancoFisico: 0 }],
+  };
+  const ACESSO_EMPRESAS_POR_EMAIL = {
+    "joaobb_@hotmail.com": ["jg"],
+    "financeirojgincorporadora@gmail.com": ["jg", "sgo"],
+    "fzanell@hotmail.com": ["sgo"],
+  };
+  const emailLoginNormalizado = (userEmail || "").trim().toLowerCase();
+  const empresasPermitidas = ACESSO_EMPRESAS_POR_EMAIL[emailLoginNormalizado] || ["jg", "sgo"];
+  const [empresaAtual, setEmpresaAtual] = useState(() =>
+    empresasPermitidas.includes("jg") ? "jg" : empresasPermitidas[0]
+  );
+  const prefixoEmpresa = empresaAtual === "sgo" ? "sgo__" : "";
+  const empresaInfo = EMPRESAS_INFO[empresaAtual];
+  // Sombra deliberada das constantes de módulo de mesmo nome (obrasIniciais,
+  // NOMES_OBRAS, NOMES_SOCIOS, defaultCustosItens mais abaixo) — dentro
+  // deste componente elas passam a depender da empresa selecionada; todo o
+  // resto do arquivo que as usa continua igual, só que agora por empresa.
+  const obrasIniciais = OBRAS_INICIAIS_POR_EMPRESA[empresaAtual];
+  const NOMES_OBRAS = obrasIniciais.map((o) => o.nome);
+  const NOMES_SOCIOS = empresaInfo.socios;
+  // Modelo de etapas do orçamento: galpão pra SGO, prédio residencial pra
+  // J&G (o modelo original, construído a partir da planilha enviada).
+  const ETAPAS_CUSTO_ATUAL = empresaAtual === "sgo" ? ETAPAS_CUSTO_GALPAO : ETAPAS_CUSTO;
+  // Para a SGO, além do checklist padrão de etapas (em branco, pra orçar),
+  // já entram lançadas as despesas reais do Galpão Cunha vindas da planilha
+  // enviada pela usuária (ver SEED_CUSTOS_GALPAO_CUNHA).
+  const defaultCustosItens =
+    empresaAtual === "sgo"
+      ? [...gerarCustosItensIniciais(NOMES_OBRAS[0], ETAPAS_CUSTO_ATUAL), ...SEED_CUSTOS_GALPAO_CUNHA]
+      : gerarCustosItensIniciais(NOMES_OBRAS[0], ETAPAS_CUSTO_ATUAL);
+
   const [selectedObra, setSelectedObra] = useState(null);
   const [activeTab, setActiveTab] = useState("geral");
   const [modoRelatorio, setModoRelatorio] = useState(false);
@@ -3183,6 +3357,7 @@ export default function DashboardConstrutora() {
   const [pdfImportError, setPdfImportError] = useState(null);
   const [pdfImportedFields, setPdfImportedFields] = useState([]);
   const [form, setForm] = useState({
+    obra: NOMES_OBRAS[0],
     unidade: "",
     comprador: "",
     valor: "",
@@ -3194,6 +3369,8 @@ export default function DashboardConstrutora() {
   const [personalizarParcelasCV, setPersonalizarParcelasCV] = useState(false);
   const [valoresParcelasCV, setValoresParcelasCV] = useState([]);
   const [datasParcelasCV, setDatasParcelasCV] = useState([]);
+  const [filtroObraCV, setFiltroObraCV] = useState("");
+  const [filtroObraReceber, setFiltroObraReceber] = useState("");
 
   const [unidadesObra, setUnidadesObra] = useState([]);
   const [loadingUnidades, setLoadingUnidades] = useState(true);
@@ -3365,27 +3542,45 @@ export default function DashboardConstrutora() {
     numeroParcelas: "1",
   });
 
-  const STORAGE_KEY = "contratos-cv";
-  const STORAGE_KEY_RECEBER = "valores-receber";
-  const STORAGE_KEY_NOTAS = "notas-compra";
-  const STORAGE_KEY_PAGAR = "contas-pagar";
-  const STORAGE_KEY_EXTRATO = "extrato-bancario";
-  const STORAGE_KEY_SOCIOS = "emprestimos-socios";
-  const STORAGE_KEY_DOCUMENTOS = "documentos-empresa-index";
-  const STORAGE_KEY_OBRAS = "obras-orcamento";
-  const STORAGE_KEY_CUSTOS = "custos-obra-itens";
-  const STORAGE_KEY_FORNECEDORES = "contratos-fornecedores";
-  const STORAGE_KEY_SERVICOS = "contratos-servicos";
-  const STORAGE_KEY_UNIDADES = "unidades-obra";
-  const STORAGE_KEY_EMPRESTIMOS_BANCARIOS = "emprestimos-bancarios";
-  const STORAGE_KEY_PLANO_CONTAS = "plano-contas";
-  const STORAGE_KEY_CONTA_BANCO_PADRAO = "extrato-conta-banco-padrao";
-  const STORAGE_KEY_SALDO_INICIAL_EXTRATO = "extrato-saldo-inicial";
-  const STORAGE_KEY_SALDO_INICIAL_APLICACOES = "extrato-saldo-inicial-aplicacoes";
-  const STORAGE_KEY_EXTRATOS_PDF = "extratos-pdf-visualizacao";
-  const chaveArquivoDocumento = (id) => `documento-arquivo-${id}`;
-  const chaveArquivoContratoFornecedor = (id) => `contrato-fornecedor-arquivo-${id}`;
-  const chaveArquivoContratoServico = (id) => `contrato-servico-arquivo-${id}`;
+  const STORAGE_KEY = prefixoEmpresa + "contratos-cv";
+  const STORAGE_KEY_RECEBER = prefixoEmpresa + "valores-receber";
+  const STORAGE_KEY_NOTAS = prefixoEmpresa + "notas-compra";
+  const STORAGE_KEY_PAGAR = prefixoEmpresa + "contas-pagar";
+  const STORAGE_KEY_EXTRATO = prefixoEmpresa + "extrato-bancario";
+  const STORAGE_KEY_SOCIOS = prefixoEmpresa + "emprestimos-socios";
+  const STORAGE_KEY_DOCUMENTOS = prefixoEmpresa + "documentos-empresa-index";
+  const STORAGE_KEY_OBRAS = prefixoEmpresa + "obras-orcamento";
+  const STORAGE_KEY_CUSTOS = prefixoEmpresa + "custos-obra-itens";
+  const STORAGE_KEY_FORNECEDORES = prefixoEmpresa + "contratos-fornecedores";
+  const STORAGE_KEY_SERVICOS = prefixoEmpresa + "contratos-servicos";
+  const STORAGE_KEY_UNIDADES = prefixoEmpresa + "unidades-obra";
+  const STORAGE_KEY_EMPRESTIMOS_BANCARIOS = prefixoEmpresa + "emprestimos-bancarios";
+  const STORAGE_KEY_PLANO_CONTAS = prefixoEmpresa + "plano-contas";
+  const STORAGE_KEY_CONTA_BANCO_PADRAO = prefixoEmpresa + "extrato-conta-banco-padrao";
+  const STORAGE_KEY_SALDO_INICIAL_EXTRATO = prefixoEmpresa + "extrato-saldo-inicial";
+  const STORAGE_KEY_SALDO_INICIAL_APLICACOES = prefixoEmpresa + "extrato-saldo-inicial-aplicacoes";
+  const STORAGE_KEY_EXTRATOS_PDF = prefixoEmpresa + "extratos-pdf-visualizacao";
+  const chaveArquivoDocumento = (id) => `${prefixoEmpresa}documento-arquivo-${id}`;
+  const chaveArquivoContratoFornecedor = (id) => `${prefixoEmpresa}contrato-fornecedor-arquivo-${id}`;
+  const chaveArquivoContratoServico = (id) => `${prefixoEmpresa}contrato-servico-arquivo-${id}`;
+
+  // Ao trocar de empresa, a obra selecionada e os "obra" padrão dos
+  // formulários de novo registro podem estar apontando pra uma obra que só
+  // existe na outra empresa (ex.: "Isla Catalina" não existe na SGO) — isso
+  // ajusta tudo isso para a primeira obra da empresa recém-selecionada,
+  // sem mexer no resto de cada formulário.
+  useEffect(() => {
+    setObraCustoSelecionada(NOMES_OBRAS[0]);
+    setForm((f) => ({ ...f, obra: NOMES_OBRAS[0] }));
+    setFormUnidade((f) => ({ ...f, obra: NOMES_OBRAS[0] }));
+    setFormNota((f) => ({ ...f, obra: NOMES_OBRAS[0] }));
+    setFormDespesa((f) => ({ ...f, obra: NOMES_OBRAS[0] }));
+    setFormEmprestimoBancario((f) => ({ ...f, obra: NOMES_OBRAS[0] }));
+    setFormSocio((f) => ({ ...f, obra: NOMES_OBRAS[0] }));
+    setFormFornecedor((f) => ({ ...f, obra: NOMES_OBRAS[0] }));
+    setFormServico((f) => ({ ...f, obra: NOMES_OBRAS[0] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3401,11 +3596,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingUnidades(false);
       }
     }
+    setLoadingUnidades(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3421,11 +3617,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingFornecedores(false);
       }
     }
+    setLoadingFornecedores(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3441,11 +3638,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingServicos(false);
       }
     }
+    setLoadingServicos(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3461,11 +3659,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingObras(false);
       }
     }
+    setLoadingObras(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3481,11 +3680,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingCustos(false);
       }
     }
+    setLoadingCustos(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3508,11 +3708,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingCV(false);
       }
     }
+    setLoadingCV(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3528,11 +3729,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingEmprestimosBancarios(false);
       }
     }
+    setLoadingEmprestimosBancarios(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3555,11 +3757,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingNotas(false);
       }
     }
+    setLoadingNotas(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3575,11 +3778,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingExtrato(false);
       }
     }
+    setLoadingExtrato(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3595,11 +3799,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingPlanoContas(false);
       }
     }
+    setLoadingPlanoContas(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3615,11 +3820,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingContaBancoPadrao(false);
       }
     }
+    setLoadingContaBancoPadrao(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3635,11 +3841,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingSaldoInicialExtrato(false);
       }
     }
+    setLoadingSaldoInicialExtrato(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3655,11 +3862,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingSaldoInicialAplicacoes(false);
       }
     }
+    setLoadingSaldoInicialAplicacoes(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3675,11 +3883,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingExtratosPdf(false);
       }
     }
+    setLoadingExtratosPdf(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3695,11 +3904,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingSocios(false);
       }
     }
+    setLoadingSocios(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3715,11 +3925,12 @@ export default function DashboardConstrutora() {
         if (!cancelled) setLoadingDocumentos(false);
       }
     }
+    setLoadingDocumentos(true);
     load();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [empresaAtual]);
 
   // Reavalia possível duplicidade sempre que o formulário de nota (vindo do
   // PDF ou digitado) ou a lista de notas já cadastradas mudar.
@@ -3807,6 +4018,7 @@ export default function DashboardConstrutora() {
       personalizarParcelasCV && valoresParcelasCV.length === (Number(form.numeroParcelas) || 1);
     const novo = {
       id: Date.now(),
+      obra: form.obra || NOMES_OBRAS[0],
       unidade: form.unidade,
       comprador: form.comprador,
       valor: Number(form.valor),
@@ -3820,6 +4032,7 @@ export default function DashboardConstrutora() {
     const novasParcelas = gerarParcelasReceber(novo);
     persistContratosEReceber([...contratosCV, novo], [...valoresReceber, ...novasParcelas]);
     setForm({
+      obra: NOMES_OBRAS[0],
       unidade: "",
       comprador: "",
       valor: "",
@@ -5383,9 +5596,10 @@ export default function DashboardConstrutora() {
     (c) => statusContratoFornecedorDisplay(c) === "ativo"
   ).length;
 
-  const totalVGV = contratosCV.reduce((s, c) => s + c.valor, 0);
-  const totalRecebidoCV = contratosCV.reduce((s, c) => s + c.valor * (c.percentualPago / 100), 0);
-  const unidadesAtrasadas = contratosCV.filter((c) => c.statusPagamento === "atrasado").length;
+  const contratosCVFiltrados = filtroObraCV ? contratosCV.filter((c) => c.obra === filtroObraCV) : contratosCV;
+  const totalVGV = contratosCVFiltrados.reduce((s, c) => s + c.valor, 0);
+  const totalRecebidoCV = contratosCVFiltrados.reduce((s, c) => s + c.valor * (c.percentualPago / 100), 0);
+  const unidadesAtrasadas = contratosCVFiltrados.filter((c) => c.statusPagamento === "atrasado").length;
 
   // Status de cada unidade calculado (vendida = tem contrato de compra e
   // venda correspondente); filtro combina obra + status efetivo.
@@ -5544,8 +5758,30 @@ export default function DashboardConstrutora() {
             </h1>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
+            {empresasPermitidas.length > 1 && (
+              <div
+                className="flex items-center rounded-sm overflow-hidden no-print"
+                style={{ border: "1px solid #3A3E45" }}
+              >
+                {empresasPermitidas.map((emp) => (
+                  <button
+                    key={emp}
+                    onClick={() => setEmpresaAtual(emp)}
+                    className="px-3 py-1.5 text-xs font-semibold"
+                    style={{
+                      fontFamily: "'Oswald', sans-serif",
+                      letterSpacing: "0.03em",
+                      color: empresaAtual === emp ? "#22252A" : "#9BA0A6",
+                      background: empresaAtual === emp ? "#E1590C" : "transparent",
+                    }}
+                  >
+                    {EMPRESAS_INFO[emp].label}
+                  </button>
+                ))}
+              </div>
+            )}
             <span className="text-sm" style={{ color: "#9BA0A6" }}>
-              Obra Isla Catalina · atualizado hoje
+              {empresaInfo.nome}
             </span>
             <button
               onClick={() => {
@@ -5572,6 +5808,8 @@ export default function DashboardConstrutora() {
               setModoRelatorio(false);
               setTipoRelatorio(null);
             }}
+            empresaInfo={empresaInfo}
+            etapasCusto={ETAPAS_CUSTO_ATUAL}
             obraCustoSelecionada={obraCustoSelecionada}
             itensObraCustoAtual={itensObraCustoAtual}
             totalGeralObraCusto={totalGeralObraCusto}
@@ -6272,7 +6510,7 @@ export default function DashboardConstrutora() {
                     <span>% Executado</span>
                   </div>
                   <div className="space-y-1.5">
-                    {ETAPAS_CUSTO.map(({ etapa }) => {
+                    {ETAPAS_CUSTO_ATUAL.map(({ etapa }) => {
                       const resumo = resumoCustoItens(itensObraCustoAtual.filter((it) => it.etapa === etapa));
                       return (
                         <div
@@ -6329,7 +6567,7 @@ export default function DashboardConstrutora() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {ETAPAS_CUSTO.map(({ etapa }) => {
+                  {ETAPAS_CUSTO_ATUAL.map(({ etapa }) => {
                     const itensEtapa = itensObraCustoAtual.filter((it) => it.etapa === etapa);
                     const resumo = resumoCustoItens(itensEtapa);
                     const colapsada = !!etapasCustoColapsadas[etapa];
