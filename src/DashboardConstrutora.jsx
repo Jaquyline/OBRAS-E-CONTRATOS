@@ -3851,6 +3851,12 @@ export default function DashboardConstrutora({ userEmail }) {
   // barra de seleção. Nada disso é salvo — reseta ao recarregar a página.
   const [selecionadosLancamentos, setSelecionadosLancamentos] = useState(() => new Set());
   const [lancamentosDesbloqueados, setLancamentosDesbloqueados] = useState(() => new Set());
+  // Aplicar a mesma conta (Débito ou Crédito) a todos os lançamentos
+  // selecionados de uma vez — útil quando várias linhas são da mesma conta
+  // bancária (ex: todas saíram do mesmo banco, então a Crédito é igual para
+  // todas, só o Débito muda por item). Também não é salvo entre sessões.
+  const [contaEmLoteDebito, setContaEmLoteDebito] = useState("");
+  const [contaEmLoteCredito, setContaEmLoteCredito] = useState("");
 
   // Aviso sobre lançamentos que ficaram de fora da exportação para a Domínio
   // por falta de "Código Domínio" em alguma das contas — não é salvo. Período
@@ -5224,6 +5230,17 @@ export default function DashboardConstrutora({ userEmail }) {
   // lançamento já salvo no extrato — usado pelos dois dropdowns da tabela.
   function handleClassificarLancamento(lancamentoId, campo, valor) {
     persistExtrato(extrato.map((l) => (l.id === lancamentoId ? { ...l, [campo]: valor } : l)));
+  }
+
+  // Aplica a mesma conta (contaDebitoId ou contaCreditoId) a todos os
+  // lançamentos marcados de uma vez — um único persistExtrato para todos,
+  // igual ao padrão do handleDesfazerSelecionados. Não mexe no outro campo
+  // nem na seleção, então dá pra aplicar Débito e Crédito em lote em
+  // seguida, ou continuar ajustando cada linha manualmente depois.
+  function handleAplicarContaEmLote(campo, contaId) {
+    if (!contaId || selecionadosLancamentos.size === 0) return;
+    const ids = selecionadosLancamentos;
+    persistExtrato(extrato.map((l) => (ids.has(l.id) ? { ...l, [campo]: contaId } : l)));
   }
 
   // Seleção (checkbox) dos lançamentos já salvos, e ações em lote sobre a
@@ -9930,6 +9947,56 @@ export default function DashboardConstrutora({ userEmail }) {
                   extratoOrdenado.length > 0 && extratoOrdenado.every((l) => selecionadosLancamentos.has(l.id));
                 return (
                 <>
+                  {selecionadosLancamentos.size > 0 && (
+                    <div
+                      className="flex items-end gap-3 flex-wrap mb-3 px-3 py-3 rounded-sm"
+                      style={{ background: "#EAF1F6", border: "1px solid #3D6E8C" }}
+                    >
+                      <span className="text-xs font-semibold" style={{ color: "#22252A" }}>
+                        Aplicar a mesma conta aos {selecionadosLancamentos.size} selecionado(s):
+                      </span>
+                      <div style={{ width: 220 }}>
+                        <label className="text-[10px] uppercase tracking-wide font-semibold block mb-1" style={{ color: "#8A8D93" }}>
+                          Débito
+                        </label>
+                        <div className="flex gap-1">
+                          <SeletorConta
+                            value={contaEmLoteDebito}
+                            onChange={setContaEmLoteDebito}
+                            planoContas={planoContas}
+                            placeholder="Escolher conta..."
+                          />
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleAplicarContaEmLote("contaDebitoId", contaEmLoteDebito)}
+                        disabled={!contaEmLoteDebito}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-sm shrink-0"
+                        style={{ color: "#F5F3EC", background: contaEmLoteDebito ? "#3D6E8C" : "#AAB0B8" }}
+                      >
+                        Aplicar Débito
+                      </button>
+                      <div style={{ width: 220 }}>
+                        <label className="text-[10px] uppercase tracking-wide font-semibold block mb-1" style={{ color: "#8A8D93" }}>
+                          Crédito
+                        </label>
+                        <SeletorConta
+                          value={contaEmLoteCredito}
+                          onChange={setContaEmLoteCredito}
+                          planoContas={planoContas}
+                          placeholder="Escolher conta..."
+                        />
+                      </div>
+                      <button
+                        onClick={() => handleAplicarContaEmLote("contaCreditoId", contaEmLoteCredito)}
+                        disabled={!contaEmLoteCredito}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-sm shrink-0"
+                        style={{ color: "#F5F3EC", background: contaEmLoteCredito ? "#3D6E8C" : "#AAB0B8" }}
+                      >
+                        Aplicar Crédito
+                      </button>
+                    </div>
+                  )}
                   <div className="hidden sm:grid grid-cols-[24px_0.7fr_2fr_0.7fr_0.55fr_0.65fr_0.8fr_1.3fr_1fr_1fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold items-center" style={{ color: "#8A8D93" }}>
                     <input
                       type="checkbox"
