@@ -4464,6 +4464,71 @@ export default function DashboardConstrutora({ userEmail }) {
     persistCustosItens(custosItens.filter((it) => it.id !== id));
   }
 
+  // ---- Fiscal: busca de notas fiscais de serviço (NFS-e) no Portal
+  // Nacional, usando o certificado digital A1 da empresa guardado com
+  // segurança numa Edge Function da Supabase (o painel nunca lida com o
+  // certificado diretamente). Enquanto essa function não estiver publicada,
+  // a busca retorna um aviso em vez de notas.
+  const [filtroDataDeFiscal, setFiltroDataDeFiscal] = useState("");
+  const [filtroDataAteFiscal, setFiltroDataAteFiscal] = useState("");
+  const [notasFiscaisEncontradas, setNotasFiscaisEncontradas] = useState([]);
+  const [buscandoNotasFiscais, setBuscandoNotasFiscais] = useState(false);
+  const [erroBuscaNotasFiscais, setErroBuscaNotasFiscais] = useState(null);
+  const [obraEscolhidaPorNota, setObraEscolhidaPorNota] = useState({});
+  const [notasLevadasParaCusto, setNotasLevadasParaCusto] = useState({});
+
+  async function handleBuscarNotasFiscais() {
+    setBuscandoNotasFiscais(true);
+    setErroBuscaNotasFiscais(null);
+    try {
+      const resp = await fetch(
+        "https://jwernoyhesshbbfsmscy.supabase.co/functions/v1/buscar-nfse" +
+          `?empresa=${empresaAtual}&cnpj=${encodeURIComponent(empresaInfo.cnpj)}` +
+          `&dataDe=${filtroDataDeFiscal}&dataAte=${filtroDataAteFiscal}`,
+        { headers: { Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || ""}` } }
+      );
+      if (!resp.ok) throw new Error("not_ready");
+      const dados = await resp.json();
+      setNotasFiscaisEncontradas(dados.notas || []);
+    } catch (err) {
+      setErroBuscaNotasFiscais(
+        "A busca automática com o Portal Nacional ainda está sendo configurada (falta publicar a conexão segura com o certificado digital). Assim que estiver pronta, essa mesma tela já vai mostrar as notas aqui."
+      );
+      setNotasFiscaisEncontradas([]);
+    } finally {
+      setBuscandoNotasFiscais(false);
+    }
+  }
+
+  function handleLevarNotaParaCusto(nota) {
+    const obraEscolhida = obraEscolhidaPorNota[nota.id] || NOMES_OBRAS[0];
+    const etapaDestino = ETAPAS_CUSTO_ATUAL[0]?.etapa || "";
+    const retencoesTexto = [
+      nota.issRetido ? `ISS retido ${formatBRL(nota.issRetido)}` : null,
+      nota.pis ? `PIS ${formatBRL(nota.pis)}` : null,
+      nota.cofins ? `COFINS ${formatBRL(nota.cofins)}` : null,
+      nota.ir ? `IR ${formatBRL(nota.ir)}` : null,
+      nota.csll ? `CSLL ${formatBRL(nota.csll)}` : null,
+      nota.inss ? `INSS ${formatBRL(nota.inss)}` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    const novoItem = {
+      id: `custo-nfse-${nota.id}`,
+      obra: obraEscolhida,
+      etapa: etapaDestino,
+      item: `NFS-e nº ${nota.numero} — ${nota.prestador}`,
+      unidade: "vb",
+      quantidade: "",
+      valorUnitario: "",
+      gastoReal: String(nota.valorLiquido ?? nota.valorNota ?? ""),
+      observacoes: retencoesTexto ? `Retenções: ${retencoesTexto}` : "",
+      extra: true,
+    };
+    persistCustosItens([...custosItens, novoItem]);
+    setNotasLevadasParaCusto((prev) => ({ ...prev, [nota.id]: true }));
+  }
+
   function handleAddContrato(e) {
     e.preventDefault();
     if (!form.unidade || !form.comprador || !form.valor) return;
@@ -6382,6 +6447,7 @@ export default function DashboardConstrutora({ userEmail }) {
             { id: "documentos", label: "Documentos da empresa" },
             { id: "fornecedores", label: "Contratos de fornecedores" },
             { id: "servicos", label: "Contratos de prestação de serviços" },
+            { id: "fiscal", label: "Fiscal" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -11572,6 +11638,146 @@ export default function DashboardConstrutora({ userEmail }) {
             <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
               Contratos de assessoria, consultoria e outros serviços prestados à empresa ou à obra (ex:
               contabilidade, jurídico, SESMT). Também alimenta o painel de vencimentos da Visão geral.
+            </p>
+          </>
+        )}
+
+        {activeTab === "fiscal" && (
+          <>
+            <section className="rounded-md p-5 border mb-5" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
+              <h2
+                className="text-sm uppercase tracking-[0.12em] font-semibold mb-1"
+                style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Fiscal — busca de notas (NFS-e)
+              </h2>
+              <p className="text-xs mb-4" style={{ color: "#8A8D93" }}>
+                Busca automática das notas fiscais de serviço emitidas contra a {empresaInfo.label} no Portal
+                Nacional, usando o certificado digital A1 da empresa. Mostra o valor de cada nota já com o
+                detalhamento das retenções (ISS, PIS, COFINS, IR, CSLL, INSS).
+              </p>
+
+              <div className="flex items-end gap-3 flex-wrap mb-4">
+                <div>
+                  <label className="text-xs font-semibold uppercase tracking-wide block mb-1" style={{ color: "#8A8D93" }}>
+                    Data de
+                  </label>
+                  <input
+                    type="date"
+                    value={filtroDataDeFiscal}
+                    onChange={(e) => setFiltroDataDeFiscal(e.target.value)}
+                    className="text-sm px-3 py-2 rounded-sm border outline-none"
+                    style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold uppercase tracking-wide block mb-1" style={{ color: "#8A8D93" }}>
+                    Data até
+                  </label>
+                  <input
+                    type="date"
+                    value={filtroDataAteFiscal}
+                    onChange={(e) => setFiltroDataAteFiscal(e.target.value)}
+                    className="text-sm px-3 py-2 rounded-sm border outline-none"
+                    style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}
+                  />
+                </div>
+                <button
+                  onClick={handleBuscarNotasFiscais}
+                  disabled={buscandoNotasFiscais}
+                  className="text-sm font-semibold px-4 py-2 rounded-sm"
+                  style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
+                >
+                  {buscandoNotasFiscais ? "Buscando…" : "Buscar notas"}
+                </button>
+              </div>
+
+              {erroBuscaNotasFiscais && (
+                <div className="mb-4 text-xs px-3 py-2 rounded-sm" style={{ color: "#8A6A3E", background: "#FBEBDB" }}>
+                  {erroBuscaNotasFiscais}
+                </div>
+              )}
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left" style={{ borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid #DCD7C9" }}>
+                      {["Data", "Nº", "Prestador", "Tomador", "Valor da nota", "ISS retido", "PIS", "COFINS", "IR", "CSLL", "INSS", "Valor líquido", ""].map(
+                        (col) => (
+                          <th
+                            key={col}
+                            className="text-[10px] uppercase tracking-wide font-semibold pb-2 pr-3 whitespace-nowrap"
+                            style={{ color: "#8A8D93" }}
+                          >
+                            {col}
+                          </th>
+                        )
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {notasFiscaisEncontradas.map((nota) => (
+                      <tr key={nota.id} style={{ borderBottom: "1px solid #E4E0D6" }}>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.data}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.numero}</td>
+                        <td className="py-2 pr-3 text-xs">{nota.prestador}</td>
+                        <td className="py-2 pr-3 text-xs">{nota.tomador}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.valorNota)}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.issRetido)}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.pis)}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.cofins)}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.ir)}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.csll)}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.inss)}</td>
+                        <td className="py-2 pr-3 text-xs font-semibold whitespace-nowrap">{formatBRL(nota.valorLiquido)}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">
+                          {notasLevadasParaCusto[nota.id] ? (
+                            <span className="text-xs" style={{ color: "#4F7A5B" }}>
+                              ✓ levada
+                            </span>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <select
+                                value={obraEscolhidaPorNota[nota.id] || NOMES_OBRAS[0]}
+                                onChange={(e) =>
+                                  setObraEscolhidaPorNota((prev) => ({ ...prev, [nota.id]: e.target.value }))
+                                }
+                                className="text-xs px-1.5 py-1 rounded-sm border outline-none"
+                                style={{ borderColor: "#DCD7C9" }}
+                              >
+                                {NOMES_OBRAS.map((o) => (
+                                  <option key={o} value={o}>
+                                    {o}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                onClick={() => handleLevarNotaParaCusto(nota)}
+                                className="text-xs font-semibold px-2 py-1 rounded-sm whitespace-nowrap"
+                                style={{ color: "#F5F3EC", background: "#4F7A5B" }}
+                              >
+                                Levar p/ custo
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {notasFiscaisEncontradas.length === 0 && (
+                      <tr>
+                        <td colSpan={13} className="py-4 text-xs" style={{ color: "#8A8D93" }}>
+                          Nenhuma nota buscada ainda — escolha o período e clique em "Buscar notas".
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              "Levar p/ custo" cria um item em Custos das obras com o valor líquido da nota (já descontadas as
+              retenções) e anota o detalhamento das retenções nas observações do item.
             </p>
           </>
         )}
