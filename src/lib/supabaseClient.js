@@ -12,3 +12,13 @@ const supabaseUrl = "https://jwernoyhesshbbfsmscy.supabase.co";
 const supabaseKey = "sb_publishable_NnXU29l-hxQA8tpRuJsazw_OFgEd3RO";
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Cliente "descartável", usado só na hora de CRIAR um login novo (tela de
+// Usuários e permissões). persistSession:false faz ele não gravar nada no
+// navegador nem mexer na sessão de quem já está logado — sem isso, chamar
+// auth.signUp() trocaria sozinho a sessão atual pela da pessoa recém-criada.
+export function criarClienteParaNovoLogin() {
+  return createClient(supabaseUrl, supabaseKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+}
