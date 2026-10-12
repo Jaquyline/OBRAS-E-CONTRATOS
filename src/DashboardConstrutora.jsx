@@ -3978,6 +3978,7 @@ export default function DashboardConstrutora({ userEmail }) {
   const STORAGE_KEY_SALDO_INICIAL_EXTRATO = prefixoEmpresa + "extrato-saldo-inicial";
   const STORAGE_KEY_SALDO_INICIAL_APLICACOES = prefixoEmpresa + "extrato-saldo-inicial-aplicacoes";
   const STORAGE_KEY_EXTRATOS_PDF = prefixoEmpresa + "extratos-pdf-visualizacao";
+  const STORAGE_KEY_SITUACAO_GALPAO = prefixoEmpresa + "situacao-galpao";
   const chaveArquivoDocumento = (id) => `${prefixoEmpresa}documento-arquivo-${id}`;
   const chaveArquivoContratoFornecedor = (id) => `${prefixoEmpresa}contrato-fornecedor-arquivo-${id}`;
   const chaveArquivoContratoServico = (id) => `${prefixoEmpresa}contrato-servico-arquivo-${id}`;
@@ -3999,6 +4000,40 @@ export default function DashboardConstrutora({ userEmail }) {
     setFormServico((f) => ({ ...f, obra: NOMES_OBRAS[0] }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [empresaAtual]);
+
+  // Situação do galpão (só usado pela SGO, que não vende por unidade como a
+  // J&G — aqui a aba "Unidades e tabela de vendas" vira "Situação do
+  // galpão": à venda, alugado ou em uso próprio).
+  const SITUACAO_GALPAO_PADRAO = {
+    status: "uso_proprio",
+    valor: "",
+    inquilino: "",
+    dataInicioContrato: "",
+    dataVencimentoContrato: "",
+    observacoes: "",
+  };
+  const [situacaoGalpao, setSituacaoGalpao] = useState(SITUACAO_GALPAO_PADRAO);
+  const [loadingSituacaoGalpao, setLoadingSituacaoGalpao] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingSituacaoGalpao(true);
+    (async () => {
+      const result = await window.storage.get(STORAGE_KEY_SITUACAO_GALPAO, false);
+      if (cancelled) return;
+      setSituacaoGalpao(result ? { ...SITUACAO_GALPAO_PADRAO, ...JSON.parse(result.value) } : SITUACAO_GALPAO_PADRAO);
+      setLoadingSituacaoGalpao(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empresaAtual]);
+
+  function handleSalvarSituacaoGalpao(novaSituacao) {
+    setSituacaoGalpao(novaSituacao);
+    window.storage.set(STORAGE_KEY_SITUACAO_GALPAO, JSON.stringify(novaSituacao), false);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -6336,7 +6371,7 @@ export default function DashboardConstrutora({ userEmail }) {
             { id: "geral", label: "Visão geral" },
             { id: "fluxocaixa", label: "Fluxo de caixa" },
             { id: "custos", label: "Custos das obras" },
-            { id: "unidades", label: "Unidades e tabela de vendas" },
+            { id: "unidades", label: empresaAtual === "sgo" ? "Situação do galpão" : "Unidades e tabela de vendas" },
             { id: "cv", label: "Contratos de compra e venda" },
             { id: "receber", label: "Valores a receber" },
             { id: "notas", label: "Notas de compras" },
@@ -7239,7 +7274,141 @@ export default function DashboardConstrutora({ userEmail }) {
           </>
         )}
 
-        {activeTab === "unidades" && (
+        {activeTab === "unidades" && empresaAtual === "sgo" && (
+          <>
+            <section className="rounded-md p-5 border" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
+              <h2
+                className="text-sm uppercase tracking-[0.12em] font-semibold mb-4"
+                style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Situação do galpão — {NOMES_OBRAS[0]}
+              </h2>
+
+              <div className="flex items-center gap-2 flex-wrap mb-5">
+                {[
+                  { id: "uso_proprio", label: "Uso próprio" },
+                  { id: "venda", label: "À venda" },
+                  { id: "alugado", label: "Alugado" },
+                ].map((opt) => {
+                  const marcado = situacaoGalpao.status === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => handleSalvarSituacaoGalpao({ ...situacaoGalpao, status: opt.id })}
+                      className="text-xs font-semibold px-3 py-1.5 rounded-full border"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: marcado ? "#22252A" : "#9BA0A6",
+                        background: marcado ? "#E1590C" : "transparent",
+                        borderColor: marcado ? "#E1590C" : "#DCD7C9",
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {loadingSituacaoGalpao ? (
+                <p className="text-sm" style={{ color: "#8A8D93" }}>
+                  Carregando…
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+                  {situacaoGalpao.status === "venda" && (
+                    <div>
+                      <label className="text-xs font-semibold uppercase tracking-wide block mb-1" style={{ color: "#8A8D93" }}>
+                        Valor de venda
+                      </label>
+                      <input
+                        value={situacaoGalpao.valor}
+                        onChange={(e) => handleSalvarSituacaoGalpao({ ...situacaoGalpao, valor: e.target.value })}
+                        placeholder="R$"
+                        className="text-sm px-3 py-2 rounded-sm border w-full outline-none"
+                        style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}
+                      />
+                    </div>
+                  )}
+
+                  {situacaoGalpao.status === "alugado" && (
+                    <>
+                      <div>
+                        <label className="text-xs font-semibold uppercase tracking-wide block mb-1" style={{ color: "#8A8D93" }}>
+                          Valor do aluguel (mensal)
+                        </label>
+                        <input
+                          value={situacaoGalpao.valor}
+                          onChange={(e) => handleSalvarSituacaoGalpao({ ...situacaoGalpao, valor: e.target.value })}
+                          placeholder="R$"
+                          className="text-sm px-3 py-2 rounded-sm border w-full outline-none"
+                          style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold uppercase tracking-wide block mb-1" style={{ color: "#8A8D93" }}>
+                          Inquilino
+                        </label>
+                        <input
+                          value={situacaoGalpao.inquilino}
+                          onChange={(e) => handleSalvarSituacaoGalpao({ ...situacaoGalpao, inquilino: e.target.value })}
+                          placeholder="Nome do inquilino / empresa"
+                          className="text-sm px-3 py-2 rounded-sm border w-full outline-none"
+                          style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold uppercase tracking-wide block mb-1" style={{ color: "#8A8D93" }}>
+                          Início do contrato
+                        </label>
+                        <input
+                          type="date"
+                          value={situacaoGalpao.dataInicioContrato}
+                          onChange={(e) => handleSalvarSituacaoGalpao({ ...situacaoGalpao, dataInicioContrato: e.target.value })}
+                          className="text-sm px-3 py-2 rounded-sm border w-full outline-none"
+                          style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold uppercase tracking-wide block mb-1" style={{ color: "#8A8D93" }}>
+                          Vencimento / renovação
+                        </label>
+                        <input
+                          type="date"
+                          value={situacaoGalpao.dataVencimentoContrato}
+                          onChange={(e) => handleSalvarSituacaoGalpao({ ...situacaoGalpao, dataVencimentoContrato: e.target.value })}
+                          className="text-sm px-3 py-2 rounded-sm border w-full outline-none"
+                          style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  <div className="sm:col-span-2">
+                    <label className="text-xs font-semibold uppercase tracking-wide block mb-1" style={{ color: "#8A8D93" }}>
+                      Observações
+                    </label>
+                    <textarea
+                      value={situacaoGalpao.observacoes}
+                      onChange={(e) => handleSalvarSituacaoGalpao({ ...situacaoGalpao, observacoes: e.target.value })}
+                      rows={3}
+                      className="text-sm px-3 py-2 rounded-sm border w-full outline-none"
+                      style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}
+                    />
+                  </div>
+                </div>
+              )}
+            </section>
+
+            <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
+              O galpão é uma obra única (não dividido em unidades à venda como a J&G) — por isso essa aba mostra
+              só a situação dele: em uso próprio, à venda ou alugado. Os custos continuam na aba "Custos das
+              obras".
+            </p>
+          </>
+        )}
+
+        {activeTab === "unidades" && empresaAtual !== "sgo" && (
           <>
             <div className="flex justify-end mb-4">
               <button
