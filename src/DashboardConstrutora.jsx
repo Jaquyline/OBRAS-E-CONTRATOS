@@ -4954,7 +4954,9 @@ export default function DashboardConstrutora({ userEmail }) {
   // AAAA-MM-DD; o painel guarda DD/MM/AAAA). Grava na hora.
   function handleEditarVencimentoPagar(id, iso) {
     const br = dataISOparaBR(iso);
-    if (!br) return;
+    if (!br || Number(iso.slice(0, 4)) < 2000) return;
+    const atual = contasPagar.find((c) => c.id === id);
+    if (atual && atual.vencimento === br) return;
     persistNotasEPagar(
       notasCompra,
       contasPagar.map((c) => (c.id === id ? { ...c, vencimento: br } : c))
@@ -4963,7 +4965,9 @@ export default function DashboardConstrutora({ userEmail }) {
 
   function handleEditarVencimentoReceber(id, iso) {
     const br = dataISOparaBR(iso);
-    if (!br) return;
+    if (!br || Number(iso.slice(0, 4)) < 2000) return;
+    const atual = valoresReceber.find((v) => v.id === id);
+    if (atual && atual.vencimento === br) return;
     persistContratosEReceber(
       contratosCV,
       valoresReceber.map((v) => (v.id === id ? { ...v, vencimento: br } : v))
@@ -8554,8 +8558,10 @@ export default function DashboardConstrutora({ userEmail }) {
                             </span>
                             <input
                               type="date"
-                              value={dataBRparaISO(v.vencimento)}
-                              onChange={(e) => handleEditarVencimentoReceber(v.id, e.target.value)}
+                              key={`${v.id}-${v.vencimento}`}
+                              defaultValue={dataBRparaISO(v.vencimento)}
+                              onBlur={(e) => handleEditarVencimentoReceber(v.id, e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
                               title="Clique para corrigir a data a receber"
                               className="text-xs px-1.5 py-1 rounded-sm outline-none"
                               style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF", width: "100%", minWidth: 0 }}
@@ -9130,8 +9136,10 @@ export default function DashboardConstrutora({ userEmail }) {
                             </span>
                             <input
                               type="date"
-                              value={dataBRparaISO(c.vencimento)}
-                              onChange={(e) => handleEditarVencimentoPagar(c.id, e.target.value)}
+                              key={`${c.id}-${c.vencimento}`}
+                              defaultValue={dataBRparaISO(c.vencimento)}
+                              onBlur={(e) => handleEditarVencimentoPagar(c.id, e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
                               title="Clique para corrigir a data de vencimento"
                               className="text-xs px-1.5 py-1 rounded-sm outline-none"
                               style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF", width: "100%", minWidth: 0 }}
