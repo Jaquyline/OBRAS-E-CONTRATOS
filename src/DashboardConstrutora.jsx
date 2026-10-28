@@ -4919,6 +4919,16 @@ export default function DashboardConstrutora({ userEmail }) {
     setShowFormNota(false);
   }
 
+  // Notas que ficaram sem nenhuma parcela em Contas a pagar (por exemplo,
+  // se a gravação anterior falhou) — recria as parcelas delas, sem mexer nas
+  // que já existem.
+  const notasSemParcelas = notasCompra.filter((n) => !contasPagar.some((c) => c.notaId === n.id));
+  function handleGerarParcelasFaltantes() {
+    if (notasSemParcelas.length === 0) return;
+    const novas = notasSemParcelas.flatMap((n) => gerarParcelas(n));
+    persistNotasEPagar(notasCompra, [...contasPagar, ...novas]);
+  }
+
   function handleDeleteNota(id) {
     persistNotasEPagar(
       notasCompra.filter((n) => n.id !== id),
@@ -8764,6 +8774,24 @@ export default function DashboardConstrutora({ userEmail }) {
                 </div>
               ) : (
                 <>
+                  {notasSemParcelas.length > 0 && (
+                    <div
+                      className="mb-3 rounded-sm px-3 py-2.5 flex flex-wrap items-center gap-3"
+                      style={{ background: "#FBEBDB", border: "1px solid #E9C9A6" }}
+                    >
+                      <span className="text-xs" style={{ color: "#7A3C06" }}>
+                        {notasSemParcelas.length} nota(s) estão sem parcelas em Contas a pagar — por isso não aparecem nos avisos de vencimento.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleGerarParcelasFaltantes}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                        style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#E1590C" }}
+                      >
+                        GERAR PARCELAS QUE FALTAM
+                      </button>
+                    </div>
+                  )}
                   <div className="hidden sm:grid grid-cols-[2.2fr_1fr_1fr_1fr_0.8fr_1.4fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Fornecedor</span>
                     <span>Obra</span>
