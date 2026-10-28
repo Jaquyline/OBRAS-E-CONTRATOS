@@ -4950,6 +4950,26 @@ export default function DashboardConstrutora({ userEmail }) {
     setContasPagar((prev) => prev.map((c) => (c.id === id ? { ...c, [campo]: valor } : c)));
   }
 
+  // Corrige a data de vencimento de uma parcela (inputs type="date" devolvem
+  // AAAA-MM-DD; o painel guarda DD/MM/AAAA). Grava na hora.
+  function handleEditarVencimentoPagar(id, iso) {
+    const br = dataISOparaBR(iso);
+    if (!br) return;
+    persistNotasEPagar(
+      notasCompra,
+      contasPagar.map((c) => (c.id === id ? { ...c, vencimento: br } : c))
+    );
+  }
+
+  function handleEditarVencimentoReceber(id, iso) {
+    const br = dataISOparaBR(iso);
+    if (!br) return;
+    persistContratosEReceber(
+      contratosCV,
+      valoresReceber.map((v) => (v.id === id ? { ...v, vencimento: br } : v))
+    );
+  }
+
   function handlePersistContasPagarBlur() {
     persistNotasEPagar(notasCompra, contasPagar);
   }
@@ -8467,7 +8487,7 @@ export default function DashboardConstrutora({ userEmail }) {
                   </div>
                 ) : (
                   <>
-                    <div className="hidden sm:grid grid-cols-[1.6fr_0.8fr_0.5fr_0.7fr_0.5fr_0.5fr_0.75fr_0.8fr_0.75fr_auto] gap-2 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                    <div className="hidden sm:grid grid-cols-[1.6fr_0.8fr_0.5fr_0.7fr_0.5fr_0.5fr_0.75fr_1.1fr_0.75fr_auto] gap-2 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                       <span>Cliente</span>
                       <span>Unidade</span>
                       <span>Parcela</span>
@@ -8486,7 +8506,7 @@ export default function DashboardConstrutora({ userEmail }) {
                         return (
                           <div
                             key={v.id}
-                            className="grid grid-cols-2 sm:grid-cols-[1.6fr_0.8fr_0.5fr_0.7fr_0.5fr_0.5fr_0.75fr_0.8fr_0.75fr_auto] gap-2 items-center rounded-sm px-3 py-3"
+                            className="grid grid-cols-2 sm:grid-cols-[1.6fr_0.8fr_0.5fr_0.7fr_0.5fr_0.5fr_0.75fr_1.1fr_0.75fr_auto] gap-2 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
                             <span className="text-sm font-semibold min-w-0" style={{ color: "#22252A" }}>
@@ -8532,12 +8552,14 @@ export default function DashboardConstrutora({ userEmail }) {
                             >
                               {formatBRLShort(valorAtualizadoItem(v))}
                             </span>
-                            <span
-                              className="text-sm"
-                              style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
-                            >
-                              {v.vencimento}
-                            </span>
+                            <input
+                              type="date"
+                              value={dataBRparaISO(v.vencimento)}
+                              onChange={(e) => handleEditarVencimentoReceber(v.id, e.target.value)}
+                              title="Clique para corrigir a data a receber"
+                              className="text-xs px-1.5 py-1 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF", width: "100%", minWidth: 0 }}
+                            />
                             <span
                               className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
                               style={{ color: cfg.color, background: cfg.bg }}
@@ -9037,7 +9059,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 </div>
               ) : (
                 <>
-                  <div className="hidden sm:grid grid-cols-[2.2fr_0.7fr_0.5fr_0.65fr_0.45fr_0.45fr_0.7fr_0.75fr_0.7fr_1.1fr_auto] gap-2 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[2.2fr_0.7fr_0.5fr_0.65fr_0.45fr_0.45fr_0.7fr_1.1fr_0.7fr_1.1fr_auto] gap-2 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Fornecedor</span>
                     <span>Obra</span>
                     <span>Parcela</span>
@@ -9062,7 +9084,7 @@ export default function DashboardConstrutora({ userEmail }) {
                         return (
                           <div
                             key={c.id}
-                            className="grid grid-cols-2 sm:grid-cols-[2.2fr_0.7fr_0.5fr_0.65fr_0.45fr_0.45fr_0.7fr_0.75fr_0.7fr_1.1fr_auto] gap-2 items-center rounded-sm px-3 py-3"
+                            className="grid grid-cols-2 sm:grid-cols-[2.2fr_0.7fr_0.5fr_0.65fr_0.45fr_0.45fr_0.7fr_1.1fr_0.7fr_1.1fr_auto] gap-2 items-center rounded-sm px-3 py-3"
                             style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                           >
                             <span className="text-sm font-semibold min-w-0" style={{ color: "#22252A" }}>{c.fornecedor}</span>
@@ -9106,12 +9128,14 @@ export default function DashboardConstrutora({ userEmail }) {
                             >
                               {formatBRLShort(valorAtualizadoItem(c))}
                             </span>
-                            <span
-                              className="text-xs"
-                              style={{ color: "#6B6F76", fontFamily: "'IBM Plex Mono', monospace" }}
-                            >
-                              {c.vencimento}
-                            </span>
+                            <input
+                              type="date"
+                              value={dataBRparaISO(c.vencimento)}
+                              onChange={(e) => handleEditarVencimentoPagar(c.id, e.target.value)}
+                              title="Clique para corrigir a data de vencimento"
+                              className="text-xs px-1.5 py-1 rounded-sm outline-none"
+                              style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF", width: "100%", minWidth: 0 }}
+                            />
                             <span
                               className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full text-center w-fit"
                               style={{ color: cfg.color, background: cfg.bg }}
