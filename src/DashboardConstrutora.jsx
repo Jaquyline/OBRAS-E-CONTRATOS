@@ -3707,6 +3707,13 @@ export default function DashboardConstrutora({ userEmail }) {
 
   const [obrasState, setObrasState] = useState(obrasIniciais);
   const [loadingObras, setLoadingObras] = useState(true);
+  // Lista de obras da empresa (inclui as que forem cadastradas depois pelo
+  // botão "+ Nova obra"). É ela que alimenta todos os filtros e seletores.
+  const listaObras = obrasState.map((o) => o.nome);
+  const [filtroObraFluxo, setFiltroObraFluxo] = useState("");
+  const [mostrarFormNovaObra, setMostrarFormNovaObra] = useState(false);
+  const [formNovaObra, setFormNovaObra] = useState({ nome: "", status: "em_andamento" });
+  const [erroNovaObra, setErroNovaObra] = useState(null);
 
   const [custosItens, setCustosItens] = useState([]);
   const [loadingCustos, setLoadingCustos] = useState(true);
@@ -4440,6 +4447,44 @@ export default function DashboardConstrutora({ userEmail }) {
     } catch (err) {
       setSaveErrorCustos("Não foi possível salvar. Tente novamente.");
     }
+  }
+
+  async function persistObras(proximaLista) {
+    setObrasState(proximaLista);
+    try {
+      const result = await window.storage.set(STORAGE_KEY_OBRAS, JSON.stringify(proximaLista), false);
+      if (!result) setErroNovaObra("Não foi possível salvar a obra. Tente novamente.");
+      else setErroNovaObra(null);
+    } catch (err) {
+      setErroNovaObra("Não foi possível salvar a obra. Tente novamente.");
+    }
+  }
+
+  // Cadastra uma obra nova. Ela ganha o próprio checklist de custos (em
+  // branco) e passa a aparecer em todos os filtros e seletores de obra,
+  // então os lançamentos dela ficam separados das demais obras.
+  function handleAddObra() {
+    const nome = (formNovaObra.nome || "").trim();
+    if (!nome) {
+      setErroNovaObra("Informe o nome da obra.");
+      return;
+    }
+    if (listaObras.some((o) => o.toLowerCase() === nome.toLowerCase())) {
+      setErroNovaObra("Já existe uma obra com esse nome.");
+      return;
+    }
+    const idObra = "o" + Date.now();
+    const novaObra = { id: idObra, nome, status: formNovaObra.status || "em_andamento", avancoFisico: 0 };
+    const itensNovos = gerarCustosItensIniciais(nome, ETAPAS_CUSTO_ATUAL).map((it) => ({
+      ...it,
+      id: `custo-${idObra}-${String(it.id).replace("custo-", "")}`,
+    }));
+    persistObras([...obrasState, novaObra]);
+    persistCustosItens([...custosItens, ...itensNovos]);
+    setObraCustoSelecionada(nome);
+    setFormNovaObra({ nome: "", status: "em_andamento" });
+    setMostrarFormNovaObra(false);
+    setErroNovaObra(null);
   }
 
   function handlePersistCustosBlur() {
@@ -6131,10 +6176,32 @@ export default function DashboardConstrutora({ userEmail }) {
   // Extrato bancário e empréstimos de sócios somam-se às entradas/saídas já
   // calculadas — não substituem (cuidado com contagem em dobro se o mesmo
   // movimento aparecer em mais de uma fonte).
+  // Filtro por obra: só entram no fluxo os lançamentos da obra escolhida.
+  // Lançamentos do extrato só são atribuídos a uma obra quando estão
+  // vinculados a uma parcela a receber ou conta a pagar dela.
+  const obraDoLancamentoExtrato = (l) => {
+    if (l.parcelaReceberId) {
+      const p = valoresReceber.find((v) => v.id === l.parcelaReceberId);
+      if (p) return p.obra;
+    }
+    if (l.contaPagarId) {
+      const c = contasPagar.find((x) => x.id === l.contaPagarId);
+      if (c) return c.obra;
+    }
+    return l.obra || "";
+  };
+  const fluxoValoresReceber = filtroObraFluxo ? valoresReceber.filter((v) => v.obra === filtroObraFluxo) : valoresReceber;
+  const fluxoContasPagar = filtroObraFluxo ? contasPagar.filter((c) => c.obra === filtroObraFluxo) : contasPagar;
+  const fluxoExtrato = filtroObraFluxo ? extrato.filter((l) => obraDoLancamentoExtrato(l) === filtroObraFluxo) : extrato;
+  const fluxoEmprestimosSocios = filtroObraFluxo
+    ? emprestimosSocios.filter((e) => e.obra === filtroObraFluxo)
+    : emprestimosSocios;
+  const extratoSemObraQtd = extrato.filter((l) => !obraDoLancamentoExtrato(l)).length;
+
   const fluxoCaixa = useMemo(() => {
     const porMes = {};
 
-    valoresReceber.forEach((v) => {
+    fluxoValoresReceber.forEach((v) => {
       const data = parseDateBR(v.vencimento);
       if (!data) return;
       const key = mesAnoKey(data);
@@ -6142,7 +6209,7 @@ export default function DashboardConstrutora({ userEmail }) {
       porMes[key].entradas += v.valor;
     });
 
-    contasPagar.forEach((c) => {
+    fluxoContasPagar.forEach((c) => {
       const data = parseDateBR(c.vencimento);
       if (!data) return;
       const key = mesAnoKey(data);
@@ -6150,7 +6217,7 @@ export default function DashboardConstrutora({ userEmail }) {
       porMes[key].saidas += c.valor;
     });
 
-    extrato.forEach((l) => {
+    fluxoExtrato.forEach((l) => {
       const data = parseDateBR(l.data);
       if (!data) return;
       const key = mesAnoKey(data);
@@ -6159,7 +6226,7 @@ export default function DashboardConstrutora({ userEmail }) {
       else porMes[key].saidas += Math.abs(l.valor);
     });
 
-    emprestimosSocios.forEach((e) => {
+    fluxoEmprestimosSocios.forEach((e) => {
       const data = parseDateBR(e.data);
       if (!data) return;
       const key = mesAnoKey(data);
@@ -6177,7 +6244,7 @@ export default function DashboardConstrutora({ userEmail }) {
         entradas: Math.round(m.entradas),
         saidas: Math.round(m.saidas),
       }));
-  }, [valoresReceber, contasPagar, extrato, emprestimosSocios]);
+  }, [valoresReceber, contasPagar, extrato, emprestimosSocios, filtroObraFluxo]);
 
   const totalEntradasFluxo = fluxoCaixa.reduce((s, f) => s + f.entradas, 0);
   const totalSaidasFluxo = fluxoCaixa.reduce((s, f) => s + f.saidas, 0);
@@ -6326,18 +6393,21 @@ export default function DashboardConstrutora({ userEmail }) {
   const documentosVencidos = documentos.filter((d) => statusDocumentoDisplay(d) === "vencido").length;
   const documentosVencendo = documentos.filter((d) => statusDocumentoDisplay(d) === "vencendo").length;
 
-  const totalAReceber = valoresReceber
+  const valoresReceberFiltrados = filtroObraReceber
+    ? valoresReceber.filter((v) => v.obra === filtroObraReceber)
+    : valoresReceber;
+  const totalAReceber = valoresReceberFiltrados
     .filter((v) => statusReceberDisplay(v) !== "pago")
     .reduce((s, v) => s + v.valor, 0);
-  const totalRecebidoParcelas = valoresReceber
+  const totalRecebidoParcelas = valoresReceberFiltrados
     .filter((v) => statusReceberDisplay(v) === "pago")
     .reduce((s, v) => s + valorAtualizadoItem(v), 0);
-  const parcelasReceberVencidas = valoresReceber.filter((v) => statusReceberDisplay(v) === "vencido").length;
+  const parcelasReceberVencidas = valoresReceberFiltrados.filter((v) => statusReceberDisplay(v) === "vencido").length;
 
   // Agrupa as parcelas por unidade + cliente: total da venda, valor já
   // recebido, saldo a receber e a lista de parcelas (pro detalhe expandido).
   const saldoPorUnidade = Object.values(
-    valoresReceber.reduce((acc, v) => {
+    valoresReceberFiltrados.reduce((acc, v) => {
       const chave = `${v.unidade}|${v.comprador}`;
       if (!acc[chave]) {
         acc[chave] = { chave, unidade: v.unidade, comprador: v.comprador, valorTotal: 0, recebido: 0, parcelas: [] };
@@ -6919,6 +6989,31 @@ export default function DashboardConstrutora({ userEmail }) {
               </button>
             </div>
 
+            <div className="mb-4 flex items-center gap-2 flex-wrap">
+              <label
+                className="text-xs font-semibold uppercase tracking-wide"
+                style={{ color: "#8A8D93", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Obra:
+              </label>
+              <select
+                value={filtroObraFluxo}
+                onChange={(e) => setFiltroObraFluxo(e.target.value)}
+                className="text-sm px-3 py-1.5 rounded-sm outline-none"
+                style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
+              >
+                <option value="">Todas as obras</option>
+                {listaObras.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
+              {filtroObraFluxo && extratoSemObraQtd > 0 && (
+                <span className="text-xs" style={{ color: "#8A8D93" }}>
+                  {extratoSemObraQtd} lançamento(s) do extrato sem vínculo a uma obra não entram neste filtro.
+                </span>
+              )}
+            </div>
+
             <div className="flex flex-wrap gap-3 mb-6">
               <KpiCard
                 eyebrow="Saldo em caixa (6 meses)"
@@ -6968,7 +7063,7 @@ export default function DashboardConstrutora({ userEmail }) {
                     {fluxoCaixaDetalhado.map((f) => {
                       const expandido = !!mesesFluxoExpandidos[f.chave];
                       const detalhe = expandido
-                        ? detalheFluxoMes(f.chave, valoresReceber, contasPagar, extrato, emprestimosSocios)
+                        ? detalheFluxoMes(f.chave, fluxoValoresReceber, fluxoContasPagar, fluxoExtrato, fluxoEmprestimosSocios)
                         : null;
                       return (
                         <div key={f.mes} className="rounded-sm overflow-hidden" style={{ border: "1px solid #E4E0D6" }}>
@@ -7131,11 +7226,69 @@ export default function DashboardConstrutora({ userEmail }) {
                 className="text-sm px-3 py-1.5 rounded-sm outline-none"
                 style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
               >
-                {NOMES_OBRAS.map((o) => (
+                {listaObras.map((o) => (
                   <option key={o} value={o}>{o}</option>
                 ))}
               </select>
+              <button
+                type="button"
+                onClick={() => {
+                  setMostrarFormNovaObra((v) => !v);
+                  setErroNovaObra(null);
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#E1590C" }}
+              >
+                {mostrarFormNovaObra ? "CANCELAR" : "+ NOVA OBRA"}
+              </button>
             </div>
+
+            {mostrarFormNovaObra && (
+              <div
+                className="mb-4 rounded-sm p-3 flex flex-wrap items-end gap-3"
+                style={{ background: "#F5F3EC", border: "1px solid #DCD7C9" }}
+              >
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>Nome da obra</label>
+                  <input
+                    type="text"
+                    value={formNovaObra.nome}
+                    onChange={(e) => setFormNovaObra((f) => ({ ...f, nome: e.target.value }))}
+                    placeholder="Ex.: Isla Veneza"
+                    className="text-sm px-3 py-1.5 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF", minWidth: 220 }}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>Situação</label>
+                  <select
+                    value={formNovaObra.status}
+                    onChange={(e) => setFormNovaObra((f) => ({ ...f, status: e.target.value }))}
+                    className="text-sm px-3 py-1.5 rounded-sm outline-none"
+                    style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
+                  >
+                    <option value="em_andamento">Em andamento</option>
+                    <option value="concluida">Concluída</option>
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddObra}
+                  className="text-xs font-semibold px-3 py-2 rounded-sm"
+                  style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#4F7A5B" }}
+                >
+                  SALVAR OBRA
+                </button>
+                <span className="text-xs" style={{ color: "#8A8D93" }}>
+                  A nova obra tem custos, contratos, contas e recebimentos próprios — nada se mistura com as outras.
+                </span>
+              </div>
+            )}
+            {erroNovaObra && (
+              <div className="mb-4 text-xs px-3 py-2 rounded-sm" style={{ color: "#B23A2E", background: "#F8E3E0" }}>
+                {erroNovaObra}
+              </div>
+            )}
 
             <div className="flex flex-wrap gap-3 mb-6">
               <KpiCard eyebrow="Total orçado" value={formatBRLShort(totalGeralObraCusto.orcado)} sub={formatBRL(totalGeralObraCusto.orcado)} />
@@ -7623,7 +7776,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
               >
                 <option value="">Todas as obras</option>
-                {NOMES_OBRAS.map((o) => (
+                {listaObras.map((o) => (
                   <option key={o} value={o}>{o}</option>
                 ))}
               </select>
@@ -7689,7 +7842,7 @@ export default function DashboardConstrutora({ userEmail }) {
                     className="text-sm px-3 py-2 rounded-sm outline-none"
                     style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
-                    {NOMES_OBRAS.map((o) => (
+                    {listaObras.map((o) => (
                       <option key={o} value={o}>{o}</option>
                     ))}
                   </select>
@@ -8252,7 +8405,27 @@ export default function DashboardConstrutora({ userEmail }) {
                 sub="precisam de atenção"
                 accent={parcelasReceberVencidas > 0 ? "#B23A2E" : "#22252A"}
               />
-              <KpiCard eyebrow="Parcelas cadastradas" value={`${valoresReceber.length}`} sub="no total" />
+              <KpiCard eyebrow="Parcelas cadastradas" value={`${valoresReceberFiltrados.length}`} sub={filtroObraReceber || "todas as obras"} />
+            </div>
+
+            <div className="mb-4 flex items-center gap-2 flex-wrap">
+              <label
+                className="text-xs font-semibold uppercase tracking-wide"
+                style={{ color: "#8A8D93", fontFamily: "'Oswald', sans-serif" }}
+              >
+                Obra:
+              </label>
+              <select
+                value={filtroObraReceber}
+                onChange={(e) => setFiltroObraReceber(e.target.value)}
+                className="text-sm px-3 py-1.5 rounded-sm outline-none"
+                style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
+              >
+                <option value="">Todas as obras</option>
+                {listaObras.map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
             </div>
 
             <section
@@ -8274,7 +8447,7 @@ export default function DashboardConstrutora({ userEmail }) {
                   Carregando parcelas…
                 </div>
               ) : (() => {
-                const parcelasPendentes = valoresReceber
+                const parcelasPendentes = valoresReceberFiltrados
                   .filter((v) => statusReceberDisplay(v) !== "pago")
                   .slice()
                   .sort((a, b) => (parseDateBR(a.vencimento) || 0) - (parseDateBR(b.vencimento) || 0));
@@ -8432,7 +8605,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
               >
                 <option value="">Todas as obras</option>
-                {NOMES_OBRAS.map((o) => (
+                {listaObras.map((o) => (
                   <option key={o} value={o}>{o}</option>
                 ))}
               </select>
@@ -8531,7 +8704,7 @@ export default function DashboardConstrutora({ userEmail }) {
                     className="text-sm px-3 py-2 rounded-sm outline-none"
                     style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
-                    {NOMES_OBRAS.map((o) => (
+                    {listaObras.map((o) => (
                       <option key={o} value={o}>{o}</option>
                     ))}
                   </select>
@@ -8591,12 +8764,13 @@ export default function DashboardConstrutora({ userEmail }) {
                 </div>
               ) : (
                 <>
-                  <div className="hidden sm:grid grid-cols-[2.2fr_1fr_1fr_1fr_0.8fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
+                  <div className="hidden sm:grid grid-cols-[2.2fr_1fr_1fr_1fr_0.8fr_1.4fr_auto] gap-3 px-3 pb-2 text-[11px] uppercase tracking-wide font-semibold" style={{ color: "#8A8D93" }}>
                     <span>Fornecedor</span>
                     <span>Obra</span>
                     <span>Valor total</span>
                     <span>Emissão</span>
                     <span>Parcelas</span>
+                    <span>Vencimento</span>
                     <span></span>
                   </div>
 
@@ -8604,10 +8778,18 @@ export default function DashboardConstrutora({ userEmail }) {
                     {notasFiltradas
                       .slice()
                       .reverse()
-                      .map((n) => (
+                      .map((n) => {
+                        const parcelasNota = contasPagar
+                          .filter((c) => c.notaId === n.id)
+                          .slice()
+                          .sort((a, b) => (parseDateBR(a.vencimento) || 0) - (parseDateBR(b.vencimento) || 0));
+                        const abertas = parcelasNota.filter((c) => statusPagarDisplay(c) !== "pago");
+                        const proxima = abertas[0];
+                        const cfgVenc = proxima ? statusPagarConfig[statusPagarDisplay(proxima)] : statusPagarConfig.pago;
+                        return (
                         <div
                           key={n.id}
-                          className="grid grid-cols-2 sm:grid-cols-[2.2fr_1fr_1fr_1fr_0.8fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
+                          className="grid grid-cols-2 sm:grid-cols-[2.2fr_1fr_1fr_1fr_0.8fr_1.4fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                           style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                         >
                           <span className="text-sm font-semibold min-w-0" style={{ color: "#22252A" }}>{n.fornecedor}</span>
@@ -8625,6 +8807,32 @@ export default function DashboardConstrutora({ userEmail }) {
                             {n.dataEmissao}
                           </span>
                           <span className="text-xs" style={{ color: "#6B6F76" }}>{n.numeroParcelas}x</span>
+                          <span className="flex flex-wrap items-center gap-1.5 min-w-0">
+                            {parcelasNota.length === 0 ? (
+                              <span className="text-xs" style={{ color: "#8A8D93" }}>—</span>
+                            ) : (
+                              <>
+                                <span
+                                  className="text-[10px] uppercase tracking-wide font-semibold px-2 py-1 rounded-full"
+                                  style={{ color: cfgVenc.color, background: cfgVenc.bg }}
+                                >
+                                  {proxima ? cfgVenc.label : "Quitada"}
+                                </span>
+                                <span
+                                  className="text-xs"
+                                  style={{ color: "#22252A", fontFamily: "'IBM Plex Mono', monospace" }}
+                                  title={parcelasNota.map((c) => `${c.parcela}: ${c.vencimento}`).join(" | ")}
+                                >
+                                  {proxima ? proxima.vencimento : ""}
+                                </span>
+                                {abertas.length > 1 && (
+                                  <span className="text-[11px]" style={{ color: "#8A8D93" }}>
+                                    +{abertas.length - 1} parcela(s)
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </span>
                           <button
                             onClick={() => handleDeleteNota(n.id)}
                             className="text-xs w-fit"
@@ -8634,7 +8842,8 @@ export default function DashboardConstrutora({ userEmail }) {
                             Excluir
                           </button>
                         </div>
-                      ))}
+                        );
+                      })}
                   </div>
                 </>
               )}
@@ -8687,7 +8896,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
               >
                 <option value="">Todas as obras</option>
-                {NOMES_OBRAS.map((o) => (
+                {listaObras.map((o) => (
                   <option key={o} value={o}>{o}</option>
                 ))}
               </select>
@@ -8738,7 +8947,7 @@ export default function DashboardConstrutora({ userEmail }) {
                     className="text-sm px-3 py-2 rounded-sm outline-none"
                     style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
-                    {NOMES_OBRAS.map((o) => (
+                    {listaObras.map((o) => (
                       <option key={o} value={o}>{o}</option>
                     ))}
                   </select>
@@ -10264,7 +10473,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
               >
                 <option value="">Todas as obras</option>
-                {NOMES_OBRAS.map((o) => (
+                {listaObras.map((o) => (
                   <option key={o} value={o}>{o}</option>
                 ))}
               </select>
@@ -10394,7 +10603,7 @@ export default function DashboardConstrutora({ userEmail }) {
                     className="text-sm px-3 py-2 rounded-sm outline-none"
                     style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
-                    {NOMES_OBRAS.map((o) => (
+                    {listaObras.map((o) => (
                       <option key={o} value={o}>{o}</option>
                     ))}
                   </select>
@@ -10543,7 +10752,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
               >
                 <option value="">Todas as obras</option>
-                {NOMES_OBRAS.map((o) => (
+                {listaObras.map((o) => (
                   <option key={o} value={o}>{o}</option>
                 ))}
               </select>
@@ -10600,7 +10809,7 @@ export default function DashboardConstrutora({ userEmail }) {
                     className="text-sm px-3 py-2 rounded-sm outline-none"
                     style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
-                    {NOMES_OBRAS.map((o) => (
+                    {listaObras.map((o) => (
                       <option key={o} value={o}>{o}</option>
                     ))}
                   </select>
@@ -11186,7 +11395,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
               >
                 <option value="">Todas as obras</option>
-                {NOMES_OBRAS.map((o) => (
+                {listaObras.map((o) => (
                   <option key={o} value={o}>{o}</option>
                 ))}
               </select>
@@ -11286,7 +11495,7 @@ export default function DashboardConstrutora({ userEmail }) {
                     className="text-sm px-3 py-2 rounded-sm outline-none"
                     style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
-                    {NOMES_OBRAS.map((o) => (
+                    {listaObras.map((o) => (
                       <option key={o} value={o}>{o}</option>
                     ))}
                   </select>
@@ -11525,7 +11734,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 style={{ border: "1px solid #DCD7C9", color: "#22252A", background: "#FFFFFF" }}
               >
                 <option value="">Todas as obras</option>
-                {NOMES_OBRAS.map((o) => (
+                {listaObras.map((o) => (
                   <option key={o} value={o}>{o}</option>
                 ))}
               </select>
@@ -11625,7 +11834,7 @@ export default function DashboardConstrutora({ userEmail }) {
                     className="text-sm px-3 py-2 rounded-sm outline-none"
                     style={{ border: "1px solid #DCD7C9", color: "#22252A", width: "100%", minWidth: 0 }}
                   >
-                    {NOMES_OBRAS.map((o) => (
+                    {listaObras.map((o) => (
                       <option key={o} value={o}>{o}</option>
                     ))}
                   </select>
@@ -11982,7 +12191,7 @@ export default function DashboardConstrutora({ userEmail }) {
                                 className="text-xs px-1.5 py-1 rounded-sm border outline-none"
                                 style={{ borderColor: "#DCD7C9" }}
                               >
-                                {NOMES_OBRAS.map((o) => (
+                                {listaObras.map((o) => (
                                   <option key={o} value={o}>
                                     {o}
                                   </option>
