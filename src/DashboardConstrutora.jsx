@@ -3468,6 +3468,209 @@ function TelaAdminUsuariosEEmpresas({
   );
 }
 
+// ===================== Conferência de saldo + aprendizado (portado do Vetor Gestão) =====================
+const brParaIsoConf = (d) => {
+  const m = String(d || "").match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
+};
+const isoParaBrConf = (s) => (s ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : "");
+const brlConf = (v) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const centConf = (v) => Math.round(Math.abs(Number(v) || 0) * 100);
+// "Adiantamentos a fornecedores" nunca é sugerido/copiado sozinho: só quando a pessoa escolhe
+const ehContaAdiantamento = (c) => /adiant/.test(normalizarDescricaoExtrato(c && c.nome));
+// descrições genéricas demais ("PIX EMITIDO OUTRA IF", "TED", "PAGAMENTO"…) não ensinam nada: cada uma é para uma coisa
+const VAGAS_APRENDIZADO = /^(e|s):((pix|ted|doc|tev|transf|transferencia|pagamento|pagamentos|pagto|pgto|pag|boleto|enviado|enviada|emitido|emitida|recebido|recebida|credito|debito|compra|saque|deposito|tarifa|de|da|do|das|dos|para|em|cartao|conta|banco|outra|outro|outras|if|ifs|instituicao|agendamento|agendado|agendada|qr|code|qrcode|chave|envio|rec|receb|transferido|transferida|mesma|titularidade|sicoob|cora|asaas|inter|nubank|itau|bradesco|santander|caixa|bb|sicredi|unicred|viacredi|cresol|ailos|c|cc|ag|pi)\s?)*$/i;
+function chaveAprendizadoObras(descricao, valor) {
+  const base = normalizarDescricaoExtrato(descricao)
+    .replace(/\d+/g, " ")
+    .replace(/[^a-z ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .slice(0, 6)
+    .join(" ");
+  return (Number(valor) < 0 ? "s:" : "e:") + base;
+}
+const chaveUtil = (k) => k.length >= 8 && !VAGAS_APRENDIZADO.test(k);
+
+// compara o saldo impresso no extrato (PDFs importados) com o saldo pelos lançamentos, dia a dia
+function conferirSaldoObras({ extrato, extratosPdf, contaBancoId }) {
+  const porDia = {};
+  let saldoAnt = null;
+  let primeiroIso = null;
+  (extratosPdf || [])
+    .slice()
+    .sort((a, b) => String(b.importadoEm || "").localeCompare(String(a.importadoEm || "")))
+    .forEach((pdf) => {
+      (pdf.dias || []).forEach((d) => {
+        const iso = brParaIsoConf(d.data);
+        if (!iso || porDia[iso]) return; // o import mais recente vale
+        porDia[iso] = { saldo: d.saldoDoDia, linhas: d.lancamentos || [] };
+      });
+      const isos = (pdf.dias || []).map((d) => brParaIsoConf(d.data)).filter(Boolean).sort();
+      if (isos.length && pdf.saldoAnterior != null && (!primeiroIso || isos[0] < primeiroIso)) {
+        primeiroIso = isos[0];
+        saldoAnt = pdf.saldoAnterior;
+      }
+    });
+  const diasPdf = Object.keys(porDia).sort();
+  if (!diasPdf.length) return { vazio: true };
+  const ini = diasPdf[0], fim = diasPdf[diasPdf.length - 1];
+  const efeito = (l) => {
+    const v = Math.abs(Number(l.valor) || 0);
+    if (contaBancoId && l.contaDebitoId === contaBancoId && l.contaCreditoId !== contaBancoId) return v;
+    if (contaBancoId && l.contaCreditoId === contaBancoId && l.contaDebitoId !== contaBancoId) return -v;
+    if (l.contaDebitoId && l.contaCreditoId) return 0; // classificado sem o banco: não mexe no saldo do banco
+    return Number(l.valor) || 0; // pendente: vale o sinal do extrato
+  };
+  const lancs = (extrato || []).map((l) => ({ l, iso: brParaIsoConf(l.data) })).filter((x) => x.iso && x.iso >= ini && x.iso <= fim);
+  const datas = [...new Set([...diasPdf, ...lancs.map((x) => x.iso)])].sort();
+  let acum = saldoAnt || 0;
+  const dias = [];
+  let ultDif = 0;
+  let primeiroErro = null;
+  const faltando = [], amais = [], semBanco = [];
+  datas.forEach((iso) => {
+    const doDia = lancs.filter((x) => x.iso === iso);
+    doDia.forEach((x) => (acum += efeito(x.l)));
+    doDia.forEach((x) => {
+      const l = x.l;
+      if (contaBancoId && l.contaDebitoId && l.contaCreditoId && l.contaDebitoId !== contaBancoId && l.contaCreditoId !== contaBancoId) semBanco.push(l);
+    });
+    const pd = porDia[iso];
+    if (pd) {
+      // linha a linha: o que está no extrato e não nos lançamentos (faltando) e vice-versa (a mais)
+      const usados = new Set();
+      (pd.linhas || []).forEach((ln) => {
+        const achou = doDia.find((x) => !usados.has(x.l.id) && x.l.origem !== "ajuste-conciliacao" && centConf(x.l.valor) === centConf(ln.valor) && Math.sign(x.l.valor) === Math.sign(ln.valor));
+        if (achou) usados.add(achou.l.id);
+        else faltando.push({ iso, descricao: ln.descricao, valor: ln.valor });
+      });
+      doDia.filter((x) => !usados.has(x.l.id) && x.l.origem !== "ajuste-conciliacao").forEach((x) => amais.push(x.l));
+    }
+    if (pd && pd.saldo != null && saldoAnt != null) {
+      const dif = Math.round((acum - pd.saldo) * 100) / 100;
+      const difDia = Math.round((dif - ultDif) * 100) / 100;
+      ultDif = dif;
+      const linha = { iso, saldoExt: pd.saldo, saldoCont: Math.round(acum * 100) / 100, dif, difDia };
+      if (Math.abs(dif) >= 0.01 && !primeiroErro) primeiroErro = linha;
+      dias.push(linha);
+    }
+  });
+  const ult = dias[dias.length - 1];
+  return { saldoAnt, dias, faltando, amais, semBanco, primeiroErro, fechou: ult ? Math.abs(ult.dif) < 0.01 : !faltando.length && !amais.length, ini, fim };
+}
+
+function ConferenciaSaldoObras({ extrato, extratosPdf, contaBancoId, onLancarAjuste, onIncluirFaltando }) {
+  const r = conferirSaldoObras({ extrato, extratosPdf, contaBancoId });
+  const st = { th: { padding: "6px 8px", fontSize: 11, textTransform: "uppercase", color: "#8A8D93", textAlign: "left", borderBottom: "1px solid #DCD7C9" }, td: { padding: "6px 8px", fontSize: 12.5, borderBottom: "1px solid #EAE6DC" } };
+  const btn = { fontFamily: "'Oswald', sans-serif", fontSize: 11, padding: "3px 8px", borderRadius: 3, background: "#3D6E8C", color: "#F5F3EC" };
+  if (r.vazio)
+    return (
+      <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
+        Importe o extrato em PDF (sub-aba "📄 Extrato em PDF") para conferir: a conferência compara o saldo impresso no extrato, dia a dia, com o saldo pelos lançamentos.
+      </div>
+    );
+  return (
+    <div className="space-y-4">
+      <p className="text-xs" style={{ color: "#6B6F76" }}>
+        Período dos extratos importados: {isoParaBrConf(r.ini)} a {isoParaBrConf(r.fim)}. Compara o saldo do extrato com o saldo pelos lançamentos (conta do banco no Débito soma, no Crédito subtrai; pendente vale o sinal do extrato).
+      </p>
+      <div className="rounded-sm px-3 py-3" style={{ background: r.fechou ? "#E8EEE8" : "#F8E3E0", border: `1px solid ${r.fechou ? "#4F7A5B" : "#B23A2E"}` }}>
+        <b style={{ color: r.fechou ? "#4F7A5B" : "#B23A2E" }}>{r.fechou ? "✅ Fechou" : "❌ Não fechou"}</b>{" "}
+        <span className="text-xs" style={{ color: "#22252A" }}>
+          {r.primeiroErro ? `O saldo deixou de bater em ${isoParaBrConf(r.primeiroErro.iso)}. ` : ""}
+          {r.faltando.length ? `${r.faltando.length} linha(s) do extrato não estão nos lançamentos. ` : ""}
+          {r.amais.length ? `${r.amais.length} lançamento(s) não estão no extrato. ` : ""}
+          {r.semBanco.length ? `${r.semBanco.length} lançamento(s) classificados sem a conta do banco. ` : ""}
+        </span>
+      </div>
+
+      {(r.faltando.length > 0 || r.amais.length > 0 || r.semBanco.length > 0) && (
+        <div>
+          <h3 className="text-xs uppercase tracking-[0.1em] font-semibold mb-2" style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}>Onde está o erro</h3>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>
+              {r.faltando.map((f, i) => (
+                <tr key={"f" + i}>
+                  <td style={st.td}>{isoParaBrConf(f.iso)}</td>
+                  <td style={st.td}>{f.descricao}</td>
+                  <td style={{ ...st.td, textAlign: "right", color: f.valor < 0 ? "#B23A2E" : "#4F7A5B" }}>{brlConf(f.valor)}</td>
+                  <td style={st.td}><span style={{ color: "#B4590C", fontWeight: 600 }}>Faltando nos lançamentos</span></td>
+                  <td style={st.td}><button style={btn} onClick={() => onIncluirFaltando(f.iso, f.descricao, f.valor)}>Incluir</button></td>
+                </tr>
+              ))}
+              {r.amais.map((l) => (
+                <tr key={"a" + l.id}>
+                  <td style={st.td}>{l.data}</td>
+                  <td style={st.td}>{l.descricao}</td>
+                  <td style={{ ...st.td, textAlign: "right", color: l.valor < 0 ? "#B23A2E" : "#4F7A5B" }}>{brlConf(l.valor)}</td>
+                  <td style={st.td}><span style={{ color: "#B23A2E", fontWeight: 600 }}>A mais (não está no extrato deste dia)</span></td>
+                  <td style={st.td}></td>
+                </tr>
+              ))}
+              {r.semBanco.map((l) => (
+                <tr key={"b" + l.id}>
+                  <td style={st.td}>{l.data}</td>
+                  <td style={st.td}>{l.descricao}</td>
+                  <td style={{ ...st.td, textAlign: "right" }}>{brlConf(l.valor)}</td>
+                  <td style={st.td}><span style={{ color: "#B4590C", fontWeight: 600 }}>Classificado sem a conta do banco</span></td>
+                  <td style={st.td}></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {r.saldoAnt == null ? (
+        <p className="text-xs" style={{ color: "#8A8D93" }}>O extrato importado não trouxe "Saldo Anterior": a conferência de saldo dia a dia não é possível, só a linha a linha acima.</p>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={st.th}>Data</th>
+              <th style={{ ...st.th, textAlign: "right" }}>Saldo no extrato</th>
+              <th style={{ ...st.th, textAlign: "right" }}>Saldo pelos lançamentos</th>
+              <th style={{ ...st.th, textAlign: "right" }}>Diferença acumulada</th>
+              <th style={{ ...st.th, textAlign: "right" }} title="Diferença acumulada do dia − a do dia anterior: o valor a lançar neste dia">Diferença do dia</th>
+              <th style={st.th}></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style={st.td}>Saldo anterior</td>
+              <td style={{ ...st.td, textAlign: "right" }}>{brlConf(r.saldoAnt)}</td>
+              <td style={{ ...st.td, textAlign: "right" }}>{brlConf(r.saldoAnt)}</td>
+              <td style={st.td}></td><td style={st.td}></td><td style={st.td}></td>
+            </tr>
+            {r.dias.map((d) => (
+              <tr key={d.iso} style={{ background: d.dif ? (r.primeiroErro && r.primeiroErro.iso === d.iso ? "#F8E3E0" : "#FBF3EA") : "transparent" }}>
+                <td style={st.td}>{isoParaBrConf(d.iso)}</td>
+                <td style={{ ...st.td, textAlign: "right" }}>{brlConf(d.saldoExt)}</td>
+                <td style={{ ...st.td, textAlign: "right" }}>{brlConf(d.saldoCont)}</td>
+                <td style={{ ...st.td, textAlign: "right", color: d.dif ? "#B23A2E" : "#8A8D93" }}>{d.dif ? brlConf(d.dif) : "—"}</td>
+                <td style={{ ...st.td, textAlign: "right", color: d.difDia ? "#B23A2E" : "#8A8D93" }}>{d.difDia ? brlConf(d.difDia) : "—"}</td>
+                <td style={st.td}>
+                  {d.difDia ? (
+                    <button style={btn} title={d.difDia > 0 ? "Contábil maior que o extrato: D Despesas bancárias / C Banco" : "Extrato maior que o contábil: D Banco / C Receitas financeiras"} onClick={() => onLancarAjuste(d.iso, d.difDia)}>
+                      Lançar diferença
+                    </button>
+                  ) : d.dif ? (
+                    <span style={{ fontSize: 11, color: "#B4590C" }}>diferença vem de antes</span>
+                  ) : (
+                    <span style={{ fontSize: 11, color: "#4F7A5B" }}>ok</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 export default function DashboardConstrutora({ userEmail }) {
   // ---- Multi-empresa: J&G (obras Isla Catalina / Residencial Isla
   // Providência) e SGO Empreendimentos Ltda (obra Galpão Cunha) — dados,
@@ -3915,6 +4118,14 @@ export default function DashboardConstrutora({ userEmail }) {
   // extrato (Saldo Anterior, Saldo do dia); não interfere nos lançamentos
   // contábeis (Débito/Crédito) da mesma aba.
   const [subAbaExtrato, setSubAbaExtrato] = useState("lancamentos");
+  // aprendizado: descrição do extrato → contas (classificou uma vez, repete sozinho)
+  const [regrasClassif, setRegrasClassif] = useState({});
+  const [aplicarParecidos, setAplicarParecidos] = useState(() => {
+    try { return localStorage.getItem("obras-aplicar-parecidos") !== "nao"; } catch (e) { return true; }
+  });
+  const [avisoExtrato, setAvisoExtrato] = useState("");
+  const [modalDesfazerAuto, setModalDesfazerAuto] = useState(false);
+  const [marcadosDesfazer, setMarcadosDesfazer] = useState(() => new Set());
   const [extratosPdf, setExtratosPdf] = useState([]);
   const [loadingExtratosPdf, setLoadingExtratosPdf] = useState(true);
   const [importingExtratoPdfView, setImportingExtratoPdfView] = useState(false);
@@ -3992,6 +4203,7 @@ export default function DashboardConstrutora({ userEmail }) {
   const STORAGE_KEY_SALDO_INICIAL_EXTRATO = prefixoEmpresa + "extrato-saldo-inicial";
   const STORAGE_KEY_SALDO_INICIAL_APLICACOES = prefixoEmpresa + "extrato-saldo-inicial-aplicacoes";
   const STORAGE_KEY_EXTRATOS_PDF = prefixoEmpresa + "extratos-pdf-visualizacao";
+  const STORAGE_KEY_REGRAS_CLASSIF = prefixoEmpresa + "extrato-regras-classificacao";
   const STORAGE_KEY_SITUACAO_GALPAO = prefixoEmpresa + "situacao-galpao";
   const chaveArquivoDocumento = (id) => `${prefixoEmpresa}documento-arquivo-${id}`;
   const chaveArquivoContratoFornecedor = (id) => `${prefixoEmpresa}contrato-fornecedor-arquivo-${id}`;
@@ -4268,6 +4480,21 @@ export default function DashboardConstrutora({ userEmail }) {
     }
     setLoadingPlanoContas(true);
     load();
+    return () => {
+      cancelled = true;
+    };
+  }, [empresaAtual]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await window.storage.get(STORAGE_KEY_REGRAS_CLASSIF, false);
+        if (!cancelled) setRegrasClassif(result ? JSON.parse(result.value) || {} : {});
+      } catch (err) {
+        if (!cancelled) setRegrasClassif({});
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -5232,10 +5459,12 @@ export default function DashboardConstrutora({ userEmail }) {
         const comDuplicados = marcarDuplicadosExtrato(lancamentos, extrato);
         const comParcelaReceber = sugerirParcelasReceber(comDuplicados, valoresReceber);
         const comContaPagar = sugerirContasPagar(comParcelaReceber, contasPagar);
-        const comClassificacaoContabil = comContaPagar.map((l) => ({
-          ...l,
-          ...sugerirClassificacaoContabil(l, { planoContas, contaBancoPadraoId, contasPagar, valoresReceber }),
-        }));
+        const comClassificacaoContabil = comContaPagar.map((l) =>
+          aplicarRegrasAprendidas({
+            ...l,
+            ...sugerirClassificacaoContabil(l, { planoContas, contaBancoPadraoId, contasPagar, valoresReceber }),
+          })
+        );
         setExtratoPreview(comClassificacaoContabil);
         setSubAbaExtrato("lancamentos");
       } else if (dias.length === 0) {
@@ -5308,7 +5537,100 @@ export default function DashboardConstrutora({ userEmail }) {
   // Define (ou troca) a classificação contábil de Débito/Crédito de um
   // lançamento já salvo no extrato — usado pelos dois dropdowns da tabela.
   function handleClassificarLancamento(lancamentoId, campo, valor) {
-    persistExtrato(extrato.map((l) => (l.id === lancamentoId ? { ...l, [campo]: valor } : l)));
+    const agoraIso = new Date().toISOString();
+    const lista = extrato.map((l) =>
+      l.id === lancamentoId ? { ...l, [campo]: valor, classificadoPor: userEmail || "", classificadoEm: agoraIso, classificadoAuto: false } : l
+    );
+    persistExtrato(aprenderEPropagar(lista, [lancamentoId]));
+  }
+
+  // ---- aprendizado (igual ao Vetor/Nibo): classificou um, aprende e aplica aos PENDENTES parecidos de qualquer mês ----
+  function persistRegrasClassif(next) {
+    setRegrasClassif(next);
+    try { window.storage.set(STORAGE_KEY_REGRAS_CLASSIF, JSON.stringify(next), false); } catch (e) {}
+  }
+  function aprenderEPropagar(lista, idsOrigem) {
+    const porId = Object.fromEntries(planoContas.map((c) => [c.id, c]));
+    const novas = {};
+    lista.forEach((l) => {
+      if (!idsOrigem.includes(l.id) || !l.contaDebitoId || !l.contaCreditoId) return;
+      if (ehContaAdiantamento(porId[l.contaDebitoId]) || ehContaAdiantamento(porId[l.contaCreditoId])) return;
+      const k = chaveAprendizadoObras(l.descricao, l.valor);
+      if (!chaveUtil(k)) return;
+      novas[k] = { contaDebitoId: l.contaDebitoId, contaCreditoId: l.contaCreditoId };
+    });
+    if (!Object.keys(novas).length) return lista;
+    persistRegrasClassif({ ...regrasClassif, ...novas });
+    if (!aplicarParecidos) return lista;
+    const agoraIso = new Date().toISOString();
+    let n = 0;
+    const saida = lista.map((l) => {
+      if (idsOrigem.includes(l.id) || statusClassificacaoContabil(l) !== "pendente") return l;
+      const r = novas[chaveAprendizadoObras(l.descricao, l.valor)];
+      if (!r || r.contaDebitoId === r.contaCreditoId) return l;
+      n += 1;
+      return { ...l, contaDebitoId: r.contaDebitoId, contaCreditoId: r.contaCreditoId, classificadoAuto: true, classificadoPor: (userEmail || "") + " (automático)", classificadoEm: agoraIso };
+    });
+    if (n) setAvisoExtrato(`Apliquei as mesmas contas em ${n} lançamento(s) parecido(s) pendente(s). Se algum não for igual, use "↩ Desfazer automáticos".`);
+    return saida;
+  }
+  // regra aprendida vale na importação (antes da sugestão genérica)
+  function aplicarRegrasAprendidas(l) {
+    const r = regrasClassif[chaveAprendizadoObras(l.descricao, l.valor)];
+    const ids = new Set(planoContas.map((c) => c.id));
+    if (!r || !chaveUtil(chaveAprendizadoObras(l.descricao, l.valor)) || !ids.has(r.contaDebitoId) || !ids.has(r.contaCreditoId) || r.contaDebitoId === r.contaCreditoId) return l;
+    return { ...l, contaDebitoId: r.contaDebitoId, contaCreditoId: r.contaCreditoId, aprendido: true };
+  }
+  function handleDesfazerAutomaticos() {
+    const ids = marcadosDesfazer;
+    if (!ids.size) return;
+    persistExtrato(
+      extrato.map((l) => {
+        if (!ids.has(l.id)) return l;
+        // fica a conta do banco; a contrapartida volta a vazio (Pendente)
+        return Number(l.valor) < 0
+          ? { ...l, contaDebitoId: "", classificadoAuto: false, classificadoPor: "", classificadoEm: "" }
+          : { ...l, contaCreditoId: "", classificadoAuto: false, classificadoPor: "", classificadoEm: "" };
+      })
+    );
+    setAvisoExtrato(`${ids.size} lançamento(s) voltaram a Pendente.`);
+    setMarcadosDesfazer(new Set());
+    setModalDesfazerAuto(false);
+  }
+
+  // ---- conferência de saldo: lançar a diferença do dia e incluir linha que falta ----
+  function contaPorNomeRegex(re) {
+    return planoContas.filter((c) => !ehContaAdiantamento(c) && re.test(normalizarDescricaoExtrato(c.nome))).sort((a, b) => a.nome.length - b.nome.length)[0] || null;
+  }
+  function handleLancarAjusteConciliacao(iso, difDia) {
+    const v = Math.round(Number(difDia) * 100) / 100;
+    if (!v) return;
+    const saida = v > 0; // contábil maior que o extrato
+    const contra = saida
+      ? contaPorNomeRegex(/despesas? bancari/) || contaPorNomeRegex(/tarifas? bancari/) || contaPorNomeRegex(/despesas? financeir/)
+      : contaPorNomeRegex(/rendimentos? de aplica/) || contaPorNomeRegex(/receitas? financeir/) || contaPorNomeRegex(/juros ativos/);
+    const banco = contaBancoPadraoId || "";
+    const novo = {
+      id: Date.now(),
+      data: isoParaBrConf(iso),
+      descricao: `Ajuste conciliação bancária – ${iso.slice(8, 10)}/${iso.slice(5, 7)}`,
+      valor: saida ? -Math.abs(v) : Math.abs(v),
+      socio: "",
+      parcelaReceberId: "",
+      contaDebitoId: saida ? (contra ? contra.id : "") : banco,
+      contaCreditoId: saida ? banco : contra ? contra.id : "",
+      origem: "ajuste-conciliacao",
+      classificadoPor: userEmail || "",
+      classificadoEm: new Date().toISOString(),
+    };
+    persistExtrato([...extrato, novo]);
+    setAvisoExtrato(`Ajuste de ${brlConf(Math.abs(v))} lançado em ${isoParaBrConf(iso)}${contra ? "" : " — não achei a conta no plano: escolha em Lançamentos"}. Dá para trocar a conta na linha do lançamento.`);
+  }
+  function handleIncluirFaltandoConciliacao(iso, descricao, valor) {
+    const base = { id: Date.now(), data: isoParaBrConf(iso), descricao, valor: Number(valor), socio: "", parcelaReceberId: "", contaPagarId: "" };
+    const sug = aplicarRegrasAprendidas({ ...base, ...sugerirClassificacaoContabil(base, { planoContas, contaBancoPadraoId, contasPagar, valoresReceber }) });
+    persistExtrato([...extrato, sug]);
+    setAvisoExtrato(`Incluído: ${isoParaBrConf(iso)} · ${descricao} · ${brlConf(valor)}.`);
   }
 
   // Aplica a mesma conta (contaDebitoId ou contaCreditoId) a todos os
@@ -5319,7 +5641,9 @@ export default function DashboardConstrutora({ userEmail }) {
   function handleAplicarContaEmLote(campo, contaId) {
     if (!contaId || selecionadosLancamentos.size === 0) return;
     const ids = selecionadosLancamentos;
-    persistExtrato(extrato.map((l) => (ids.has(l.id) ? { ...l, [campo]: contaId } : l)));
+    const agoraIso = new Date().toISOString();
+    const lista = extrato.map((l) => (ids.has(l.id) ? { ...l, [campo]: contaId, classificadoPor: userEmail || "", classificadoEm: agoraIso, classificadoAuto: false } : l));
+    persistExtrato(aprenderEPropagar(lista, [...ids]));
   }
 
   // Seleção (checkbox) dos lançamentos já salvos, e ações em lote sobre a
@@ -9318,6 +9642,8 @@ export default function DashboardConstrutora({ userEmail }) {
                     ? "Extrato bancário — Exportar para Domínio"
                     : subAbaExtrato === "plano-contas"
                     ? "Extrato bancário — Plano de contas"
+                    : subAbaExtrato === "conferencia"
+                    ? "Extrato bancário — Conferência de saldo"
                     : "Extrato bancário"}
                 </h2>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -9345,6 +9671,18 @@ export default function DashboardConstrutora({ userEmail }) {
                       }}
                     >
                       📄 Extrato em PDF
+                    </button>
+                    <button
+                      onClick={() => setSubAbaExtrato("conferencia")}
+                      className="text-xs font-semibold px-3 py-1.5"
+                      style={{
+                        fontFamily: "'Oswald', sans-serif",
+                        letterSpacing: "0.03em",
+                        color: subAbaExtrato === "conferencia" ? "#F5F3EC" : "#22252A",
+                        background: subAbaExtrato === "conferencia" ? "#3D6E8C" : "#E4E0D6",
+                      }}
+                    >
+                      ✓ Conferência de saldo
                     </button>
                     <button
                       onClick={() => setSubAbaExtrato("exportar-dominio")}
@@ -9569,6 +9907,21 @@ export default function DashboardConstrutora({ userEmail }) {
                       {avisoExportDominio}
                     </div>
                   )}
+                </>
+              ) : subAbaExtrato === "conferencia" ? (
+                <>
+                  {avisoExtrato && (
+                    <div className="text-xs px-3 py-2 rounded-sm mb-3" style={{ background: "#EAF1F6", border: "1px solid #3D6E8C", color: "#22252A" }}>
+                      {avisoExtrato} <button onClick={() => setAvisoExtrato("")} style={{ color: "#3D6E8C", marginLeft: 6 }}>✕</button>
+                    </div>
+                  )}
+                  <ConferenciaSaldoObras
+                    extrato={extrato}
+                    extratosPdf={extratosPdf}
+                    contaBancoId={contaBancoPadraoId}
+                    onLancarAjuste={handleLancarAjusteConciliacao}
+                    onIncluirFaltando={handleIncluirFaltandoConciliacao}
+                  />
                 </>
               ) : subAbaExtrato === "plano-contas" ? (() => {
                 const contasFiltradas = planoContas
@@ -10174,6 +10527,97 @@ export default function DashboardConstrutora({ userEmail }) {
                 </div>
               )}
 
+              {extrato.length > 0 && (
+                <div className="flex items-center gap-3 flex-wrap mb-3">
+                  <label className="text-xs flex items-center gap-2" style={{ color: "#22252A" }} title="Ao classificar um lançamento, aplica as mesmas contas aos pendentes com a mesma descrição (qualquer mês). Descrições genéricas como 'PIX ENVIADO' não são copiadas.">
+                    <input
+                      type="checkbox"
+                      checked={aplicarParecidos}
+                      onChange={(e) => {
+                        setAplicarParecidos(e.target.checked);
+                        try { localStorage.setItem("obras-aplicar-parecidos", e.target.checked ? "sim" : "nao"); } catch (err) {}
+                      }}
+                    />
+                    Aplicar automaticamente aos parecidos (todos os meses)
+                  </label>
+                  <button
+                    onClick={() => { setMarcadosDesfazer(new Set()); setModalDesfazerAuto(true); }}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                    style={{ fontFamily: "'Oswald', sans-serif", color: "#22252A", background: "#E4E0D6" }}
+                    title="Lista as classificações feitas sozinhas pelo 'aplicar aos parecidos' e deixa desfazer"
+                  >
+                    ↩ Desfazer automáticos
+                  </button>
+                  {avisoExtrato && (
+                    <span className="text-xs px-2 py-1 rounded-sm" style={{ background: "#EAF1F6", color: "#22252A" }}>
+                      {avisoExtrato} <button onClick={() => setAvisoExtrato("")} style={{ color: "#3D6E8C", marginLeft: 4 }}>✕</button>
+                    </span>
+                  )}
+                </div>
+              )}
+              {modalDesfazerAuto && (() => {
+                const porId = Object.fromEntries(planoContas.map((c) => [c.id, c]));
+                const auto = extrato.filter((l) => l.classificadoAuto);
+                const grupos = {};
+                auto.forEach((l) => {
+                  const contra = Number(l.valor) < 0 ? l.contaDebitoId : l.contaCreditoId;
+                  const dia = String(l.classificadoEm || "").slice(0, 10);
+                  const k = contra + "|" + dia + "|" + (l.classificadoPor || "");
+                  (grupos[k] = grupos[k] || { contra, dia, por: l.classificadoPor, itens: [] }).itens.push(l);
+                });
+                const gs = Object.values(grupos).sort((a, b) => b.itens.length - a.itens.length);
+                const marcarGrupo = (g, on) =>
+                  setMarcadosDesfazer((prev) => {
+                    const next = new Set(prev);
+                    g.itens.forEach((l) => (on ? next.add(l.id) : next.delete(l.id)));
+                    return next;
+                  });
+                return (
+                  <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                    <div style={{ background: "#F5F3EC", borderRadius: 8, maxWidth: 860, width: "100%", maxHeight: "86vh", display: "flex", flexDirection: "column", padding: 18 }}>
+                      <b style={{ fontFamily: "'Oswald', sans-serif", fontSize: 15 }}>↩ Desfazer classificações automáticas</b>
+                      <span className="text-xs mb-3" style={{ color: "#6B6F76" }}>
+                        Feitas pelo "Aplicar automaticamente aos parecidos". Marque os grupos errados: voltam a Pendente (a conta do banco fica).
+                      </span>
+                      <div style={{ overflow: "auto", flex: 1 }}>
+                        {gs.length === 0 ? (
+                          <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>Nenhuma classificação automática.</div>
+                        ) : (
+                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                            <thead>
+                              <tr style={{ textAlign: "left", color: "#8A8D93" }}>
+                                <th></th><th>Conta aplicada</th><th style={{ textAlign: "right" }}>Lançamentos</th><th>Quando · quem</th><th>Exemplos</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {gs.map((g, i) => (
+                                <tr key={i} style={{ borderTop: "1px solid #DCD7C9" }}>
+                                  <td><input type="checkbox" checked={g.itens.every((l) => marcadosDesfazer.has(l.id))} onChange={(e) => marcarGrupo(g, e.target.checked)} /></td>
+                                  <td><b>{porId[g.contra] ? porId[g.contra].nome : g.contra || "—"}</b></td>
+                                  <td style={{ textAlign: "right" }}>{g.itens.length}</td>
+                                  <td>{g.dia ? isoParaBrConf(g.dia) : ""} · {g.por}</td>
+                                  <td style={{ fontSize: 11.5 }}>{g.itens.slice(0, 3).map((l) => `${l.data} ${String(l.descricao || "").slice(0, 36)} ${brlConf(l.valor)}`).join(" | ")}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                      <div className="flex justify-end gap-2 mt-3">
+                        <button onClick={() => setModalDesfazerAuto(false)} className="text-xs font-semibold px-3 py-1.5 rounded-sm" style={{ background: "#E4E0D6" }}>Fechar</button>
+                        <button
+                          onClick={() => { if (window.confirm(`Voltar ${marcadosDesfazer.size} lançamento(s) para Pendente?`)) handleDesfazerAutomaticos(); }}
+                          disabled={!marcadosDesfazer.size}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                          style={{ background: "#3D6E8C", color: "#F5F3EC", opacity: marcadosDesfazer.size ? 1 : 0.5 }}
+                        >
+                          ↩ Desfazer marcados ({marcadosDesfazer.size})
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
               {loadingExtrato ? (
                 <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
                   Carregando extrato…
