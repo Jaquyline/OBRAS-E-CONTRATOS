@@ -4903,6 +4903,17 @@ export default function DashboardConstrutora({ userEmail }) {
     setObraEscolhidaPorNota((prev) => { const o = { ...prev }; lista.forEach((n) => { if (n.obraPadrao && !o[n.id]) o[n.id] = n.obraPadrao; }); return o; });
     return lista;
   }
+  // NF-e com ciência dada há mais de 1 hora e ainda sem XML: ao abrir a aba Fiscal, busca de novo sozinho (uma vez)
+  const [autoFiscalFeito, setAutoFiscalFeito] = useState(false);
+  useEffect(() => {
+    if (activeTab !== "fiscal" || autoFiscalFeito || buscandoNotasFiscais || !certificadoFiscal) return;
+    const pend = Object.values(fiscalBase.notas || {}).filter((n) => n.tipo === "NF-e" && !n.temXml && n.cienciaEm && Date.now() - new Date(n.cienciaEm).getTime() > 3600e3 && n.situacao !== "Cancelada");
+    if (!pend.length) return;
+    setAutoFiscalFeito(true);
+    capturarNotasFiscais();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, fiscalBase, certificadoFiscal]);
+
   // a lista acompanha o período, os CNPJs e as notas guardadas
   useEffect(() => {
     if (Object.keys(fiscalBase.notas || {}).length) montarListaFiscal(fiscalBase);
@@ -5092,7 +5103,17 @@ export default function DashboardConstrutora({ userEmail }) {
   // Ver a nota: abre o PDF guardado no Gestão ou monta uma visualização a partir do XML (NF-e com os itens; NFS-e com o serviço)
   async function abrirNotaFiscal(nota) {
     if (!nota.temXml) {
-      setErroBuscaNotasFiscais(`A ${nota.tipo} nº ${nota.numero} ainda está só com o resumo (sem o XML completo). A ciência já foi dada: clique em "⬇ Buscar novas notas" mais tarde para baixar o XML.`);
+      // ainda sem o XML completo: mostra o resumo que a SEFAZ mandou e quando o XML deve chegar
+      const w0 = window.open("", "_blank");
+      if (!w0) return setErroBuscaNotasFiscais("O navegador bloqueou a janela — libere pop-ups para este site.");
+      const e0 = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+      const quando = nota.cienciaEm ? new Date(new Date(nota.cienciaEm).getTime() + 3600e3).toLocaleString("pt-BR") : "";
+      w0.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${e0(nota.tipo)} ${e0(nota.numero)} — resumo</title><style>body{font:13px/1.5 Arial,sans-serif;max-width:800px;margin:24px auto;padding:0 16px;color:#111}h1{font-size:18px;margin:0 0 4px}.av{background:#fdf5e7;border:1px solid #e8c98f;padding:10px 12px;border-radius:6px;margin:12px 0}table{border-collapse:collapse;width:100%}td{border-bottom:1px solid #eee;padding:6px 4px}td:first-child{color:#555;width:200px}</style></head><body>
+        <h1>${e0(nota.tipo)} nº ${e0(nota.numero)} — resumo da SEFAZ</h1>
+        <div class="av">${nota.situacao === "Cancelada" ? "<b style='color:#b23a2e'>NF-e CANCELADA.</b> " : ""}O XML completo (com os itens) ainda não chegou. ${nota.cienciaEm ? `A ciência da operação foi registrada em ${e0(new Date(nota.cienciaEm).toLocaleString("pt-BR"))}; o painel baixa o XML sozinho a partir de ${e0(quando)}.` : "Clique em “⬇ Buscar novas notas”: o painel registra a ciência da operação e baixa o XML na busca seguinte."}</div>
+        <table><tr><td>Fornecedor</td><td><b>${e0(nota.prestador)}</b> — CNPJ ${e0(fmtCnpj(nota.prestadorDoc))}</td></tr><tr><td>Emissão</td><td>${e0(dataISOparaBR(nota.data))}</td></tr><tr><td>Valor da nota</td><td><b>${e0(formatBRL(nota.valorNota))}</b></td></tr><tr><td>Situação</td><td>${e0(nota.situacao || "Autorizada")}</td></tr><tr><td>Chave de acesso</td><td style="word-break:break-all">${e0(nota.chave)}</td></tr><tr><td>Tomador</td><td>${e0(nota.cnpjNome || "")} — CNPJ ${e0(fmtCnpj(nota.cnpjTomador))}</td></tr></table>
+        <p><a href="https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=completa&tipoConteudo=XbSeqxE8pl8=" target="_blank" rel="noreferrer">Consultar a nota completa na SEFAZ</a> (cole a chave acima)</p></body></html>`);
+      w0.document.close();
       return;
     }
     const w = window.open("", "_blank");
@@ -13024,7 +13045,7 @@ export default function DashboardConstrutora({ userEmail }) {
                         <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.tipo || "NFS-e"}{/cancel/i.test(nota.situacao || "") ? <span style={{ color: "#B23A2E" }}> · cancelada</span> : null}</td>
                         <td className="py-2 pr-3 text-xs whitespace-nowrap">
                           {nota.numero}{" "}
-                          <button onClick={() => abrirNotaFiscal(nota)} title={nota.arquivo ? "Ver a nota" : "Só o resumo no Gestão (sem o XML)"} className="ml-1" style={{ color: nota.arquivo ? "#3D6E8C" : "#B8B4A8" }}>👁 ver</button>
+                          <button onClick={() => abrirNotaFiscal(nota)} title={nota.temXml ? "Ver a nota" : "Só o resumo da SEFAZ (o XML completo chega depois da ciência)"} className="ml-1" style={{ color: nota.temXml ? "#3D6E8C" : "#A4640B" }}>{nota.temXml ? "👁 ver" : "👁 resumo"}</button>
                         </td>
                         <td className="py-2 pr-3 text-xs">{nota.prestador}</td>
                         <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.valorNota)}</td>
