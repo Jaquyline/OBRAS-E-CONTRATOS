@@ -14,6 +14,7 @@ export default async function handler(req, res) {
     if (!chave) return res.status(500).json({ error: "Falta configurar OBRAS_GESTAO_TOKEN na Vercel do Obras & Contratos." });
     const base = String(process.env.GESTAO_URL || "https://gestao.contabilvetor.com.br").replace(/\/+$/, "");
     const q = new URLSearchParams({ cnpj: String(req.query.cnpj || ""), de: String(req.query.de || ""), ate: String(req.query.ate || "") });
+    if (req.query.arquivo) q.set("arquivo", String(req.query.arquivo));
     const r = await fetch(`${base}/api/obras-notas?${q}`, { headers: { "x-obras-token": chave } });
     const j = await r.json().catch(() => ({ error: "O Gestão não respondeu." }));
     res.setHeader("Cache-Control", "no-store");

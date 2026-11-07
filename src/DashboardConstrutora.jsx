@@ -4974,6 +4974,54 @@ export default function DashboardConstrutora({ userEmail }) {
     });
   }, [notasFiscaisEncontradas, buscaFiscal, filtroCnpjFiscal, filtroSitFiscal, pagamentoPorNota, notaJaCadastrada, custosItens]);
 
+  // Ver a nota: abre o PDF guardado no Gestão ou monta uma visualização a partir do XML (NF-e com os itens; NFS-e com o serviço)
+  async function abrirNotaFiscal(nota) {
+    if (!nota.arquivo) {
+      setErroBuscaNotasFiscais(`A ${nota.tipo} nº ${nota.numero} ainda está só com o resumo no Gestão (sem o XML completo). No Gestão, busque de novo as NF-e/NFS-e desse mês para baixar o arquivo.`);
+      return;
+    }
+    const w = window.open("", "_blank");
+    if (!w) return setErroBuscaNotasFiscais("O navegador bloqueou a janela — libere pop-ups para este site.");
+    w.document.write("<p style='font:14px Arial;padding:20px'>Abrindo a nota…</p>");
+    try {
+      const token = (await supabase.auth.getSession()).data.session?.access_token || "";
+      const r = await fetch(`/api/notas-gestao?cnpj=${nota.cnpjTomador}&arquivo=${encodeURIComponent(nota.arquivo)}`, { headers: { Authorization: `Bearer ${token}` } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.url) throw new Error(j.error || "arquivo não encontrado");
+      if (/\.pdf(\?|$)/i.test(nota.arquivo)) { w.location.href = j.url; return; }
+      const xml = await (await fetch(j.url)).text();
+      const doc = new DOMParser().parseFromString(xml, "application/xml");
+      const tg = (el, nome) => { const x = el && el.getElementsByTagNameNS("*", nome)[0]; return x ? x.textContent.trim() : ""; };
+      const q = (el, nome) => el && el.getElementsByTagNameNS("*", nome)[0];
+      const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+      const brl = (v) => (Number(v) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+      let corpo = "";
+      if (nota.tipo === "NF-e") {
+        const emit = q(doc, "emit"), dest = q(doc, "dest"), tot = q(doc, "ICMSTot");
+        const itens = [...doc.getElementsByTagNameNS("*", "det")].map((d) => { const p = q(d, "prod"); return `<tr><td>${esc(tg(p, "cProd"))}</td><td>${esc(tg(p, "xProd"))}</td><td>${esc(tg(p, "NCM"))}</td><td>${esc(tg(p, "CFOP"))}</td><td class="r">${esc((+tg(p, "qCom")).toLocaleString("pt-BR"))} ${esc(tg(p, "uCom"))}</td><td class="r">${brl(tg(p, "vUnCom"))}</td><td class="r">${brl(tg(p, "vProd"))}</td></tr>`; }).join("");
+        corpo = `<h1>NF-e nº ${esc(nota.numero)} — série ${esc(tg(doc, "serie"))}</h1><div class="sub">Emitida em ${esc(dataISOparaBR(nota.data))} · ${esc(tg(doc, "natOp"))} · Chave ${esc(nota.chave)}</div>
+          <div class="g"><div><b>Emitente</b><br>${esc(tg(emit, "xNome"))}<br>CNPJ ${esc(tg(emit, "CNPJ"))}<br>${esc([tg(q(emit, "enderEmit"), "xLgr"), tg(q(emit, "enderEmit"), "nro"), tg(q(emit, "enderEmit"), "xMun"), tg(q(emit, "enderEmit"), "UF")].filter(Boolean).join(", "))}</div>
+          <div><b>Destinatário</b><br>${esc(tg(dest, "xNome"))}<br>CNPJ ${esc(tg(dest, "CNPJ") || tg(dest, "CPF"))}</div></div>
+          <table><thead><tr><th>Cód.</th><th>Produto</th><th>NCM</th><th>CFOP</th><th class="r">Qtde</th><th class="r">Unitário</th><th class="r">Total</th></tr></thead><tbody>${itens}</tbody></table>
+          <table class="tot"><tr><td>Produtos ${brl(tg(tot, "vProd"))}</td><td>Frete ${brl(tg(tot, "vFrete"))}</td><td>Desconto ${brl(tg(tot, "vDesc"))}</td><td>ICMS ${brl(tg(tot, "vICMS"))}</td><td>IPI ${brl(tg(tot, "vIPI"))}</td><td><b>Total da nota ${brl(tg(tot, "vNF"))}</b></td></tr></table>
+          ${tg(doc, "infCpl") ? `<p class="obs"><b>Informações complementares:</b> ${esc(tg(doc, "infCpl"))}</p>` : ""}`;
+      } else {
+        const prest = q(doc, "prest") || q(doc, "emit"), toma = q(doc, "toma");
+        corpo = `<h1>NFS-e nº ${esc(nota.numero)}</h1><div class="sub">Emitida em ${esc(dataISOparaBR(nota.data))}${nota.competencia ? " · competência " + esc(nota.competencia) : ""} · Chave ${esc(nota.chave)}</div>
+          <div class="g"><div><b>Prestador</b><br>${esc(nota.prestador || tg(prest, "xNome"))}<br>CNPJ ${esc(tg(prest, "CNPJ") || nota.prestadorDoc)}</div><div><b>Tomador</b><br>${esc(tg(toma, "xNome"))}<br>CNPJ ${esc(tg(toma, "CNPJ") || tg(toma, "CPF"))}</div></div>
+          <p><b>Serviço:</b> ${esc(tg(doc, "xTribNac") || tg(doc, "xTribMun") || tg(doc, "cTribNac"))}</p>
+          <p class="desc">${esc(tg(doc, "xDescServ"))}</p>
+          <table class="tot"><tr><td>Valor da nota ${brl(nota.valorNota)}</td><td>ISS retido ${brl(nota.issRetido)}</td><td>IR ${brl(nota.ir)}</td><td>PIS/COFINS/CSLL ${brl(nota.pcc)}</td><td>INSS ${brl(nota.inss)}</td><td><b>Líquido ${brl(nota.valorLiquido)}</b></td></tr></table>`;
+      }
+      w.document.open();
+      w.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(nota.tipo)} ${esc(nota.numero)} — ${esc(nota.prestador)}</title><style>body{font:13px/1.4 Arial,sans-serif;color:#111;max-width:1000px;margin:20px auto;padding:0 16px}h1{font-size:18px;margin:0}.sub{color:#555;margin:2px 0 12px;font-size:12px;word-break:break-all}.g{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}.g div{border:1px solid #ddd;border-radius:6px;padding:8px}table{width:100%;border-collapse:collapse;margin:8px 0}th,td{border-bottom:1px solid #e3e3e3;padding:4px 6px;text-align:left;vertical-align:top}th{background:#f2f2f2;font-size:12px}.r{text-align:right;white-space:nowrap}.tot td{background:#f7f7f7;white-space:nowrap}.desc{white-space:pre-wrap;border:1px solid #eee;padding:8px;border-radius:6px}.obs{font-size:12px;color:#444}.bar{margin-bottom:12px}@media print{.bar{display:none}}</style></head><body><div class="bar"><button onclick="print()">🖨 Imprimir / PDF</button> <a href="${esc(j.url)}" download>⬇ Baixar XML</a></div>${corpo}</body></html>`);
+      w.document.close();
+    } catch (err) {
+      w.close();
+      setErroBuscaNotasFiscais("Não consegui abrir a nota: " + err.message);
+    }
+  }
+
   function handleLevarNotaParaCusto(nota) {
     const obraEscolhida = obraEscolhidaPorNota[nota.id] || NOMES_OBRAS[0];
     const etapaDestino = ETAPAS_CUSTO_ATUAL[0]?.etapa || "";
@@ -12839,7 +12887,10 @@ export default function DashboardConstrutora({ userEmail }) {
                         <td className="py-2 pr-3 text-xs whitespace-nowrap">{dataISOparaBR(nota.data) || nota.data}</td>
                         <td className="py-2 pr-3 text-xs whitespace-nowrap" title={fmtCnpj(nota.cnpjTomador)}>{nota.cnpjNome || "Matriz"}</td>
                         <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.tipo || "NFS-e"}{/cancel/i.test(nota.situacao || "") ? <span style={{ color: "#B23A2E" }}> · cancelada</span> : null}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.numero}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">
+                          {nota.numero}{" "}
+                          <button onClick={() => abrirNotaFiscal(nota)} title={nota.arquivo ? "Ver a nota" : "Só o resumo no Gestão (sem o XML)"} className="ml-1" style={{ color: nota.arquivo ? "#3D6E8C" : "#B8B4A8" }}>👁 ver</button>
+                        </td>
                         <td className="py-2 pr-3 text-xs">{nota.prestador}</td>
                         <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.valorNota)}</td>
                         <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.issRetido ? formatBRL(nota.issRetido) : "—"}</td>
