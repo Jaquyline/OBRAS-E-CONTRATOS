@@ -5011,9 +5011,19 @@ export default function DashboardConstrutora({ userEmail }) {
           if (semXml.length) {
             setProgressoFiscal(`${a.nome || fmtCnpj(cnpj)}: dando ciência em ${semXml.length} NF-e para liberar o XML…`);
             const c = await chamarFiscal({ acao: "ciencia", cnpj, chaves: semXml }).catch((e) => ({ erro: e.message }));
-            (c.resultados || []).filter((x) => x.ok).forEach((x) => { const id = `${cnpj}-nfe-${x.chave}`; if (base.notas[id]) base.notas[id] = { ...base.notas[id], cienciaEm: new Date().toISOString() }; });
+            const agoraC = new Date().toISOString();
+            (c.resultados || []).forEach((x) => {
+              const id = `${cnpj}-nfe-${x.chave}`;
+              if (!base.notas[id]) return;
+              base.notas[id] = x.ok ? { ...base.notas[id], cienciaEm: agoraC, cienciaErro: null } : { ...base.notas[id], cienciaErro: { em: agoraC, cStat: x.cStat, motivo: x.xMotivo } };
+            });
             if (c.erro) avisos.push(`Ciência das NF-e: ${c.erro}`);
-            else avisos.push(`${semXml.length} NF-e vieram só em resumo: ciência registrada — o XML completo chega numa próxima busca (a SEFAZ libera em seguida ou em até 1 hora).`);
+            else {
+              const okC = (c.resultados || []).filter((x) => x.ok).length;
+              const ruins = (c.resultados || []).filter((x) => !x.ok);
+              if (okC) avisos.push(`${okC} NF-e vieram só em resumo: ciência registrada — o XML completo chega numa próxima busca (a SEFAZ libera em seguida ou em até 1 hora).`);
+              if (ruins.length) avisos.push(`A SEFAZ recusou a ciência de ${ruins.length} NF-e: ${[...new Set(ruins.map((x) => `${x.cStat} ${x.xMotivo}`))].slice(0, 3).join("; ")}. Elas continuam só em resumo.`);
+            }
           }
         }
         base.nsu[cnpj] = nsu;
@@ -5110,7 +5120,7 @@ export default function DashboardConstrutora({ userEmail }) {
       const quando = nota.cienciaEm ? new Date(new Date(nota.cienciaEm).getTime() + 3600e3).toLocaleString("pt-BR") : "";
       w0.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${e0(nota.tipo)} ${e0(nota.numero)} — resumo</title><style>body{font:13px/1.5 Arial,sans-serif;max-width:800px;margin:24px auto;padding:0 16px;color:#111}h1{font-size:18px;margin:0 0 4px}.av{background:#fdf5e7;border:1px solid #e8c98f;padding:10px 12px;border-radius:6px;margin:12px 0}table{border-collapse:collapse;width:100%}td{border-bottom:1px solid #eee;padding:6px 4px}td:first-child{color:#555;width:200px}</style></head><body>
         <h1>${e0(nota.tipo)} nº ${e0(nota.numero)} — resumo da SEFAZ</h1>
-        <div class="av">${nota.situacao === "Cancelada" ? "<b style='color:#b23a2e'>NF-e CANCELADA.</b> " : ""}O XML completo (com os itens) ainda não chegou. ${nota.cienciaEm ? `A ciência da operação foi registrada em ${e0(new Date(nota.cienciaEm).toLocaleString("pt-BR"))}; o painel baixa o XML sozinho a partir de ${e0(quando)}.` : "Clique em “⬇ Buscar novas notas”: o painel registra a ciência da operação e baixa o XML na busca seguinte."}</div>
+        <div class="av">${nota.situacao === "Cancelada" ? "<b style='color:#b23a2e'>NF-e CANCELADA.</b> " : ""}O XML completo (com os itens) ainda não chegou. ${!nota.cienciaEm && nota.cienciaErro ? `<b>A SEFAZ recusou a ciência da operação</b> em ${e0(new Date(nota.cienciaErro.em).toLocaleString("pt-BR"))}: <b>${e0(nota.cienciaErro.cStat)} ${e0(nota.cienciaErro.motivo)}</b>. Sem a ciência, a SEFAZ só envia o resumo. ` : ""}${nota.cienciaEm ? `A ciência da operação foi registrada em ${e0(new Date(nota.cienciaEm).toLocaleString("pt-BR"))}; o painel baixa o XML sozinho a partir de ${e0(quando)}.` : "Clique em “⬇ Buscar novas notas”: o painel registra a ciência da operação e baixa o XML na busca seguinte."}</div>
         <table><tr><td>Fornecedor</td><td><b>${e0(nota.prestador)}</b> — CNPJ ${e0(fmtCnpj(nota.prestadorDoc))}</td></tr><tr><td>Emissão</td><td>${e0(dataISOparaBR(nota.data))}</td></tr><tr><td>Valor da nota</td><td><b>${e0(formatBRL(nota.valorNota))}</b></td></tr><tr><td>Situação</td><td>${e0(nota.situacao || "Autorizada")}</td></tr><tr><td>Chave de acesso</td><td style="word-break:break-all">${e0(nota.chave)}</td></tr><tr><td>Tomador</td><td>${e0(nota.cnpjNome || "")} — CNPJ ${e0(fmtCnpj(nota.cnpjTomador))}</td></tr></table>
         <p><a href="https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=completa&tipoConteudo=XbSeqxE8pl8=" target="_blank" rel="noreferrer">Consultar a nota completa na SEFAZ</a> (cole a chave acima)</p></body></html>`);
       w0.document.close();
