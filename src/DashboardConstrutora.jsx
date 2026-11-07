@@ -4760,6 +4760,8 @@ export default function DashboardConstrutora({ userEmail }) {
   const STORAGE_KEY_CNPJS_FISCAIS = prefixoEmpresa + "fiscal-cnpjs-extras";
   const [cnpjsFiscaisExtras, setCnpjsFiscaisExtras] = useState([]);
   const [filtroCnpjFiscal, setFiltroCnpjFiscal] = useState("");
+  const [buscaFiscal, setBuscaFiscal] = useState("");
+  const [filtroSitFiscal, setFiltroSitFiscal] = useState("");
   const [novoCnpjFiscal, setNovoCnpjFiscal] = useState({ cnpj: "", nome: "", obra: "" });
   useEffect(() => {
     let cancel = false;
@@ -4950,6 +4952,27 @@ export default function DashboardConstrutora({ userEmail }) {
     return out;
   }, [notasFiscaisEncontradas, notasCompra, custosItens]);
   const [levarMesmoAssim, setLevarMesmoAssim] = useState({});
+  // pesquisa na lista: fornecedor, nº da nota, CNPJ do fornecedor ou valor (ex.: 1.550 ou 1550,00)
+  const notasFiscaisFiltradas = useMemo(() => {
+    const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const q = norm(buscaFiscal).trim();
+    const qd = buscaFiscal.replace(/\D/g, "");
+    const qv = Number(buscaFiscal.replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", "."));
+    return notasFiscaisEncontradas.filter((n) => {
+      if (filtroCnpjFiscal && n.cnpjTomador !== filtroCnpjFiscal) return false;
+      if (filtroSitFiscal === "aberto" && pagamentoPorNota[n.id]) return false;
+      if (filtroSitFiscal === "pago" && !pagamentoPorNota[n.id]) return false;
+      if (filtroSitFiscal === "cadastrada" && !notaJaCadastrada[n.id]) return false;
+      if (filtroSitFiscal === "nova" && (notaJaCadastrada[n.id] || custosItens.some((c) => c.id === `custo-${n.id}`))) return false;
+      if (filtroSitFiscal === "nfse" && n.tipo !== "NFS-e") return false;
+      if (filtroSitFiscal === "nfe" && n.tipo !== "NF-e") return false;
+      if (!q) return true;
+      if (norm(`${n.prestador} ${n.numero} ${n.tipo} ${n.cnpjNome || ""} ${n.natOp || ""}`).includes(q)) return true;
+      if (qd.length >= 3 && (String(n.prestadorDoc || "").includes(qd) || String(n.numero || "").replace(/\D/g, "") === qd)) return true;
+      if (!Number.isNaN(qv) && qv > 0 && [n.valorNota, n.valorLiquido].some((v) => Math.abs(Number(v) - qv) < 0.01)) return true;
+      return false;
+    });
+  }, [notasFiscaisEncontradas, buscaFiscal, filtroCnpjFiscal, filtroSitFiscal, pagamentoPorNota, notaJaCadastrada, custosItens]);
 
   function handleLevarNotaParaCusto(nota) {
     const obraEscolhida = obraEscolhidaPorNota[nota.id] || NOMES_OBRAS[0];
@@ -12762,6 +12785,31 @@ export default function DashboardConstrutora({ userEmail }) {
                 </button>
               </div>
 
+              {notasFiscaisEncontradas.length > 0 && (
+                <div className="flex items-end gap-3 flex-wrap mb-3">
+                  <input
+                    type="search"
+                    value={buscaFiscal}
+                    onChange={(e) => setBuscaFiscal(e.target.value)}
+                    placeholder="Pesquisar fornecedor, nº da nota, CNPJ ou valor…"
+                    className="text-sm px-3 py-2 rounded-sm border outline-none"
+                    style={{ borderColor: "#DCD7C9", background: "#FFFFFF", minWidth: 320, flex: "1 1 320px" }}
+                  />
+                  <select value={filtroSitFiscal} onChange={(e) => setFiltroSitFiscal(e.target.value)} className="text-sm px-3 py-2 rounded-sm border outline-none" style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}>
+                    <option value="">Todas as notas</option>
+                    <option value="nova">Ainda não cadastradas</option>
+                    <option value="cadastrada">Já cadastradas</option>
+                    <option value="aberto">Em aberto (sem pagamento)</option>
+                    <option value="pago">Pagas</option>
+                    <option value="nfse">Só NFS-e (serviços)</option>
+                    <option value="nfe">Só NF-e (compras)</option>
+                  </select>
+                  <span className="text-xs" style={{ color: "#6B6F76" }}>
+                    {notasFiscaisFiltradas.length} de {notasFiscaisEncontradas.length} nota(s) · {formatBRL(notasFiscaisFiltradas.reduce((t, n) => t + (Number(n.valorNota) || 0), 0))}
+                  </span>
+                </div>
+              )}
+
               {erroBuscaNotasFiscais && (
                 <div className="mb-4 text-xs px-3 py-2 rounded-sm" style={{ color: "#8A6A3E", background: "#FBEBDB" }}>
                   {erroBuscaNotasFiscais}
@@ -12786,7 +12834,7 @@ export default function DashboardConstrutora({ userEmail }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {notasFiscaisEncontradas.filter((n) => !filtroCnpjFiscal || n.cnpjTomador === filtroCnpjFiscal).map((nota) => (
+                    {notasFiscaisFiltradas.map((nota) => (
                       <tr key={nota.id} style={{ borderBottom: "1px solid #E4E0D6" }}>
                         <td className="py-2 pr-3 text-xs whitespace-nowrap">{dataISOparaBR(nota.data) || nota.data}</td>
                         <td className="py-2 pr-3 text-xs whitespace-nowrap" title={fmtCnpj(nota.cnpjTomador)}>{nota.cnpjNome || "Matriz"}</td>
