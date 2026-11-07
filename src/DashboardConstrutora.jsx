@@ -4926,6 +4926,31 @@ export default function DashboardConstrutora({ userEmail }) {
     return out;
   }, [notasFiscaisEncontradas, extrato]);
 
+  // A nota do Gestão já está no painel? (cadastrada em Notas de compra ou já lançada em Custos das obras)
+  // Mesmo fornecedor (2 primeiras palavras do nome), mesmo valor (cheio ou líquido) e data até 5 dias de diferença;
+  // nos custos também pelo nº da nota no nome do item. Assim a mesma nota não entra duas vezes.
+  const notaJaCadastrada = useMemo(() => {
+    const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]+/g, " ");
+    const pal = (t) => norm(t).split(/\s+/).filter((w) => w.length >= 3 && !/^(ltda|eireli|com|comercio|servicos|materiais|de|da|do|epp|me)$/.test(w)).slice(0, 2);
+    const mesmoForn = (a, b) => { const pa = pal(a), nb = norm(b); return pa.length > 0 && pa.every((w) => nb.includes(w)); };
+    const dia = (br) => { const iso = dataBRparaISO(br) || br; return iso ? new Date(iso + "T12:00:00").getTime() / 864e5 : NaN; };
+    const out = {};
+    notasFiscaisEncontradas.forEach((n) => {
+      const tn = dia(n.data);
+      const valores = [n.valorNota, n.valorLiquido].map(Number);
+      const igual = (v) => valores.some((x) => Math.abs(Number(v) - x) < 0.01);
+      const nc = (notasCompra || []).find((c) => (mesmoForn(n.prestador, c.fornecedor) || mesmoForn(c.fornecedor, n.prestador)) && igual(c.valorTotal) && (isNaN(dia(c.dataEmissao)) || Math.abs(dia(c.dataEmissao) - tn) <= 5));
+      if (nc) { out[n.id] = `já em Notas de compra (${nc.fornecedor}, ${formatBRL(nc.valorTotal)}${nc.dataEmissao ? ", " + nc.dataEmissao : ""})`; return; }
+      if ((custosItens || []).some((c) => c.id === `custo-${n.id}` || c.id === `custo-nfse-${n.id}`)) return; // levada por aqui: aparece "✓ levada"
+      const ci = (custosItens || []).find((c) =>
+        (n.numero && new RegExp(`n[ºo°]\\s*${String(n.numero).replace(/\D/g, "")}\\b`, "i").test(c.item || "") && mesmoForn(n.prestador, c.item)) ||
+        (igual(c.gastoReal) && mesmoForn(n.prestador, `${c.item || ""} ${c.observacoes || ""}`)));
+      if (ci) out[n.id] = `já em Custos (${ci.obra}${ci.item ? " — " + ci.item : ""})`;
+    });
+    return out;
+  }, [notasFiscaisEncontradas, notasCompra, custosItens]);
+  const [levarMesmoAssim, setLevarMesmoAssim] = useState({});
+
   function handleLevarNotaParaCusto(nota) {
     const obraEscolhida = obraEscolhidaPorNota[nota.id] || NOMES_OBRAS[0];
     const etapaDestino = ETAPAS_CUSTO_ATUAL[0]?.etapa || "";
@@ -12782,7 +12807,14 @@ export default function DashboardConstrutora({ userEmail }) {
                           )}
                         </td>
                         <td className="py-2 pr-3 whitespace-nowrap">
-                          {notasLevadasParaCusto[nota.id] || custosItens.some((c) => c.id === `custo-${nota.id}` || c.id === `custo-nfse-${nota.id}`) ? (
+                          {notaJaCadastrada[nota.id] && !levarMesmoAssim[nota.id] && !notasLevadasParaCusto[nota.id] ? (
+                            <span className="text-xs" style={{ color: "#A4640B" }} title={notaJaCadastrada[nota.id]}>
+                              ⚠ {notaJaCadastrada[nota.id]}{" "}
+                              <button onClick={() => setLevarMesmoAssim((p) => ({ ...p, [nota.id]: true }))} className="underline" style={{ color: "#6B6F76" }} title="Só se for outra nota, diferente da já cadastrada">
+                                é outra
+                              </button>
+                            </span>
+                          ) : notasLevadasParaCusto[nota.id] || custosItens.some((c) => c.id === `custo-${nota.id}` || c.id === `custo-nfse-${nota.id}`) ? (
                             <span className="text-xs" style={{ color: "#4F7A5B" }}>
                               ✓ levada
                             </span>
