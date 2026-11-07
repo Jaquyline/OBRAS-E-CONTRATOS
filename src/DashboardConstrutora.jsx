@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import forge from "node-forge";
 import { supabase, criarClienteParaNovoLogin } from "./lib/supabaseClient.js";
 import { htmlDanfseOficial } from "./lib/danfse-oficial.js";
+import { lerXmlNfse, lerDocNfe } from "./lib/fiscal-xml.js";
 
 // ---- Importação de PDF: extração por padrão de texto (sem IA) ----
 
@@ -4866,45 +4867,158 @@ export default function DashboardConstrutora({ userEmail }) {
     setCertificadoFiscal(null);
   }
 
-  // Notas tomadas (NFS-e de serviços e NF-e de compras) capturadas pelo Vetor Gestão com o certificado A1 da empresa.
-  // O painel chama a função /api/notas-gestao (servidor do Obras), que repassa ao Gestão com a chave combinada.
-  async function handleBuscarNotasFiscais() {
+  // Notas tomadas (NFS-e de serviços e NF-e de compras) capturadas PELO PRÓPRIO OBRAS, com o certificado A1 guardado aqui
+  // (independente do Vetor Gestão). Ficam salvas no painel: a busca só traz o que é novo (por NSU, em cada CNPJ).
+  const STORAGE_KEY_FISCAL_NOTAS = prefixoEmpresa + "fiscal-notas-tomadas";
+  const [fiscalBase, setFiscalBase] = useState({ notas: {}, nsu: {} });
+  const [progressoFiscal, setProgressoFiscal] = useState("");
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const r = await window.storage.get(STORAGE_KEY_FISCAL_NOTAS, false).catch(() => null);
+      if (!cancel) setFiscalBase(r ? JSON.parse(r.value) : { notas: {}, nsu: {} });
+    })();
+    return () => { cancel = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [STORAGE_KEY_FISCAL_NOTAS]);
+  const alvosFiscais = () => {
     const principal = String(empresaInfo.cnpj || "").replace(/\D/g, "");
-    const alvos = [
+    return [
       ...(principal.length === 14 ? [{ cnpj: principal, nome: "Matriz", obra: "" }] : []),
       ...cnpjsFiscaisExtras.filter((x) => String(x.cnpj).replace(/\D/g, "").length === 14),
     ];
-    if (!alvos.length) {
-      setErroBuscaNotasFiscais("Cadastre o CNPJ desta empresa para buscar as notas no Gestão.");
-      return;
-    }
+  };
+  // mostra as notas guardadas no período e CNPJs escolhidos
+  function montarListaFiscal(base) {
     const hoje = new Date().toISOString().slice(0, 10);
     const de = filtroDataDeFiscal || `${hoje.slice(0, 4)}-01-01`;
     const ate = filtroDataAteFiscal || hoje;
+    const alvos = alvosFiscais();
+    const nomeDe = Object.fromEntries(alvos.map((a) => [a.cnpj, a]));
+    const lista = Object.values(base.notas || {})
+      .filter((n) => nomeDe[n.cnpjTomador] && n.data >= de && n.data <= ate)
+      .map((n) => ({ ...n, cnpjNome: nomeDe[n.cnpjTomador].nome || fmtCnpj(n.cnpjTomador), obraPadrao: nomeDe[n.cnpjTomador].obra || "" }))
+      .sort((a, b) => a.data.localeCompare(b.data));
+    setNotasFiscaisEncontradas(lista);
+    setObraEscolhidaPorNota((prev) => { const o = { ...prev }; lista.forEach((n) => { if (n.obraPadrao && !o[n.id]) o[n.id] = n.obraPadrao; }); return o; });
+    return lista;
+  }
+  // a lista acompanha o período, os CNPJs e as notas guardadas
+  useEffect(() => {
+    if (Object.keys(fiscalBase.notas || {}).length) montarListaFiscal(fiscalBase);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fiscalBase, filtroDataDeFiscal, filtroDataAteFiscal, cnpjsFiscaisExtras]);
+  async function handleBuscarNotasFiscais() {
+    setErroBuscaNotasFiscais(null);
+    const l = montarListaFiscal(fiscalBase);
+    if (!l.length) setErroBuscaNotasFiscais('Nenhuma nota guardada nesse período. Clique em "⬇ Buscar novas notas" para trazer do Portal Nacional e da SEFAZ.');
+  }
+  async function chamarFiscal(corpo) {
+    const token = (await supabase.auth.getSession()).data.session?.access_token || "";
+    const r = await fetch("/api/fiscal", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ chaveCertificado: STORAGE_KEY_CERTIFICADO_FISCAL, ...corpo }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `erro ${r.status}`);
+    return j;
+  }
+  // busca as novas: NFS-e (Portal Nacional) e NF-e (SEFAZ) de cada CNPJ; dá ciência nas NF-e que vieram só em resumo
+  async function capturarNotasFiscais() {
+    if (!certificadoFiscal) return setErroBuscaNotasFiscais('Envie o certificado A1 na seção "Certificado digital" antes de buscar.');
+    const alvos = alvosFiscais();
+    if (!alvos.length) return setErroBuscaNotasFiscais("Cadastre o CNPJ desta empresa para buscar as notas.");
     setBuscandoNotasFiscais(true);
     setErroBuscaNotasFiscais(null);
+    const base = { notas: { ...(fiscalBase.notas || {}) }, nsu: { ...(fiscalBase.nsu || {}) }, canc: { ...(fiscalBase.canc || {}) } };
+    const avisos = [];
+    let novas = 0;
+    const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
     try {
-      const token = (await supabase.auth.getSession()).data.session?.access_token || "";
-      const todas = [];
       for (const a of alvos) {
         const cnpj = String(a.cnpj).replace(/\D/g, "");
-        const resp = await fetch(`/api/notas-gestao?cnpj=${cnpj}&de=${de}&ate=${ate}`, { headers: { Authorization: `Bearer ${token}` } });
-        const dados = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(`${a.nome || fmtCnpj(cnpj)}: ${dados.error || "erro " + resp.status}`);
-        (dados.notas || []).forEach((n) => todas.push({ ...n, id: `${cnpj}-${n.id}`, cnpjTomador: cnpj, cnpjNome: a.nome || fmtCnpj(cnpj), obraPadrao: a.obra || "" }));
+        const nsu = { nfse: 0, nfe: 0, ...(base.nsu[cnpj] || {}) };
+        // ---- NFS-e
+        for (let rodada = 0; rodada < 40; rodada++) {
+          setProgressoFiscal(`${a.nome || fmtCnpj(cnpj)}: NFS-e no Portal Nacional… ${novas} nota(s) nova(s)`);
+          const j = await chamarFiscal({ acao: "nfse", cnpj, nsu: nsu.nfse });
+          for (const d of j.docs || []) {
+            if (/evento/i.test(d.tipo)) {
+              const ch = (d.xml.match(/<chNFSe>(\d{50})<\/chNFSe>/) || [])[1] || d.chave;
+              const id = `${cnpj}-nfse-${ch}`;
+              if (/101101|105102|cancel|substitu/i.test(d.xml)) {
+                base.canc[id] = /105102|substitu/i.test(d.xml) ? "Substituída" : "Cancelada";
+                if (base.notas[id]) base.notas[id] = { ...base.notas[id], situacao: base.canc[id] };
+              }
+              continue;
+            }
+            const n = lerXmlNfse(d.xml);
+            if (!n || n.tomDoc !== cnpj) continue; // só as notas TOMADAS por este CNPJ
+            const id = `${cnpj}-nfse-${n.chave || n.id}`;
+            const pcc = r2((n.pis || 0) + (n.cofins || 0) + (n.csll || 0));
+            const ret = r2((n.issRet || 0) + (n.irrf || 0) + pcc + (n.inss || 0));
+            if (!base.notas[id]) novas++;
+            base.notas[id] = {
+              id, tipo: "NFS-e", cnpjTomador: cnpj, data: String(n.emissao).slice(0, 10), numero: String(n.numero || ""), prestador: n.prestNome, prestadorDoc: n.prestDoc,
+              valorNota: n.valor, issRetido: n.issRet || 0, ir: n.irrf || 0, pcc, inss: n.inss || 0, valorLiquido: n.liquido || r2(n.valor - ret),
+              situacao: (typeof base.canc[id] === "string" && base.canc[id]) || (base.notas[id] && /cancel|substitu/i.test(base.notas[id].situacao || "") && base.notas[id].situacao) || n.situacao, chave: n.chave, competencia: n.competencia, descricao: n.descricao, temXml: true,
+            };
+            await window.storage.set(prefixoEmpresa + "fiscal-xml:" + id, d.xml, false);
+          }
+          nsu.nfse = j.ultimoNsu || nsu.nfse;
+          if (j.fim) break;
+        }
+        // ---- NF-e (SEFAZ): sem documentos novos ela pede 1 hora de intervalo
+        const ultimaNfe = (base.nsu[cnpj] || {}).nfeEm;
+        if (ultimaNfe && Date.now() - new Date(ultimaNfe).getTime() < 3600e3 && (base.nsu[cnpj] || {}).nfeFim) {
+          avisos.push(`${a.nome || fmtCnpj(cnpj)}: NF-e já consultada há menos de 1 hora (regra da SEFAZ) — busque de novo mais tarde.`);
+        } else {
+          for (let rodada = 0; rodada < 10; rodada++) {
+            setProgressoFiscal(`${a.nome || fmtCnpj(cnpj)}: NF-e na SEFAZ… ${novas} nota(s) nova(s)`);
+            const j = await chamarFiscal({ acao: "nfe", cnpj, nsu: nsu.nfe, uf: "SC" });
+            for (const d of j.docs || []) {
+              const n = lerDocNfe(d);
+              if (!n || !n.chave) continue;
+              const id = `${cnpj}-nfe-${n.chave}`;
+              if (n.tipo === "evento") {
+                if (n.tpEvento === "110111") { base.canc[id] = true; if (base.notas[id]) base.notas[id] = { ...base.notas[id], situacao: "Cancelada" }; }
+                continue;
+              }
+              if (String(n.tpNF || "1") !== "1" || String(n.emitDoc || "").replace(/\D/g, "") === cnpj) continue;
+              const ja = base.notas[id];
+              if (!ja) novas++;
+              base.notas[id] = {
+                ...(ja || {}), id, tipo: "NF-e", cnpjTomador: cnpj, data: String(n.dhEmi).slice(0, 10), numero: String(n.numero || ""), prestador: n.emitNome, prestadorDoc: String(n.emitDoc || "").replace(/\D/g, ""),
+                valorNota: n.valor, issRetido: 0, ir: 0, pcc: 0, inss: 0, valorLiquido: n.valor, situacao: (ja && ja.situacao === "Cancelada") || base.canc[id] ? "Cancelada" : n.situacao, chave: n.chave, natOp: n.natOp || (ja && ja.natOp) || "",
+                temXml: (ja && ja.temXml) || n.tipo === "proc",
+              };
+              if (n.tipo === "proc") await window.storage.set(prefixoEmpresa + "fiscal-xml:" + id, d.xml, false);
+            }
+            nsu.nfe = j.ultNSU || nsu.nfe;
+            if (j.cStat && !["137", "138"].includes(String(j.cStat))) { avisos.push(`${a.nome || fmtCnpj(cnpj)}: SEFAZ respondeu ${j.cStat} — ${j.xMotivo}`); break; }
+            if (j.fim || String(j.cStat) === "137") { nsu.nfeEm = new Date().toISOString(); nsu.nfeFim = true; break; }
+          }
+          // ciência da operação nas NF-e que vieram só em resumo: o XML completo chega na próxima busca
+          const semXml = Object.values(base.notas).filter((n) => n.cnpjTomador === cnpj && n.tipo === "NF-e" && !n.temXml && !n.cienciaEm && n.situacao !== "Cancelada").map((n) => n.chave).slice(0, 100);
+          if (semXml.length) {
+            setProgressoFiscal(`${a.nome || fmtCnpj(cnpj)}: dando ciência em ${semXml.length} NF-e para liberar o XML…`);
+            const c = await chamarFiscal({ acao: "ciencia", cnpj, chaves: semXml }).catch((e) => ({ erro: e.message }));
+            (c.resultados || []).filter((x) => x.ok).forEach((x) => { const id = `${cnpj}-nfe-${x.chave}`; if (base.notas[id]) base.notas[id] = { ...base.notas[id], cienciaEm: new Date().toISOString() }; });
+            if (c.erro) avisos.push(`Ciência das NF-e: ${c.erro}`);
+            else avisos.push(`${semXml.length} NF-e vieram só em resumo: ciência registrada — o XML completo chega numa próxima busca (a SEFAZ libera em seguida ou em até 1 hora).`);
+          }
+        }
+        base.nsu[cnpj] = nsu;
+        await window.storage.set(STORAGE_KEY_FISCAL_NOTAS, JSON.stringify(base), false);
+        setFiscalBase(base);
       }
-      todas.sort((x, y) => x.data.localeCompare(y.data));
-      setNotasFiscaisEncontradas(todas);
-      // a obra do CNPJ (ex.: patrimônio de afetação da obra) já vem escolhida para levar ao custo
-      setObraEscolhidaPorNota((prev) => { const o = { ...prev }; todas.forEach((n) => { if (n.obraPadrao && !o[n.id]) o[n.id] = n.obraPadrao; }); return o; });
-      const dados = { notas: todas };
-      if (!(dados.notas || []).length)
-        setErroBuscaNotasFiscais("Nenhuma nota tomada no período. Confira no Vetor Gestão se as notas desta empresa já foram buscadas (Gestão Fiscal → NFS-e recebidas e NF-e de entrada).");
+      montarListaFiscal(base);
+      setErroBuscaNotasFiscais(`${novas} nota(s) nova(s) trazida(s).${avisos.length ? " " + avisos.join(" ") : ""}`);
     } catch (err) {
-      setErroBuscaNotasFiscais("Não consegui buscar as notas no Gestão: " + err.message);
-      setNotasFiscaisEncontradas([]);
+      await window.storage.set(STORAGE_KEY_FISCAL_NOTAS, JSON.stringify(base), false).catch(() => {});
+      setFiscalBase(base);
+      montarListaFiscal(base);
+      setErroBuscaNotasFiscais("Busca interrompida: " + err.message + (novas ? ` (${novas} nota(s) nova(s) já guardadas)` : ""));
     } finally {
       setBuscandoNotasFiscais(false);
+      setProgressoFiscal("");
     }
   }
 
@@ -4977,20 +5091,18 @@ export default function DashboardConstrutora({ userEmail }) {
 
   // Ver a nota: abre o PDF guardado no Gestão ou monta uma visualização a partir do XML (NF-e com os itens; NFS-e com o serviço)
   async function abrirNotaFiscal(nota) {
-    if (!nota.arquivo) {
-      setErroBuscaNotasFiscais(`A ${nota.tipo} nº ${nota.numero} ainda está só com o resumo no Gestão (sem o XML completo). No Gestão, busque de novo as NF-e/NFS-e desse mês para baixar o arquivo.`);
+    if (!nota.temXml) {
+      setErroBuscaNotasFiscais(`A ${nota.tipo} nº ${nota.numero} ainda está só com o resumo (sem o XML completo). A ciência já foi dada: clique em "⬇ Buscar novas notas" mais tarde para baixar o XML.`);
       return;
     }
     const w = window.open("", "_blank");
     if (!w) return setErroBuscaNotasFiscais("O navegador bloqueou a janela — libere pop-ups para este site.");
     w.document.write("<p style='font:14px Arial;padding:20px'>Abrindo a nota…</p>");
     try {
-      const token = (await supabase.auth.getSession()).data.session?.access_token || "";
-      const r = await fetch(`/api/notas-gestao?cnpj=${nota.cnpjTomador}&arquivo=${encodeURIComponent(nota.arquivo)}`, { headers: { Authorization: `Bearer ${token}` } });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.url) throw new Error(j.error || "arquivo não encontrado");
-      if (/\.pdf(\?|$)/i.test(nota.arquivo)) { w.location.href = j.url; return; }
-      const xml = await (await fetch(j.url)).text();
+      const rx = await window.storage.get(prefixoEmpresa + "fiscal-xml:" + nota.id, false);
+      if (!rx) throw new Error("o XML desta nota não está guardado — busque as notas de novo");
+      const xml = rx.value;
+      const j = { url: URL.createObjectURL(new Blob([xml], { type: "application/xml" })) };
       // NFS-e: o DANFSe no leiaute oficial do Portal Nacional (o mesmo do Gestão), montado a partir do XML
       if (nota.tipo !== "NF-e") {
         try {
@@ -5012,7 +5124,7 @@ export default function DashboardConstrutora({ userEmail }) {
       if (nota.tipo === "NF-e") {
         const emit = q(doc, "emit"), dest = q(doc, "dest"), tot = q(doc, "ICMSTot");
         const itens = [...doc.getElementsByTagNameNS("*", "det")].map((d) => { const p = q(d, "prod"); return `<tr><td>${esc(tg(p, "cProd"))}</td><td>${esc(tg(p, "xProd"))}</td><td>${esc(tg(p, "NCM"))}</td><td>${esc(tg(p, "CFOP"))}</td><td class="r">${esc((+tg(p, "qCom")).toLocaleString("pt-BR"))} ${esc(tg(p, "uCom"))}</td><td class="r">${brl(tg(p, "vUnCom"))}</td><td class="r">${brl(tg(p, "vProd"))}</td></tr>`; }).join("");
-        corpo = `<h1>NF-e nº ${esc(nota.numero)} — série ${esc(tg(doc, "serie"))}</h1><div class="sub">Emitida em ${esc(dataISOparaBR(nota.data))} · ${esc(tg(doc, "natOp"))} · Chave ${esc(nota.chave)}</div>
+        corpo = `${/cancel/i.test(nota.situacao || "") ? '<div style="background:#fbe3e0;color:#b23a2e;border:2px solid #b23a2e;padding:8px 12px;font-weight:700;font-size:16px;margin-bottom:10px;text-align:center">NF-e CANCELADA</div>' : ""}<h1>NF-e nº ${esc(nota.numero)} — série ${esc(tg(doc, "serie"))}</h1><div class="sub">Emitida em ${esc(dataISOparaBR(nota.data))} · ${esc(tg(doc, "natOp"))} · Chave ${esc(nota.chave)}</div>
           <div class="g"><div><b>Emitente</b><br>${esc(tg(emit, "xNome"))}<br>CNPJ ${esc(tg(emit, "CNPJ"))}<br>${esc([tg(q(emit, "enderEmit"), "xLgr"), tg(q(emit, "enderEmit"), "nro"), tg(q(emit, "enderEmit"), "xMun"), tg(q(emit, "enderEmit"), "UF")].filter(Boolean).join(", "))}</div>
           <div><b>Destinatário</b><br>${esc(tg(dest, "xNome"))}<br>CNPJ ${esc(tg(dest, "CNPJ") || tg(dest, "CPF"))}</div></div>
           <table><thead><tr><th>Cód.</th><th>Produto</th><th>NCM</th><th>CFOP</th><th class="r">Qtde</th><th class="r">Unitário</th><th class="r">Total</th></tr></thead><tbody>${itens}</tbody></table>
@@ -5027,7 +5139,7 @@ export default function DashboardConstrutora({ userEmail }) {
           <table class="tot"><tr><td>Valor da nota ${brl(nota.valorNota)}</td><td>ISS retido ${brl(nota.issRetido)}</td><td>IR ${brl(nota.ir)}</td><td>PIS/COFINS/CSLL ${brl(nota.pcc)}</td><td>INSS ${brl(nota.inss)}</td><td><b>Líquido ${brl(nota.valorLiquido)}</b></td></tr></table>`;
       }
       w.document.open();
-      w.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(nota.tipo)} ${esc(nota.numero)} — ${esc(nota.prestador)}</title><style>body{font:13px/1.4 Arial,sans-serif;color:#111;max-width:1000px;margin:20px auto;padding:0 16px}h1{font-size:18px;margin:0}.sub{color:#555;margin:2px 0 12px;font-size:12px;word-break:break-all}.g{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}.g div{border:1px solid #ddd;border-radius:6px;padding:8px}table{width:100%;border-collapse:collapse;margin:8px 0}th,td{border-bottom:1px solid #e3e3e3;padding:4px 6px;text-align:left;vertical-align:top}th{background:#f2f2f2;font-size:12px}.r{text-align:right;white-space:nowrap}.tot td{background:#f7f7f7;white-space:nowrap}.desc{white-space:pre-wrap;border:1px solid #eee;padding:8px;border-radius:6px}.obs{font-size:12px;color:#444}.bar{margin-bottom:12px}@media print{.bar{display:none}}</style></head><body><div class="bar"><button onclick="print()">🖨 Imprimir / PDF</button> <a href="${esc(j.url)}" download>⬇ Baixar XML</a></div>${corpo}</body></html>`);
+      w.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(nota.tipo)} ${esc(nota.numero)} — ${esc(nota.prestador)}</title><style>body{font:13px/1.4 Arial,sans-serif;color:#111;max-width:1000px;margin:20px auto;padding:0 16px}h1{font-size:18px;margin:0}.sub{color:#555;margin:2px 0 12px;font-size:12px;word-break:break-all}.g{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}.g div{border:1px solid #ddd;border-radius:6px;padding:8px}table{width:100%;border-collapse:collapse;margin:8px 0}th,td{border-bottom:1px solid #e3e3e3;padding:4px 6px;text-align:left;vertical-align:top}th{background:#f2f2f2;font-size:12px}.r{text-align:right;white-space:nowrap}.tot td{background:#f7f7f7;white-space:nowrap}.desc{white-space:pre-wrap;border:1px solid #eee;padding:8px;border-radius:6px}.obs{font-size:12px;color:#444}.bar{margin-bottom:12px}@media print{.bar{display:none}}</style></head><body><div class="bar"><button onclick="print()">🖨 Imprimir / PDF</button> <a href="${esc(j.url)}" download="${esc(nota.tipo + "_" + nota.numero)}.xml">⬇ Baixar XML</a>${nota.chave && nota.tipo === "NF-e" ? ` · <a href="https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=resumo&tipoConteudo=7PhJ+gAVw2g=" target="_blank" rel="noreferrer">Consultar situação na SEFAZ</a> (chave ${esc(nota.chave)})` : ""}</div>${corpo}</body></html>`);
       w.document.close();
     } catch (err) {
       w.close();
@@ -12842,32 +12954,18 @@ export default function DashboardConstrutora({ userEmail }) {
                   className="text-sm font-semibold px-4 py-2 rounded-sm"
                   style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
                 >
-                  {buscandoNotasFiscais ? "Buscando…" : "Buscar notas"}
+                  Mostrar notas do período
                 </button>
-                <details className="text-xs" style={{ color: "#3D6E8C" }}>
-                  <summary className="cursor-pointer font-semibold py-2">↻ Atualizar as notas no Gestão</summary>
-                  <div className="mt-1 p-2 rounded-sm border" style={{ borderColor: "#DCD7C9", background: "#FFFFFF", color: "#22252A" }}>
-                    <div className="mb-1" style={{ color: "#6B6F76" }}>
-                      Abre o Vetor Gestão já na empresa e no período e busca as notas novas pelo certificado A1 (a filial usa o da matriz).
-                      Quando terminar, volte aqui e clique em "Buscar notas".
-                    </div>
-                    {[{ cnpj: String(empresaInfo.cnpj || "").replace(/\D/g, ""), nome: "Matriz" }, ...cnpjsFiscaisExtras]
-                      .filter((x) => String(x.cnpj).length === 14)
-                      .map((x) => {
-                        const hoje = new Date().toISOString().slice(0, 10);
-                        const de = (filtroDataDeFiscal || `${hoje.slice(0, 4)}-01-01`).slice(0, 7);
-                        const ate = (filtroDataAteFiscal || hoje).slice(0, 7);
-                        const base = "https://gestao.contabilvetor.com.br/fiscal.html";
-                        return (
-                          <div key={x.cnpj} className="flex items-center gap-3 py-1">
-                            <b style={{ minWidth: 140 }}>{x.nome || fmtCnpj(x.cnpj)}</b>
-                            <a href={`${base}?emp=${x.cnpj}&mes=${de}&mesAte=${ate}&lado=recebidas&buscar=1#nfse`} target="_blank" rel="noreferrer" className="underline">NFS-e de serviços ({de.slice(5)}/{de.slice(0, 4)} a {ate.slice(5)}/{ate.slice(0, 4)})</a>
-                            <a href={`${base}?emp=${x.cnpj}&buscar=1#nfe-entrada`} target="_blank" rel="noreferrer" className="underline">NF-e de compras</a>
-                          </div>
-                        );
-                      })}
-                  </div>
-                </details>
+                <button
+                  onClick={capturarNotasFiscais}
+                  disabled={buscandoNotasFiscais}
+                  className="text-sm font-semibold px-4 py-2 rounded-sm"
+                  style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#4F7A5B" }}
+                  title="Busca direto no Portal Nacional (NFS-e) e na SEFAZ (NF-e) com o certificado A1 deste painel, para todos os CNPJs acima"
+                >
+                  {buscandoNotasFiscais ? "Buscando…" : "⬇ Buscar novas notas"}
+                </button>
+                {progressoFiscal && <span className="text-xs" style={{ color: "#6B6F76" }}>{progressoFiscal}</span>}
               </div>
 
               {notasFiscaisEncontradas.length > 0 && (
