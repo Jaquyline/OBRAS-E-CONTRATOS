@@ -7144,7 +7144,7 @@ export default function DashboardConstrutora({ userEmail }) {
         }
       `}</style>
 
-      <div className={`${activeTab === "fiscal" ? "max-w-none" : "max-w-6xl"} mx-auto px-5 py-8 sm:px-8`}>
+      <div className={`${activeTab === "fiscal" ? "max-w-none px-2 py-4 sm:px-3" : "max-w-6xl px-5 py-8 sm:px-8"} mx-auto`}>
         {mostrarTelaAdmin ? (
           <TelaAdminUsuariosEEmpresas
             empresasInfo={EMPRESAS_INFO}
@@ -12865,7 +12865,7 @@ export default function DashboardConstrutora({ userEmail }) {
 
         {activeTab === "fiscal" && (
           <>
-            <section className="rounded-md p-5 border mb-5" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
+            <section className="rounded-md p-3 border mb-5" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
               <h2
                 className="text-sm uppercase tracking-[0.12em] font-semibold mb-1"
                 style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
@@ -13121,7 +13121,7 @@ export default function DashboardConstrutora({ userEmail }) {
                             );
                           })()}
                         </td>
-                        <td className="py-1.5 pr-2 text-xs" style={{ minWidth: 180 }}>{nota.prestador}</td>
+                        <td className="py-1.5 pr-2 text-xs" style={{ minWidth: 140, maxWidth: 220 }}>{nota.prestador}</td>
                         <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{formatBRL(nota.valorNota)}</td>
                         <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{nota.issRetido ? formatBRL(nota.issRetido) : "—"}</td>
                         <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{nota.ir ? formatBRL(nota.ir) : "—"}</td>
@@ -13135,7 +13135,7 @@ export default function DashboardConstrutora({ userEmail }) {
                             <span style={{ color: "#A4640B" }}>em aberto</span>
                           )}
                         </td>
-                        <td className="py-2 pr-3 whitespace-nowrap">
+                        <td className="py-2 pr-1 whitespace-nowrap">
                           {notaJaCadastrada[nota.id] && !levarMesmoAssim[nota.id] && !notasLevadasParaCusto[nota.id] ? (
                             <span className="text-xs" style={{ color: "#A4640B" }} title={notaJaCadastrada[nota.id]}>
                               ⚠ {notaJaCadastrada[nota.id]}{" "}
@@ -13154,8 +13154,8 @@ export default function DashboardConstrutora({ userEmail }) {
                                 onChange={(e) =>
                                   setObraEscolhidaPorNota((prev) => ({ ...prev, [nota.id]: e.target.value }))
                                 }
-                                className="text-xs px-1.5 py-1 rounded-sm border outline-none"
-                                style={{ borderColor: "#DCD7C9" }}
+                                className="text-xs px-1 py-1 rounded-sm border outline-none"
+                                style={{ borderColor: "#DCD7C9", maxWidth: 120 }}
                               >
                                 {listaObras.map((o) => (
                                   <option key={o} value={o}>
@@ -13168,7 +13168,7 @@ export default function DashboardConstrutora({ userEmail }) {
                                 className="text-xs font-semibold px-2 py-1 rounded-sm whitespace-nowrap"
                                 style={{ color: "#F5F3EC", background: "#4F7A5B" }}
                               >
-                                Levar p/ custo
+                                Levar →
                               </button>
                             </div>
                           )}
