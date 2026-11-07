@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import forge from "node-forge";
 import { supabase, criarClienteParaNovoLogin } from "./lib/supabaseClient.js";
+import { htmlDanfseOficial } from "./lib/danfse-oficial.js";
 
 // ---- Importação de PDF: extração por padrão de texto (sem IA) ----
 
@@ -4990,6 +4991,18 @@ export default function DashboardConstrutora({ userEmail }) {
       if (!r.ok || !j.url) throw new Error(j.error || "arquivo não encontrado");
       if (/\.pdf(\?|$)/i.test(nota.arquivo)) { w.location.href = j.url; return; }
       const xml = await (await fetch(j.url)).text();
+      // NFS-e: o DANFSe no leiaute oficial do Portal Nacional (o mesmo do Gestão), montado a partir do XML
+      if (nota.tipo !== "NF-e") {
+        try {
+          const html = htmlDanfseOficial(xml, { chave: nota.chave, situacao: /cancel/i.test(nota.situacao || "") ? "NFS-e Cancelada" : "" });
+          w.document.open();
+          w.document.write(html);
+          w.document.close();
+          return;
+        } catch (e) {
+          // XML fora do padrão nacional: segue com a visualização simples abaixo
+        }
+      }
       const doc = new DOMParser().parseFromString(xml, "application/xml");
       const tg = (el, nome) => { const x = el && el.getElementsByTagNameNS("*", nome)[0]; return x ? x.textContent.trim() : ""; };
       const q = (el, nome) => el && el.getElementsByTagNameNS("*", nome)[0];
