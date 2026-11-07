@@ -4755,6 +4755,23 @@ export default function DashboardConstrutora({ userEmail }) {
   const [erroBuscaNotasFiscais, setErroBuscaNotasFiscais] = useState(null);
   const [obraEscolhidaPorNota, setObraEscolhidaPorNota] = useState({});
   const [notasLevadasParaCusto, setNotasLevadasParaCusto] = useState({});
+  // Outros CNPJs da mesma empresa (filial / patrimônio de afetação de uma obra): as notas tomadas por eles entram
+  // separadas e já com a obra escolhida para levar ao custo.
+  const STORAGE_KEY_CNPJS_FISCAIS = prefixoEmpresa + "fiscal-cnpjs-extras";
+  const [cnpjsFiscaisExtras, setCnpjsFiscaisExtras] = useState([]);
+  const [filtroCnpjFiscal, setFiltroCnpjFiscal] = useState("");
+  const [novoCnpjFiscal, setNovoCnpjFiscal] = useState({ cnpj: "", nome: "", obra: "" });
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const r = await window.storage.get(STORAGE_KEY_CNPJS_FISCAIS, false).catch(() => null);
+      if (!cancel) setCnpjsFiscaisExtras(r ? JSON.parse(r.value) : []);
+    })();
+    return () => { cancel = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [STORAGE_KEY_CNPJS_FISCAIS]);
+  const salvarCnpjsFiscais = (lista) => { setCnpjsFiscaisExtras(lista); window.storage.set(STORAGE_KEY_CNPJS_FISCAIS, JSON.stringify(lista), false); };
+  const fmtCnpj = (d) => String(d || "").replace(/\D/g, "").replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
 
   // Certificado digital — guardado pelo próprio painel (sem precisar de
   // terminal nem do painel da Supabase): a pessoa escolhe o arquivo .pfx e
@@ -4846,38 +4863,75 @@ export default function DashboardConstrutora({ userEmail }) {
     setCertificadoFiscal(null);
   }
 
+  // Notas tomadas (NFS-e de serviços e NF-e de compras) capturadas pelo Vetor Gestão com o certificado A1 da empresa.
+  // O painel chama a função /api/notas-gestao (servidor do Obras), que repassa ao Gestão com a chave combinada.
   async function handleBuscarNotasFiscais() {
-    if (!certificadoFiscal) {
-      setErroBuscaNotasFiscais('Envie o certificado digital na seção "Certificado digital" abaixo antes de buscar as notas.');
+    const principal = String(empresaInfo.cnpj || "").replace(/\D/g, "");
+    const alvos = [
+      ...(principal.length === 14 ? [{ cnpj: principal, nome: "Matriz", obra: "" }] : []),
+      ...cnpjsFiscaisExtras.filter((x) => String(x.cnpj).replace(/\D/g, "").length === 14),
+    ];
+    if (!alvos.length) {
+      setErroBuscaNotasFiscais("Cadastre o CNPJ desta empresa para buscar as notas no Gestão.");
       return;
     }
+    const hoje = new Date().toISOString().slice(0, 10);
+    const de = filtroDataDeFiscal || `${hoje.slice(0, 4)}-01-01`;
+    const ate = filtroDataAteFiscal || hoje;
     setBuscandoNotasFiscais(true);
     setErroBuscaNotasFiscais(null);
     try {
-      const resp = await fetch(
-        "https://jwernoyhesshbbfsmscy.supabase.co/functions/v1/buscar-nfse" +
-          `?empresa=${empresaAtual}&cnpj=${encodeURIComponent(empresaInfo.cnpj)}` +
-          `&dataDe=${filtroDataDeFiscal}&dataAte=${filtroDataAteFiscal}`,
-        { headers: { Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token || ""}` } }
-      );
-      if (!resp.ok) throw new Error("not_ready");
-      const dados = await resp.json();
-      setNotasFiscaisEncontradas(dados.notas || []);
+      const token = (await supabase.auth.getSession()).data.session?.access_token || "";
+      const todas = [];
+      for (const a of alvos) {
+        const cnpj = String(a.cnpj).replace(/\D/g, "");
+        const resp = await fetch(`/api/notas-gestao?cnpj=${cnpj}&de=${de}&ate=${ate}`, { headers: { Authorization: `Bearer ${token}` } });
+        const dados = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(`${a.nome || fmtCnpj(cnpj)}: ${dados.error || "erro " + resp.status}`);
+        (dados.notas || []).forEach((n) => todas.push({ ...n, id: `${cnpj}-${n.id}`, cnpjTomador: cnpj, cnpjNome: a.nome || fmtCnpj(cnpj), obraPadrao: a.obra || "" }));
+      }
+      todas.sort((x, y) => x.data.localeCompare(y.data));
+      setNotasFiscaisEncontradas(todas);
+      // a obra do CNPJ (ex.: patrimônio de afetação da obra) já vem escolhida para levar ao custo
+      setObraEscolhidaPorNota((prev) => { const o = { ...prev }; todas.forEach((n) => { if (n.obraPadrao && !o[n.id]) o[n.id] = n.obraPadrao; }); return o; });
+      const dados = { notas: todas };
+      if (!(dados.notas || []).length)
+        setErroBuscaNotasFiscais("Nenhuma nota tomada no período. Confira no Vetor Gestão se as notas desta empresa já foram buscadas (Gestão Fiscal → NFS-e recebidas e NF-e de entrada).");
     } catch (err) {
-      setErroBuscaNotasFiscais(
-        "A busca automática com o Portal Nacional ainda está sendo configurada (falta publicar a conexão segura com o certificado digital). Assim que estiver pronta, essa mesma tela já vai mostrar as notas aqui."
-      );
+      setErroBuscaNotasFiscais("Não consegui buscar as notas no Gestão: " + err.message);
       setNotasFiscaisEncontradas([]);
     } finally {
       setBuscandoNotasFiscais(false);
     }
   }
 
+  // Conferir com pagamentos: para cada nota, a saída do extrato com o mesmo valor (líquido ou cheio), de 5 dias antes
+  // até 120 dias depois da emissão; com mais de uma, a que tem o nome do fornecedor na descrição e a data mais próxima.
+  const pagamentoPorNota = useMemo(() => {
+    const out = {};
+    const usados = new Set();
+    const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const dia = (iso) => new Date(iso + "T12:00:00").getTime() / 864e5;
+    const saidas = (extrato || []).filter((l) => Number(l.valor) < 0).map((l) => ({ l, abs: Math.abs(Number(l.valor)), t: dia(dataBRparaISO(l.data) || "1900-01-01"), d: norm(l.descricao) }));
+    [...notasFiscaisEncontradas].sort((a, b) => a.data.localeCompare(b.data)).forEach((n) => {
+      if (/cancel/i.test(n.situacao || "")) return;
+      const tn = dia(n.data);
+      const pal = norm(n.prestador).split(/\s+/).filter((w) => w.length >= 4 && !/^(ltda|eireli|comercio|servicos|materiais)$/.test(w)).slice(0, 2);
+      const cand = saidas.filter((x) => !usados.has(x.l.id) && (Math.abs(x.abs - n.valorLiquido) < 0.01 || Math.abs(x.abs - n.valorNota) < 0.01) && x.t >= tn - 5 && x.t <= tn + 120);
+      if (!cand.length) return;
+      cand.sort((a, b) => (pal.some((w) => b.d.includes(w)) ? 1 : 0) - (pal.some((w) => a.d.includes(w)) ? 1 : 0) || Math.abs(a.t - tn) - Math.abs(b.t - tn));
+      usados.add(cand[0].l.id);
+      out[n.id] = cand[0].l;
+    });
+    return out;
+  }, [notasFiscaisEncontradas, extrato]);
+
   function handleLevarNotaParaCusto(nota) {
     const obraEscolhida = obraEscolhidaPorNota[nota.id] || NOMES_OBRAS[0];
     const etapaDestino = ETAPAS_CUSTO_ATUAL[0]?.etapa || "";
     const retencoesTexto = [
       nota.issRetido ? `ISS retido ${formatBRL(nota.issRetido)}` : null,
+      nota.pcc ? `PIS/COFINS/CSLL ${formatBRL(nota.pcc)}` : null,
       nota.pis ? `PIS ${formatBRL(nota.pis)}` : null,
       nota.cofins ? `COFINS ${formatBRL(nota.cofins)}` : null,
       nota.ir ? `IR ${formatBRL(nota.ir)}` : null,
@@ -4887,15 +4941,15 @@ export default function DashboardConstrutora({ userEmail }) {
       .filter(Boolean)
       .join(", ");
     const novoItem = {
-      id: `custo-nfse-${nota.id}`,
+      id: `custo-${nota.id}`,
       obra: obraEscolhida,
       etapa: etapaDestino,
-      item: `NFS-e nº ${nota.numero} — ${nota.prestador}`,
+      item: `${nota.tipo || "NFS-e"} nº ${nota.numero} — ${nota.prestador}`,
       unidade: "vb",
       quantidade: "",
       valorUnitario: "",
       gastoReal: String(nota.valorLiquido ?? nota.valorNota ?? ""),
-      observacoes: retencoesTexto ? `Retenções: ${retencoesTexto}` : "",
+      observacoes: [`Emitida em ${dataISOparaBR(nota.data)}`, retencoesTexto ? `Retenções: ${retencoesTexto}` : "", pagamentoPorNota[nota.id] ? `Paga em ${pagamentoPorNota[nota.id].data}` : ""].filter(Boolean).join(" · "),
       extra: true,
     };
     persistCustosItens([...custosItens, novoItem]);
@@ -12599,15 +12653,56 @@ export default function DashboardConstrutora({ userEmail }) {
                 className="text-sm uppercase tracking-[0.12em] font-semibold mb-1"
                 style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
               >
-                Fiscal — busca de notas (NFS-e)
+                Fiscal — notas de serviços e compras (do Vetor Gestão)
               </h2>
               <p className="text-xs mb-4" style={{ color: "#8A8D93" }}>
-                Busca automática das notas fiscais de serviço emitidas contra a {empresaInfo.label} no Portal
-                Nacional, usando o certificado digital A1 da empresa. Mostra o valor de cada nota já com o
-                detalhamento das retenções (ISS, PIS, COFINS, IR, CSLL, INSS).
+                Notas tomadas pela {empresaInfo.label} — NFS-e de serviços (Portal Nacional) e NF-e de compras (SEFAZ) —
+                que o Vetor Gestão já captura com o certificado A1 da empresa. Mostra as retenções, se a nota já foi
+                paga (saída do extrato com o mesmo valor) e leva a nota para o custo da obra.
               </p>
 
+              <div className="mb-4 text-xs rounded-sm border p-3" style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}>
+                <div className="font-semibold mb-1" style={{ color: "#22252A" }}>CNPJs desta empresa</div>
+                <div style={{ color: "#6B6F76" }}>
+                  Matriz: <b>{fmtCnpj(empresaInfo.cnpj) || "— (sem CNPJ cadastrado)"}</b>
+                  {cnpjsFiscaisExtras.map((x, i) => (
+                    <span key={x.cnpj} className="ml-3">
+                      · {x.nome || "Filial"}: <b>{fmtCnpj(x.cnpj)}</b>{x.obra ? ` → ${x.obra}` : ""}{" "}
+                      <button onClick={() => salvarCnpjsFiscais(cnpjsFiscaisExtras.filter((_, k) => k !== i))} style={{ color: "#B23A2E" }} title="Tirar este CNPJ da busca">✕</button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex items-end gap-2 flex-wrap mt-2">
+                  <input value={novoCnpjFiscal.cnpj} onChange={(e) => setNovoCnpjFiscal({ ...novoCnpjFiscal, cnpj: e.target.value })} placeholder="CNPJ da filial / afetação" className="px-2 py-1 rounded-sm border" style={{ borderColor: "#DCD7C9" }} />
+                  <input value={novoCnpjFiscal.nome} onChange={(e) => setNovoCnpjFiscal({ ...novoCnpjFiscal, nome: e.target.value })} placeholder="Nome (ex.: Isla Catalina — afetação)" className="px-2 py-1 rounded-sm border" style={{ borderColor: "#DCD7C9", minWidth: 220 }} />
+                  <select value={novoCnpjFiscal.obra} onChange={(e) => setNovoCnpjFiscal({ ...novoCnpjFiscal, obra: e.target.value })} className="px-2 py-1 rounded-sm border" style={{ borderColor: "#DCD7C9" }}>
+                    <option value="">Obra (opcional)</option>
+                    {listaObras.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                  <button
+                    onClick={() => {
+                      const d = novoCnpjFiscal.cnpj.replace(/\D/g, "");
+                      if (d.length !== 14) return setErroBuscaNotasFiscais("Digite os 14 números do CNPJ da filial / patrimônio de afetação.");
+                      if (d === String(empresaInfo.cnpj || "").replace(/\D/g, "") || cnpjsFiscaisExtras.some((x) => x.cnpj === d)) return;
+                      salvarCnpjsFiscais([...cnpjsFiscaisExtras, { cnpj: d, nome: novoCnpjFiscal.nome.trim(), obra: novoCnpjFiscal.obra }]);
+                      setNovoCnpjFiscal({ cnpj: "", nome: "", obra: "" });
+                    }}
+                    className="font-semibold px-3 py-1 rounded-sm" style={{ color: "#F5F3EC", background: "#3D6E8C" }}
+                  >+ Incluir CNPJ</button>
+                </div>
+              </div>
+
               <div className="flex items-end gap-3 flex-wrap mb-4">
+                {cnpjsFiscaisExtras.length > 0 && (
+                  <div>
+                    <label className="text-xs font-semibold uppercase tracking-wide block mb-1" style={{ color: "#8A8D93" }}>CNPJ</label>
+                    <select value={filtroCnpjFiscal} onChange={(e) => setFiltroCnpjFiscal(e.target.value)} className="text-sm px-3 py-2 rounded-sm border outline-none" style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}>
+                      <option value="">Todos</option>
+                      <option value={String(empresaInfo.cnpj || "").replace(/\D/g, "")}>Matriz</option>
+                      {cnpjsFiscaisExtras.map((x) => <option key={x.cnpj} value={x.cnpj}>{x.nome || fmtCnpj(x.cnpj)}</option>)}
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label className="text-xs font-semibold uppercase tracking-wide block mb-1" style={{ color: "#8A8D93" }}>
                     Data de
@@ -12652,7 +12747,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 <table className="w-full text-left" style={{ borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid #DCD7C9" }}>
-                      {["Data", "Nº", "Prestador", "Tomador", "Valor da nota", "ISS retido", "PIS", "COFINS", "IR", "CSLL", "INSS", "Valor líquido", ""].map(
+                      {["Data", "CNPJ", "Tipo", "Nº", "Fornecedor", "Valor da nota", "ISS retido", "IR", "PIS/COFINS/CSLL", "INSS", "Valor líquido", "Pagamento", ""].map(
                         (col) => (
                           <th
                             key={col}
@@ -12666,22 +12761,28 @@ export default function DashboardConstrutora({ userEmail }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {notasFiscaisEncontradas.map((nota) => (
+                    {notasFiscaisEncontradas.filter((n) => !filtroCnpjFiscal || n.cnpjTomador === filtroCnpjFiscal).map((nota) => (
                       <tr key={nota.id} style={{ borderBottom: "1px solid #E4E0D6" }}>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.data}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{dataISOparaBR(nota.data) || nota.data}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap" title={fmtCnpj(nota.cnpjTomador)}>{nota.cnpjNome || "Matriz"}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.tipo || "NFS-e"}{/cancel/i.test(nota.situacao || "") ? <span style={{ color: "#B23A2E" }}> · cancelada</span> : null}</td>
                         <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.numero}</td>
                         <td className="py-2 pr-3 text-xs">{nota.prestador}</td>
-                        <td className="py-2 pr-3 text-xs">{nota.tomador}</td>
                         <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.valorNota)}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.issRetido)}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.pis)}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.cofins)}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.ir)}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.csll)}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.inss)}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.issRetido ? formatBRL(nota.issRetido) : "—"}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.ir ? formatBRL(nota.ir) : "—"}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.pcc ? formatBRL(nota.pcc) : "—"}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.inss ? formatBRL(nota.inss) : "—"}</td>
                         <td className="py-2 pr-3 text-xs font-semibold whitespace-nowrap">{formatBRL(nota.valorLiquido)}</td>
+                        <td className="py-2 pr-3 text-xs whitespace-nowrap">
+                          {pagamentoPorNota[nota.id] ? (
+                            <span style={{ color: "#4F7A5B" }} title={pagamentoPorNota[nota.id].descricao}>✓ pago {pagamentoPorNota[nota.id].data}</span>
+                          ) : (
+                            <span style={{ color: "#A4640B" }}>em aberto</span>
+                          )}
+                        </td>
                         <td className="py-2 pr-3 whitespace-nowrap">
-                          {notasLevadasParaCusto[nota.id] ? (
+                          {notasLevadasParaCusto[nota.id] || custosItens.some((c) => c.id === `custo-${nota.id}` || c.id === `custo-nfse-${nota.id}`) ? (
                             <span className="text-xs" style={{ color: "#4F7A5B" }}>
                               ✓ levada
                             </span>
@@ -12727,7 +12828,8 @@ export default function DashboardConstrutora({ userEmail }) {
 
             <p className="mt-6 text-xs" style={{ color: "#6B6F76" }}>
               "Levar p/ custo" cria um item em Custos das obras com o valor líquido da nota (já descontadas as
-              retenções) e anota o detalhamento das retenções nas observações do item.
+              retenções) e anota a data, as retenções e o pagamento nas observações do item. "Pagamento" procura no
+              extrato bancário uma saída com o mesmo valor (de 5 dias antes até 120 dias depois da nota).
             </p>
           </>
         )}
