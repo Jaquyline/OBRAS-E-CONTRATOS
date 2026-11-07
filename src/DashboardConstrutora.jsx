@@ -7094,7 +7094,7 @@ export default function DashboardConstrutora({ userEmail }) {
         }
       `}</style>
 
-      <div className="max-w-6xl mx-auto px-5 py-8 sm:px-8">
+      <div className={`${activeTab === "fiscal" ? "max-w-none" : "max-w-6xl"} mx-auto px-5 py-8 sm:px-8`}>
         {mostrarTelaAdmin ? (
           <TelaAdminUsuariosEEmpresas
             empresasInfo={EMPRESAS_INFO}
@@ -13028,7 +13028,7 @@ export default function DashboardConstrutora({ userEmail }) {
                         (col) => (
                           <th
                             key={col}
-                            className="text-[10px] uppercase tracking-wide font-semibold pb-2 pr-3 whitespace-nowrap"
+                            className="text-[10px] uppercase tracking-wide font-semibold pb-2 pr-2 whitespace-nowrap"
                             style={{ color: "#8A8D93" }}
                           >
                             {col}
@@ -13040,21 +13040,21 @@ export default function DashboardConstrutora({ userEmail }) {
                   <tbody>
                     {notasFiscaisFiltradas.map((nota) => (
                       <tr key={nota.id} style={{ borderBottom: "1px solid #E4E0D6" }}>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{dataISOparaBR(nota.data) || nota.data}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap" title={fmtCnpj(nota.cnpjTomador)}>{nota.cnpjNome || "Matriz"}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.tipo || "NFS-e"}{/cancel/i.test(nota.situacao || "") ? <span style={{ color: "#B23A2E" }}> · cancelada</span> : null}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">
+                        <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{dataISOparaBR(nota.data) || nota.data}</td>
+                        <td className="py-1.5 pr-2 text-xs whitespace-nowrap" title={fmtCnpj(nota.cnpjTomador)}>{nota.cnpjNome || "Matriz"}</td>
+                        <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{nota.tipo || "NFS-e"}{/cancel/i.test(nota.situacao || "") ? <span style={{ color: "#B23A2E" }}> · cancelada</span> : null}</td>
+                        <td className="py-1.5 pr-2 text-xs whitespace-nowrap">
                           {nota.numero}{" "}
                           <button onClick={() => abrirNotaFiscal(nota)} title={nota.temXml ? "Ver a nota" : "Só o resumo da SEFAZ (o XML completo chega depois da ciência)"} className="ml-1" style={{ color: nota.temXml ? "#3D6E8C" : "#A4640B" }}>{nota.temXml ? "👁 ver" : "👁 resumo"}</button>
                         </td>
-                        <td className="py-2 pr-3 text-xs">{nota.prestador}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{formatBRL(nota.valorNota)}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.issRetido ? formatBRL(nota.issRetido) : "—"}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.ir ? formatBRL(nota.ir) : "—"}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.pcc ? formatBRL(nota.pcc) : "—"}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">{nota.inss ? formatBRL(nota.inss) : "—"}</td>
-                        <td className="py-2 pr-3 text-xs font-semibold whitespace-nowrap">{formatBRL(nota.valorLiquido)}</td>
-                        <td className="py-2 pr-3 text-xs whitespace-nowrap">
+                        <td className="py-1.5 pr-2 text-xs" style={{ minWidth: 180 }}>{nota.prestador}</td>
+                        <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{formatBRL(nota.valorNota)}</td>
+                        <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{nota.issRetido ? formatBRL(nota.issRetido) : "—"}</td>
+                        <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{nota.ir ? formatBRL(nota.ir) : "—"}</td>
+                        <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{nota.pcc ? formatBRL(nota.pcc) : "—"}</td>
+                        <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{nota.inss ? formatBRL(nota.inss) : "—"}</td>
+                        <td className="py-1.5 pr-2 text-xs font-semibold whitespace-nowrap">{formatBRL(nota.valorLiquido)}</td>
+                        <td className="py-1.5 pr-2 text-xs whitespace-nowrap">
                           {pagamentoPorNota[nota.id] ? (
                             <span style={{ color: "#4F7A5B" }} title={pagamentoPorNota[nota.id].descricao}>✓ pago {pagamentoPorNota[nota.id].data}</span>
                           ) : (
