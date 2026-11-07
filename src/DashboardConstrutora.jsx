@@ -12831,6 +12831,30 @@ export default function DashboardConstrutora({ userEmail }) {
                 >
                   {buscandoNotasFiscais ? "Buscando…" : "Buscar notas"}
                 </button>
+                <details className="text-xs" style={{ color: "#3D6E8C" }}>
+                  <summary className="cursor-pointer font-semibold py-2">↻ Atualizar as notas no Gestão</summary>
+                  <div className="mt-1 p-2 rounded-sm border" style={{ borderColor: "#DCD7C9", background: "#FFFFFF", color: "#22252A" }}>
+                    <div className="mb-1" style={{ color: "#6B6F76" }}>
+                      Abre o Vetor Gestão já na empresa e no período e busca as notas novas pelo certificado A1 (a filial usa o da matriz).
+                      Quando terminar, volte aqui e clique em "Buscar notas".
+                    </div>
+                    {[{ cnpj: String(empresaInfo.cnpj || "").replace(/\D/g, ""), nome: "Matriz" }, ...cnpjsFiscaisExtras]
+                      .filter((x) => String(x.cnpj).length === 14)
+                      .map((x) => {
+                        const hoje = new Date().toISOString().slice(0, 10);
+                        const de = (filtroDataDeFiscal || `${hoje.slice(0, 4)}-01-01`).slice(0, 7);
+                        const ate = (filtroDataAteFiscal || hoje).slice(0, 7);
+                        const base = "https://gestao.contabilvetor.com.br/fiscal.html";
+                        return (
+                          <div key={x.cnpj} className="flex items-center gap-3 py-1">
+                            <b style={{ minWidth: 140 }}>{x.nome || fmtCnpj(x.cnpj)}</b>
+                            <a href={`${base}?emp=${x.cnpj}&mes=${de}&mesAte=${ate}&lado=recebidas&buscar=1#nfse`} target="_blank" rel="noreferrer" className="underline">NFS-e de serviços ({de.slice(5)}/{de.slice(0, 4)} a {ate.slice(5)}/{ate.slice(0, 4)})</a>
+                            <a href={`${base}?emp=${x.cnpj}&buscar=1#nfe-entrada`} target="_blank" rel="noreferrer" className="underline">NF-e de compras</a>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </details>
               </div>
 
               {notasFiscaisEncontradas.length > 0 && (
