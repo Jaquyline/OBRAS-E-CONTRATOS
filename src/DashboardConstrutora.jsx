@@ -4931,6 +4931,46 @@ export default function DashboardConstrutora({ userEmail }) {
     if (!r.ok) throw new Error(j.error || `erro ${r.status}`);
     return j;
   }
+  // ciência da operação manual (uma nota ou todas as que estão só em resumo): libera o XML completo na SEFAZ
+  async function darCienciaNotasFiscais(lista) {
+    if (!certificadoFiscal) return setErroBuscaNotasFiscais('Envie o certificado A1 na seção "Certificado digital" antes de dar a ciência.');
+    const alvo = (lista || []).filter((n) => n && n.tipo === "NF-e" && !n.temXml && n.chave && n.situacao !== "Cancelada");
+    if (!alvo.length) return setErroBuscaNotasFiscais("Nenhuma NF-e só em resumo para dar ciência.");
+    setBuscandoNotasFiscais(true);
+    setErroBuscaNotasFiscais(null);
+    const base = { notas: { ...(fiscalBase.notas || {}) }, nsu: { ...(fiscalBase.nsu || {}) }, canc: { ...(fiscalBase.canc || {}) } };
+    const porCnpj = new Map();
+    alvo.forEach((n) => { const c = n.cnpjTomador; if (!porCnpj.has(c)) porCnpj.set(c, []); porCnpj.get(c).push(n.chave); });
+    let ok = 0;
+    const ruins = [];
+    const erros = [];
+    try {
+      for (const [cnpj, chaves] of porCnpj) {
+        for (let i = 0; i < chaves.length; i += 100) {
+          setProgressoFiscal(`Dando ciência em ${Math.min(i + 100, chaves.length)} de ${chaves.length} NF-e (${fmtCnpj(cnpj)})…`);
+          const c = await chamarFiscal({ acao: "ciencia", cnpj, chaves: chaves.slice(i, i + 100) }).catch((e) => ({ erro: e.message }));
+          if (c.erro) { erros.push(c.erro); continue; }
+          const agoraC = new Date().toISOString();
+          (c.resultados || []).forEach((x) => {
+            const id = `${cnpj}-nfe-${x.chave}`;
+            if (x.ok) ok++; else ruins.push(x);
+            if (!base.notas[id]) return;
+            base.notas[id] = x.ok ? { ...base.notas[id], cienciaEm: agoraC, cienciaErro: null } : { ...base.notas[id], cienciaErro: { em: agoraC, cStat: x.cStat, motivo: x.xMotivo } };
+          });
+        }
+      }
+      await window.storage.set(STORAGE_KEY_FISCAL_NOTAS, JSON.stringify(base), false);
+      setFiscalBase(base);
+      const partes = [];
+      if (ok) partes.push(`Ciência registrada em ${ok} NF-e — o XML completo chega na próxima busca (a SEFAZ libera em até 1 hora; o painel busca sozinho).`);
+      if (ruins.length) partes.push(`A SEFAZ recusou ${ruins.length}: ${[...new Set(ruins.map((x) => `${x.cStat} ${x.xMotivo}`))].slice(0, 3).join("; ")}.`);
+      if (erros.length) partes.push(`Erro: ${[...new Set(erros)].join("; ")}`);
+      setErroBuscaNotasFiscais(partes.join(" ") || null);
+    } finally {
+      setProgressoFiscal("");
+      setBuscandoNotasFiscais(false);
+    }
+  }
   // busca as novas: NFS-e (Portal Nacional) e NF-e (SEFAZ) de cada CNPJ; dá ciência nas NF-e que vieram só em resumo
   async function capturarNotasFiscais() {
     if (!certificadoFiscal) return setErroBuscaNotasFiscais('Envie o certificado A1 na seção "Certificado digital" antes de buscar.');
@@ -12996,6 +13036,20 @@ export default function DashboardConstrutora({ userEmail }) {
                 >
                   {buscandoNotasFiscais ? "Buscando…" : "⬇ Buscar novas notas"}
                 </button>
+                {(() => {
+                  const pendC = Object.values(fiscalBase.notas || {}).filter((n) => n.tipo === "NF-e" && !n.temXml && n.situacao !== "Cancelada" && !n.cienciaEm);
+                  return pendC.length ? (
+                    <button
+                      onClick={() => darCienciaNotasFiscais(pendC)}
+                      disabled={buscandoNotasFiscais}
+                      className="text-sm font-semibold px-4 py-2 rounded-sm"
+                      style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#A4640B" }}
+                      title="Registra a ciência da operação na SEFAZ para liberar o XML completo das NF-e que vieram só em resumo"
+                    >
+                      ✔ Dar ciência nas {pendC.length} NF-e só em resumo
+                    </button>
+                  ) : null;
+                })()}
                 {progressoFiscal && <span className="text-xs" style={{ color: "#6B6F76" }}>{progressoFiscal}</span>}
               </div>
 
@@ -13056,6 +13110,16 @@ export default function DashboardConstrutora({ userEmail }) {
                         <td className="py-1.5 pr-2 text-xs whitespace-nowrap">
                           {nota.numero}{" "}
                           <button onClick={() => abrirNotaFiscal(nota)} title={nota.temXml ? "Ver a nota" : "Só o resumo da SEFAZ (o XML completo chega depois da ciência)"} className="ml-1" style={{ color: nota.temXml ? "#3D6E8C" : "#A4640B" }}>{nota.temXml ? "👁 ver" : "👁 resumo"}</button>
+                          {nota.tipo === "NF-e" && !nota.temXml && !/cancel/i.test(nota.situacao || "") && (() => {
+                            const nb = (fiscalBase.notas || {})[nota.id] || nota;
+                            if (nb.cienciaEm) return <span className="block" style={{ fontSize: 10, color: "#6B6F76" }} title={`Ciência em ${new Date(nb.cienciaEm).toLocaleString("pt-BR")}`}>ciência dada · aguardando XML</span>;
+                            return (
+                              <span className="block" style={{ fontSize: 10 }}>
+                                {nb.cienciaErro ? <span style={{ color: "#B23A2E" }} title={`${nb.cienciaErro.cStat} ${nb.cienciaErro.motivo}`}>recusada: {String(nb.cienciaErro.cStat || "")} · </span> : null}
+                                <button disabled={buscandoNotasFiscais} onClick={() => darCienciaNotasFiscais([nb])} style={{ color: "#A4640B", textDecoration: "underline" }}>{nb.cienciaErro ? "tentar de novo" : "dar ciência"}</button>
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="py-1.5 pr-2 text-xs" style={{ minWidth: 180 }}>{nota.prestador}</td>
                         <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{formatBRL(nota.valorNota)}</td>
