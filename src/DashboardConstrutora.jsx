@@ -7769,24 +7769,6 @@ export default function DashboardConstrutora({ userEmail }) {
         ) : (
         <>
         {/* Tab nav */}
-        {/* Imprimir a aba aberta: abas com relatório próprio abrem o relatório (com o botão de imprimir);
-            as demais (Fiscal, Empréstimos bancários) imprimem a própria tela */}
-        <div className="flex justify-end mb-2 no-print" style={{ display: activeTab === "geral" ? "none" : undefined }}>
-          <button
-            onClick={() => {
-              const comRelatorio = ["geral", "unidades", "cv", "receber", "notas", "pagar", "extrato", "socios", "documentos", "fornecedores", "servicos", "fluxocaixa", "custos"];
-              if (comRelatorio.includes(activeTab)) {
-                setTipoRelatorio(activeTab);
-                setModoRelatorio(true);
-              } else window.print();
-            }}
-            className="text-xs font-semibold px-3 py-1.5 rounded-sm"
-            style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#22252A" }}
-            title="Imprimir / salvar em PDF a aba aberta"
-          >
-            🖨 IMPRIMIR ESTA ABA
-          </button>
-        </div>
         <div className="flex flex-wrap justify-center gap-1 mb-7 border-b no-print" style={{ borderColor: "#3A3E45" }}>
           {[
             { id: "geral", label: "Visão geral" },
@@ -12165,6 +12147,16 @@ export default function DashboardConstrutora({ userEmail }) {
 
         {activeTab === "emprestimosbancarios" && (
           <>
+            <div className="flex justify-end mb-4 no-print">
+              <button
+                onClick={() => window.print()}
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
+                title="Imprimir / salvar em PDF esta tela"
+              >
+                🖨 IMPRIMIR
+              </button>
+            </div>
             <div className="flex flex-wrap gap-3 mb-4">
               <KpiCard
                 eyebrow="Total contratado"
@@ -13456,6 +13448,16 @@ export default function DashboardConstrutora({ userEmail }) {
 
         {activeTab === "fiscal" && (
           <>
+            <div className="flex justify-end mb-4 no-print">
+              <button
+                onClick={() => window.print()}
+                className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#3D6E8C" }}
+                title="Imprimir / salvar em PDF esta tela"
+              >
+                🖨 IMPRIMIR
+              </button>
+            </div>
             <section className="rounded-md p-3 border mb-5" style={{ background: "#F5F3EC", borderColor: "#DCD7C9" }}>
               <h2
                 className="text-sm uppercase tracking-[0.12em] font-semibold mb-1"
