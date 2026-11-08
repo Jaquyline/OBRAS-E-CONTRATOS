@@ -5139,7 +5139,29 @@ export default function DashboardConstrutora({ userEmail }) {
     const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     const dia = (iso) => new Date(iso + "T12:00:00").getTime() / 864e5;
     const saidas = (extrato || []).filter((l) => Number(l.valor) < 0).map((l) => ({ l, abs: Math.abs(Number(l.valor)), t: dia(dataBRparaISO(l.data) || "1900-01-01"), d: norm(l.descricao) }));
+    // baixa feita à mão na aba Fiscal (lançamento do extrato escolhido, ou pago no caixa) vale antes da comparação automática
+    notasFiscaisEncontradas.forEach((n) => {
+      const pm = ((fiscalBase.notas || {})[n.id] || {}).pagamentoManual;
+      if (!pm) return;
+      if (pm.forma === "banco" && pm.extratoId != null) {
+        const l = (extrato || []).find((x) => String(x.id) === String(pm.extratoId));
+        if (l) { usados.add(l.id); out[n.id] = { ...l, manual: true }; }
+      } else if (pm.forma === "caixa") out[n.id] = { id: null, data: pm.data, descricao: "Pago no caixa (baixa manual)", caixa: true, manual: true };
+    });
+    // nota já levada para Compras com as parcelas pagas em Contas a pagar
+    notasFiscaisEncontradas.forEach((n) => {
+      if (out[n.id]) return;
+      const nc = (notasCompra || []).find((c) => c.notaFiscalId === n.id);
+      if (!nc) return;
+      const ps = (contasPagar || []).filter((c) => c.notaId === nc.id);
+      if (ps.length && ps.every((c) => c.status === "pago")) {
+        const l = (extrato || []).find((x) => x.contaPagarId && ps.some((c) => c.id === x.contaPagarId));
+        if (l) usados.add(l.id);
+        out[n.id] = l ? { ...l, viaCompras: true } : { id: null, data: ps[ps.length - 1].dataPagamento || "", descricao: "Pago em Contas a pagar", caixa: ps[0].formaPagamento === "caixa", viaCompras: true };
+      }
+    });
     [...notasFiscaisEncontradas].sort((a, b) => a.data.localeCompare(b.data)).forEach((n) => {
+      if (out[n.id]) return;
       if (/cancel/i.test(n.situacao || "")) return;
       const tn = dia(n.data);
       const pal = norm(n.prestador).split(/\s+/).filter((w) => w.length >= 4 && !/^(ltda|eireli|comercio|servicos|materiais)$/.test(w)).slice(0, 2);
@@ -5150,7 +5172,7 @@ export default function DashboardConstrutora({ userEmail }) {
       out[n.id] = cand[0].l;
     });
     return out;
-  }, [notasFiscaisEncontradas, extrato]);
+  }, [notasFiscaisEncontradas, extrato, fiscalBase, notasCompra, contasPagar]);
 
   // A nota do Gestão já está no painel? (cadastrada em Notas de compra ou já lançada em Custos das obras)
   // Mesmo fornecedor (2 primeiras palavras do nome), mesmo valor (cheio ou líquido) e data até 5 dias de diferença;
@@ -5325,10 +5347,43 @@ export default function DashboardConstrutora({ userEmail }) {
         ? gerarParcelas(novaNota)
         : [{ id: `${id}-1`, notaId: id, fornecedor, obra, parcela: "1/1", valor: valorTotal, vencimento: novaNota.dataEmissao, status: "pendente" }]; // à vista: vence na emissão
     const pg = pagamentoPorNota[nota.id];
-    const linkar = pg && parcelas.length === 1 && !pg.contaPagarId;
-    if (pg && parcelas.length === 1) parcelas = parcelas.map((p) => ({ ...p, status: "pago", formaPagamento: "banco", dataPagamento: pg.data, observacao: `Paga em ${pg.data} (extrato)` }));
+    const linkar = pg && pg.id != null && parcelas.length === 1 && !pg.contaPagarId;
+    if (pg && parcelas.length === 1) parcelas = parcelas.map((p) => ({ ...p, status: "pago", formaPagamento: pg.caixa ? "caixa" : "banco", dataPagamento: pg.data, observacao: pg.caixa ? `Paga no caixa em ${pg.data}` : `Paga em ${pg.data} (extrato)` }));
     await persistNotasEPagar([...notasCompra, novaNota], [...contasPagar, ...parcelas]);
     if (linkar) await persistExtrato(extrato.map((l) => (l.id === pg.id ? { ...l, contaPagarId: parcelas[0].id } : l))); // já liga a saída do extrato à parcela
+  }
+
+  // Baixa manual de uma nota na aba Fiscal: escolher a saída do extrato (qualquer valor) ou "pago no caixa"
+  const [pagandoNotaFiscalId, setPagandoNotaFiscalId] = useState(null);
+  const [baixaNotaForm, setBaixaNotaForm] = useState({ extratoId: "", data: "" });
+  async function salvarPagamentoManualNota(nota, pm) {
+    const base = { ...fiscalBase, notas: { ...(fiscalBase.notas || {}) } };
+    if (!base.notas[nota.id]) return;
+    base.notas[nota.id] = { ...base.notas[nota.id], pagamentoManual: pm || null };
+    setFiscalBase(base);
+    setPagandoNotaFiscalId(null);
+    try { await window.storage.set(STORAGE_KEY_FISCAL_NOTAS, JSON.stringify(base), false); } catch {}
+    // se a nota já está em Compras (1 parcela), a parcela acompanha a baixa
+    const nc = notasCompra.find((c) => c.notaFiscalId === nota.id);
+    if (nc && pm) {
+      const ps = contasPagar.filter((c) => c.notaId === nc.id);
+      if (ps.length === 1) {
+        const l = pm.forma === "banco" ? extrato.find((x) => String(x.id) === String(pm.extratoId)) : null;
+        await persistNotasEPagar(notasCompra, contasPagar.map((c) => (c.id === ps[0].id ? { ...c, status: "pago", formaPagamento: pm.forma, dataPagamento: l ? l.data : pm.data } : c)));
+        if (l && !l.contaPagarId) await persistExtrato(extrato.map((x) => (x.id === l.id ? { ...x, contaPagarId: ps[0].id } : x)));
+      }
+    }
+  }
+  function saidasParaBaixa(nota) {
+    const tn = new Date(nota.data + "T12:00:00").getTime() / 864e5;
+    const usadosAuto = new Set(Object.values(pagamentoPorNota).filter((x) => x && x.id != null).map((x) => x.id));
+    return (extrato || [])
+      .filter((l) => Number(l.valor) < 0 && !usadosAuto.has(l.id))
+      .map((l) => ({ l, t: (parseDateBR(l.data) || new Date(0)).getTime() / 864e5 }))
+      .filter((x) => x.t >= tn - 10 && x.t <= tn + 180)
+      .sort((a, b) => Math.abs(Math.abs(a.l.valor) - nota.valorLiquido) - Math.abs(Math.abs(b.l.valor) - nota.valorLiquido) || a.t - b.t)
+      .slice(0, 40)
+      .map((x) => x.l);
   }
 
   function handleLevarNotaParaCusto(nota) {
@@ -13419,10 +13474,60 @@ export default function DashboardConstrutora({ userEmail }) {
                         <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{formatBRL(nota.valorNota)}</td>
                         <td className="py-1.5 pr-2 text-xs font-semibold whitespace-nowrap">{formatBRL(nota.valorLiquido)}</td>
                         <td className="py-1.5 pr-2 text-xs whitespace-nowrap">
-                          {pagamentoPorNota[nota.id] ? (
-                            <span style={{ color: "#4F7A5B" }} title={pagamentoPorNota[nota.id].descricao}>✓ pago {pagamentoPorNota[nota.id].data}</span>
+                          {pagandoNotaFiscalId === nota.id ? (
+                            <span className="flex flex-col gap-1" style={{ minWidth: 260 }}>
+                              <select
+                                value={baixaNotaForm.extratoId}
+                                onChange={(e) => setBaixaNotaForm((f) => ({ ...f, extratoId: e.target.value }))}
+                                className="text-xs px-1 py-1 rounded-sm border outline-none"
+                                style={{ borderColor: "#DCD7C9", maxWidth: 300 }}
+                              >
+                                <option value="">🏦 Escolha a saída do extrato…</option>
+                                <option value="__caixa">💵 Pago no caixa / dinheiro</option>
+                                {saidasParaBaixa(nota).map((l) => (
+                                  <option key={l.id} value={String(l.id)}>{l.data} · {formatBRL(Math.abs(l.valor))} · {String(l.descricao || "").slice(0, 40)}</option>
+                                ))}
+                              </select>
+                              {baixaNotaForm.extratoId === "__caixa" && (
+                                <input type="date" value={baixaNotaForm.data} onChange={(e) => setBaixaNotaForm((f) => ({ ...f, data: e.target.value }))} className="text-xs px-1 py-0.5 rounded-sm border" style={{ borderColor: "#DCD7C9" }} />
+                              )}
+                              <span className="flex gap-2">
+                                <button
+                                  disabled={!baixaNotaForm.extratoId}
+                                  onClick={() =>
+                                    salvarPagamentoManualNota(
+                                      nota,
+                                      baixaNotaForm.extratoId === "__caixa"
+                                        ? { forma: "caixa", data: dataISOparaBR(baixaNotaForm.data) || formatDateBR(new Date()) }
+                                        : { forma: "banco", extratoId: baixaNotaForm.extratoId }
+                                    )
+                                  }
+                                  className="font-semibold px-2 py-0.5 rounded-sm"
+                                  style={{ color: "#F5F3EC", background: baixaNotaForm.extratoId ? "#4F7A5B" : "#B9BCC1" }}
+                                >
+                                  Salvar
+                                </button>
+                                <button onClick={() => setPagandoNotaFiscalId(null)} style={{ color: "#8A8D93" }}>cancelar</button>
+                              </span>
+                              <span className="text-[10px]" style={{ color: "#8A8D93", whiteSpace: "normal" }}>Saídas do extrato de 10 dias antes até 180 dias depois da nota, as de valor mais parecido primeiro.</span>
+                            </span>
+                          ) : pagamentoPorNota[nota.id] ? (
+                            <span style={{ color: "#4F7A5B" }} title={pagamentoPorNota[nota.id].descricao}>
+                              ✓ pago {pagamentoPorNota[nota.id].data}
+                              {pagamentoPorNota[nota.id].caixa ? " · caixa" : ""}
+                              {pagamentoPorNota[nota.id].manual ? (
+                                <button onClick={() => salvarPagamentoManualNota(nota, null)} className="ml-1" style={{ color: "#8A8D93" }} title="Desfazer a baixa manual">✕</button>
+                              ) : !pagamentoPorNota[nota.id].viaCompras ? (
+                                <button onClick={() => { setBaixaNotaForm({ extratoId: "", data: "" }); setPagandoNotaFiscalId(nota.id); }} className="ml-1 underline" style={{ color: "#8A8D93" }} title="O pagamento achado sozinho está errado? Escolha o certo">trocar</button>
+                              ) : null}
+                            </span>
                           ) : (
-                            <span style={{ color: "#A4640B" }}>em aberto</span>
+                            <span>
+                              <span style={{ color: "#A4640B" }}>em aberto</span>{" "}
+                              <button onClick={() => { setBaixaNotaForm({ extratoId: "", data: new Date().toISOString().slice(0, 10) }); setPagandoNotaFiscalId(nota.id); }} className="underline" style={{ color: "#3D6E8C" }} title="Já foi paga? Escolha a saída do extrato ou marque como paga no caixa">
+                                marcar pago
+                              </button>
+                            </span>
                           )}
                         </td>
                         <td className="py-2 pr-1 whitespace-nowrap">
