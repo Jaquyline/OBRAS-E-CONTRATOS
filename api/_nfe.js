@@ -116,10 +116,12 @@ function agoraBR() {
   const d = new Date(Date.now() - 3 * 3600 * 1000 - 60 * 1000); // horário de Brasília, 1 min antes (evita "data futura")
   return d.toISOString().slice(0, 19) + "-03:00";
 }
-export function eventoCiencia({ cnpj, chave, key, cert, amb, dh }) {
+export const EVENTOS_DEST = { ciencia: ["210210", "Ciencia da Operacao"], confirmacao: ["210200", "Confirmacao da Operacao"] };
+export function eventoCiencia({ cnpj, chave, key, cert, amb, dh, tipo }) {
+  const [tpEv, descEv] = EVENTOS_DEST[tipo] || EVENTOS_DEST.ciencia;
   const u = URLS[amb] || URLS.producao;
-  const id = `ID210210${chave}01`;
-  const corpo = `<cOrgao>91</cOrgao><tpAmb>${u.tpAmb}</tpAmb><CNPJ>${cnpj}</CNPJ><chNFe>${chave}</chNFe><dhEvento>${dh || agoraBR()}</dhEvento><tpEvento>210210</tpEvento><nSeqEvento>1</nSeqEvento><verEvento>1.00</verEvento><detEvento versao="1.00"><descEvento>Ciencia da Operacao</descEvento></detEvento>`;
+  const id = `ID${tpEv}${chave}01`;
+  const corpo = `<cOrgao>91</cOrgao><tpAmb>${u.tpAmb}</tpAmb><CNPJ>${cnpj}</CNPJ><chNFe>${chave}</chNFe><dhEvento>${dh || agoraBR()}</dhEvento><tpEvento>${tpEv}</tpEvento><nSeqEvento>1</nSeqEvento><verEvento>1.00</verEvento><detEvento versao="1.00"><descEvento>${descEv}</descEvento></detEvento>`;
   // forma canônica (C14N) do infEvento dentro de <evento xmlns="...nfe">: o namespace herdado aparece no elemento
   const infCanon = `<infEvento xmlns="${NS_NFE}" Id="${id}">${corpo}</infEvento>`;
   const digest = crypto.createHash("sha1").update(infCanon, "utf8").digest("base64");
@@ -135,13 +137,13 @@ export function xmlEnvEvento(eventos) {
   const lote = String(Date.now()).slice(-15);
   return `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4"><envEvento xmlns="${NS_NFE}" versao="1.00"><idLote>${lote}</idLote>${eventos.join("")}</envEvento></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
 }
-export async function cienciaLote({ cnpj, chaves, amb, pfx, senha }) {
+export async function cienciaLote({ cnpj, chaves, amb, pfx, senha, tipo }) {
   const u = URLS[amb] || URLS.producao;
   const { key, cert } = chavesDoPfx(pfx);
   const out = [];
   for (let i = 0; i < chaves.length; i += 20) {
     const parte = chaves.slice(i, i + 20);
-    const xml = xmlEnvEvento(parte.map((chave) => eventoCiencia({ cnpj, chave, key, cert, amb })));
+    const xml = xmlEnvEvento(parte.map((chave) => eventoCiencia({ cnpj, chave, key, cert, amb, tipo })));
     const r = await postSoap(u.evento, xml, "http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4/nfeRecepcaoEventoNF", pfx, senha);
     const ret = tag(r.corpo, "retEnvEvento");
     const cLote = tag(ret, "cStat");

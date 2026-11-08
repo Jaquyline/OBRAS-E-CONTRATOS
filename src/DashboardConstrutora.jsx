@@ -4932,7 +4932,9 @@ export default function DashboardConstrutora({ userEmail }) {
     return j;
   }
   // ciência da operação manual (uma nota ou todas as que estão só em resumo): libera o XML completo na SEFAZ
-  async function darCienciaNotasFiscais(lista) {
+  async function darCienciaNotasFiscais(lista, tipo = "ciencia") {
+    const conf = tipo === "confirmar";
+    if (conf && !window.confirm(`Confirmação da Operação em ${(lista || []).length} NF-e.\n\nIsto declara oficialmente à SEFAZ que a J&G realizou essa compra e recebeu a mercadoria/serviço. Use só para notas reconhecidas.\n\nConfirmar?`)) return;
     if (!certificadoFiscal) return setErroBuscaNotasFiscais('Envie o certificado A1 na seção "Certificado digital" antes de dar a ciência.');
     const alvo = (lista || []).filter((n) => n && n.tipo === "NF-e" && !n.temXml && n.chave && n.situacao !== "Cancelada");
     if (!alvo.length) return setErroBuscaNotasFiscais("Nenhuma NF-e só em resumo para dar ciência.");
@@ -4948,21 +4950,21 @@ export default function DashboardConstrutora({ userEmail }) {
       for (const [cnpj, chaves] of porCnpj) {
         for (let i = 0; i < chaves.length; i += 100) {
           setProgressoFiscal(`Dando ciência em ${Math.min(i + 100, chaves.length)} de ${chaves.length} NF-e (${fmtCnpj(cnpj)})…`);
-          const c = await chamarFiscal({ acao: "ciencia", cnpj, chaves: chaves.slice(i, i + 100) }).catch((e) => ({ erro: e.message }));
+          const c = await chamarFiscal({ acao: conf ? "confirmar" : "ciencia", cnpj, chaves: chaves.slice(i, i + 100) }).catch((e) => ({ erro: e.message }));
           if (c.erro) { erros.push(c.erro); continue; }
           const agoraC = new Date().toISOString();
           (c.resultados || []).forEach((x) => {
             const id = `${cnpj}-nfe-${x.chave}`;
             if (x.ok) ok++; else ruins.push(x);
             if (!base.notas[id]) return;
-            base.notas[id] = x.ok ? { ...base.notas[id], cienciaEm: agoraC, cienciaErro: null } : { ...base.notas[id], cienciaErro: { em: agoraC, cStat: x.cStat, motivo: x.xMotivo } };
+            base.notas[id] = x.ok ? { ...base.notas[id], cienciaEm: agoraC, cienciaErro: null, ...(conf ? { confirmadaEm: agoraC } : {}) } : { ...base.notas[id], [conf ? "confirmacaoErro" : "cienciaErro"]: { em: agoraC, cStat: x.cStat, motivo: x.xMotivo } };
           });
         }
       }
       await window.storage.set(STORAGE_KEY_FISCAL_NOTAS, JSON.stringify(base), false);
       setFiscalBase(base);
       const partes = [];
-      if (ok) partes.push(`Ciência registrada em ${ok} NF-e — o XML completo chega na próxima busca (a SEFAZ libera em até 1 hora; o painel busca sozinho).`);
+      if (ok) partes.push(`${conf ? "Confirmação da operação" : "Ciência"} registrada em ${ok} NF-e — o XML completo chega na próxima busca (a SEFAZ libera em até 1 hora; o painel busca sozinho).`);
       if (ruins.length) partes.push(`A SEFAZ recusou ${ruins.length}: ${[...new Set(ruins.map((x) => `${x.cStat} ${x.xMotivo}`))].slice(0, 3).join("; ")}.`);
       if (erros.length) partes.push(`Erro: ${[...new Set(erros)].join("; ")}`);
       setErroBuscaNotasFiscais(partes.join(" ") || null);
@@ -5047,7 +5049,7 @@ export default function DashboardConstrutora({ userEmail }) {
             if (j.fim || String(j.cStat) === "137") { nsu.nfeEm = new Date().toISOString(); nsu.nfeFim = true; break; }
           }
           // ciência da operação nas NF-e que vieram só em resumo: o XML completo chega na próxima busca
-          const semXml = Object.values(base.notas).filter((n) => n.cnpjTomador === cnpj && n.tipo === "NF-e" && !n.temXml && !n.cienciaEm && n.situacao !== "Cancelada").map((n) => n.chave).slice(0, 100);
+          const semXml = Object.values(base.notas).filter((n) => n.cnpjTomador === cnpj && n.tipo === "NF-e" && !n.temXml && !n.cienciaEm && n.situacao !== "Cancelada" && !(n.cienciaErro && String(n.cienciaErro.cStat) === "596") && Date.now() - new Date(n.data + "T12:00:00").getTime() < 10 * 864e5).map((n) => n.chave).slice(0, 100);
           if (semXml.length) {
             setProgressoFiscal(`${a.nome || fmtCnpj(cnpj)}: dando ciência em ${semXml.length} NF-e para liberar o XML…`);
             const c = await chamarFiscal({ acao: "ciencia", cnpj, chaves: semXml }).catch((e) => ({ erro: e.message }));
@@ -13037,7 +13039,7 @@ export default function DashboardConstrutora({ userEmail }) {
                   {buscandoNotasFiscais ? "Buscando…" : "⬇ Buscar novas notas"}
                 </button>
                 {(() => {
-                  const pendC = Object.values(fiscalBase.notas || {}).filter((n) => n.tipo === "NF-e" && !n.temXml && n.situacao !== "Cancelada" && !n.cienciaEm);
+                  const pendC = Object.values(fiscalBase.notas || {}).filter((n) => n.tipo === "NF-e" && !n.temXml && n.situacao !== "Cancelada" && !n.cienciaEm && !(n.cienciaErro && String(n.cienciaErro.cStat) === "596") && Date.now() - new Date(n.data + "T12:00:00").getTime() < 10 * 864e5);
                   return pendC.length ? (
                     <button
                       onClick={() => darCienciaNotasFiscais(pendC)}
@@ -13047,6 +13049,20 @@ export default function DashboardConstrutora({ userEmail }) {
                       title="Registra a ciência da operação na SEFAZ para liberar o XML completo das NF-e que vieram só em resumo"
                     >
                       ✔ Dar ciência nas {pendC.length} NF-e só em resumo
+                    </button>
+                  ) : null;
+                })()}
+                {(() => {
+                  const venc = Object.values(fiscalBase.notas || {}).filter((n) => n.tipo === "NF-e" && !n.temXml && n.situacao !== "Cancelada" && !n.cienciaEm && ((n.cienciaErro && String(n.cienciaErro.cStat) === "596") || Date.now() - new Date(n.data + "T12:00:00").getTime() >= 10 * 864e5));
+                  return venc.length ? (
+                    <button
+                      onClick={() => darCienciaNotasFiscais(venc, "confirmar")}
+                      disabled={buscandoNotasFiscais}
+                      className="text-sm font-semibold px-4 py-2 rounded-sm"
+                      style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#A4640B", background: "#FBEBDB", border: "1px solid #E8C98F" }}
+                      title="Prazo da ciência (10 dias) vencido: a Confirmação da Operação (até 180 dias) declara à SEFAZ que a compra foi realizada e libera o XML completo"
+                    >
+                      Confirmar operação em {venc.length} NF-e com prazo vencido
                     </button>
                   ) : null;
                 })()}
@@ -13112,7 +13128,16 @@ export default function DashboardConstrutora({ userEmail }) {
                           <button onClick={() => abrirNotaFiscal(nota)} title={nota.temXml ? "Ver a nota" : "Só o resumo da SEFAZ (o XML completo chega depois da ciência)"} className="ml-1" style={{ color: nota.temXml ? "#3D6E8C" : "#A4640B" }}>{nota.temXml ? "👁 ver" : "👁 resumo"}</button>
                           {nota.tipo === "NF-e" && !nota.temXml && !/cancel/i.test(nota.situacao || "") && (() => {
                             const nb = (fiscalBase.notas || {})[nota.id] || nota;
-                            if (nb.cienciaEm) return <span className="block" style={{ fontSize: 10, color: "#6B6F76" }} title={`Ciência em ${new Date(nb.cienciaEm).toLocaleString("pt-BR")}`}>ciência dada · aguardando XML</span>;
+                            if (nb.cienciaEm) return <span className="block" style={{ fontSize: 10, color: "#6B6F76" }} title={`${nb.confirmadaEm ? "Operação confirmada" : "Ciência"} em ${new Date(nb.cienciaEm).toLocaleString("pt-BR")}`}>{nb.confirmadaEm ? "operação confirmada" : "ciência dada"} · aguardando XML</span>;
+                            const vencida = (nb.cienciaErro && String(nb.cienciaErro.cStat) === "596") || Date.now() - new Date(nb.data + "T12:00:00").getTime() >= 10 * 864e5;
+                            if (vencida)
+                              return (
+                                <span className="block" style={{ fontSize: 10 }}>
+                                  <span style={{ color: "#B23A2E" }} title="A SEFAZ só aceita a ciência até 10 dias após a emissão">prazo da ciência vencido · </span>
+                                  <button disabled={buscandoNotasFiscais} onClick={() => darCienciaNotasFiscais([nb], "confirmar")} style={{ color: "#A4640B", textDecoration: "underline" }} title="Confirmação da Operação (até 180 dias): declara à SEFAZ que a compra foi realizada e libera o XML completo">confirmar operação</button>
+                                  {nb.confirmacaoErro ? <span style={{ color: "#B23A2E" }} title={`${nb.confirmacaoErro.cStat} ${nb.confirmacaoErro.motivo}`}> · recusada {String(nb.confirmacaoErro.cStat || "")}</span> : null}
+                                </span>
+                              );
                             return (
                               <span className="block" style={{ fontSize: 10 }}>
                                 {nb.cienciaErro ? <span style={{ color: "#B23A2E" }} title={`${nb.cienciaErro.cStat} ${nb.cienciaErro.motivo}`}>recusada: {String(nb.cienciaErro.cStat || "")} · </span> : null}

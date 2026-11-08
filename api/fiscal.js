@@ -79,9 +79,9 @@ export default async function handler(req, res) {
       const r = await distribuir({ cnpj, uf: b.uf || "SC", ultNSU: b.nsu || 0, amb: "producao", pfx: cert, tempoMax: 40000 });
       return res.status(200).json(r);
     }
-    if (b.acao === "ciencia") {
+    if (b.acao === "ciencia" || b.acao === "confirmar") {
       const chaves = (Array.isArray(b.chaves) ? b.chaves : []).map(dig).filter((c) => c.length === 44).slice(0, 100);
-      return res.status(200).json({ resultados: await cienciaLote({ cnpj, chaves, amb: "producao", pfx: cert }) });
+      return res.status(200).json({ resultados: await cienciaLote({ cnpj, chaves, amb: "producao", pfx: cert, tipo: b.acao === "confirmar" ? "confirmacao" : "ciencia" }) });
     }
     return res.status(400).json({ error: "Ação desconhecida." });
   } catch (e) {
