@@ -5286,6 +5286,13 @@ export default function DashboardConstrutora({ userEmail }) {
       const cancelada = /cancel/i.test(n.situacao || "");
       if (filtroSitFiscal === "canceladas") return cancelada;
       if (cancelada) return false;
+      // ocultadas à mão ("não lançar") só aparecem no filtro "Ocultadas"
+      const ocultada = !!((fiscalBase.notas || {})[n.id] || {}).ocultada;
+      if (filtroSitFiscal === "ocultadas") return ocultada;
+      if (ocultada) return false;
+      // padrão "Para lançar": esconde as que já estão no painel (Compras, Contas a pagar, Custos)
+      const lancada = !!notaJaCadastrada[n.id] || notasCompra.some((c) => c.notaFiscalId === n.id) || custosItens.some((c) => c.id === `custo-${n.id}` || c.id === `custo-nfse-${n.id}`);
+      if (filtroSitFiscal === "" && lancada && !(notaEmSoma[n.id] && notasCompra.some((c) => c.notaFiscalId === n.id))) return false; // levada e repetida continua visível para desfazer
       if (filtroSitFiscal === "aberto" && pagamentoPorNota[n.id]) return false;
       if (filtroSitFiscal === "pago" && !pagamentoPorNota[n.id]) return false;
       if (filtroSitFiscal === "cadastrada" && !notaJaCadastrada[n.id]) return false;
@@ -5298,7 +5305,7 @@ export default function DashboardConstrutora({ userEmail }) {
       if (!Number.isNaN(qv) && qv > 0 && [n.valorNota, n.valorLiquido].some((v) => Math.abs(Number(v) - qv) < 0.01)) return true;
       return false;
     });
-  }, [notasFiscaisEncontradas, buscaFiscal, filtroCnpjFiscal, filtroSitFiscal, pagamentoPorNota, notaJaCadastrada, custosItens]);
+  }, [notasFiscaisEncontradas, buscaFiscal, filtroCnpjFiscal, filtroSitFiscal, pagamentoPorNota, notaJaCadastrada, custosItens, fiscalBase, notasCompra, notaEmSoma]);
 
   // Ver a nota: abre o PDF guardado no Gestão ou monta uma visualização a partir do XML (NF-e com os itens; NFS-e com o serviço)
   async function abrirNotaFiscal(nota) {
@@ -5446,6 +5453,14 @@ export default function DashboardConstrutora({ userEmail }) {
     } finally {
       setBaixandoXmlId(null);
     }
+  }
+
+  async function ocultarNotaFiscal(nota, ocultar) {
+    const base = { ...fiscalBase, notas: { ...(fiscalBase.notas || {}) } };
+    if (!base.notas[nota.id]) return;
+    base.notas[nota.id] = { ...base.notas[nota.id], ocultada: ocultar ? new Date().toISOString() : null };
+    setFiscalBase(base);
+    try { await window.storage.set(STORAGE_KEY_FISCAL_NOTAS, JSON.stringify(base), false); } catch {}
   }
 
   // Baixa manual de uma nota na aba Fiscal: escolher a saída do extrato (qualquer valor) ou "pago no caixa"
@@ -13511,13 +13526,15 @@ export default function DashboardConstrutora({ userEmail }) {
                     style={{ borderColor: "#DCD7C9", background: "#FFFFFF", minWidth: 320, flex: "1 1 320px" }}
                   />
                   <select value={filtroSitFiscal} onChange={(e) => setFiltroSitFiscal(e.target.value)} className="text-sm px-3 py-2 rounded-sm border outline-none" style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}>
-                    <option value="">Todas as notas</option>
+                    <option value="">Para lançar (esconde as já lançadas)</option>
+                    <option value="todas">Todas as notas</option>
                     <option value="nova">Ainda não cadastradas</option>
                     <option value="cadastrada">Já cadastradas</option>
                     <option value="aberto">Em aberto (sem pagamento)</option>
                     <option value="pago">Pagas</option>
                     <option value="nfse">Só NFS-e (serviços)</option>
                     <option value="nfe">Só NF-e (compras)</option>
+                    <option value="ocultadas">Ocultadas ({Object.values(fiscalBase.notas || {}).filter((x) => x.ocultada).length})</option>
                     <option value="canceladas">Canceladas ({notasFiscaisEncontradas.filter((n) => /cancel/i.test(n.situacao || "")).length})</option>
                   </select>
                   <span className="text-xs" style={{ color: "#6B6F76" }}>
@@ -13650,6 +13667,11 @@ export default function DashboardConstrutora({ userEmail }) {
                         <td className="py-2 pr-1 whitespace-nowrap">
                           {/cancel/i.test(nota.situacao || "") ? (
                             <span className="text-xs" style={{ color: "#B23A2E" }}>nota cancelada — não lançar</span>
+                          ) : ((fiscalBase.notas || {})[nota.id] || {}).ocultada ? (
+                            <span className="text-xs" style={{ color: "#8A8D93" }}>
+                              ocultada{" "}
+                              <button onClick={() => ocultarNotaFiscal(nota, false)} className="underline" style={{ color: "#3D6E8C" }}>mostrar de novo</button>
+                            </span>
                           ) : notasCompra.some((c) => c.notaFiscalId === nota.id) ? (
                             <span className="text-xs" style={{ color: "#4F7A5B" }}>
                               ✓ em Notas de compras{" "}
@@ -13723,6 +13745,9 @@ export default function DashboardConstrutora({ userEmail }) {
                               </button>
                               <button onClick={() => handleLevarNotaParaCusto(nota)} className="text-[10px] underline" style={{ color: "#6B6F76" }} title="Lançar só como custo da obra (sem Contas a pagar)">
                                 custo
+                              </button>
+                              <button onClick={() => ocultarNotaFiscal(nota, true)} className="text-[10px] underline" style={{ color: "#B23A2E" }} title="Já lançada de outro jeito / repetida: tira da tela (fica no filtro Ocultadas)">
+                                ocultar
                               </button>
                             </div>
                           )}
