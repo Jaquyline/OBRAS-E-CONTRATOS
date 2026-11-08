@@ -4927,10 +4927,25 @@ export default function DashboardConstrutora({ userEmail }) {
     return () => { cancel = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [STORAGE_KEY_FISCAL_NOTAS]);
+  // obra padrão das notas da MATRIZ (a filial/afetação tem a obra dela): escolhida no quadro "CNPJs desta empresa";
+  // sem escolha, é a 1ª obra da lista (como era antes)
+  const STORAGE_KEY_OBRA_MATRIZ_FISCAL = prefixoEmpresa + "fiscal-obra-matriz";
+  const [obraMatrizFiscal, setObraMatrizFiscal] = useState("");
+  const [filtroObraFiscal, setFiltroObraFiscal] = useState("");
+  useEffect(() => {
+    let cancel = false;
+    Promise.resolve()
+      .then(() => window.storage.get(STORAGE_KEY_OBRA_MATRIZ_FISCAL, false))
+      .then((r) => { if (!cancel) setObraMatrizFiscal(r && r.value ? String(r.value) : ""); })
+      .catch(() => {});
+    return () => { cancel = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [STORAGE_KEY_OBRA_MATRIZ_FISCAL]);
+  const obraMatrizEfetiva = obraMatrizFiscal || listaObras[0] || "";
   const alvosFiscais = () => {
     const principal = String(empresaInfo.cnpj || "").replace(/\D/g, "");
     return [
-      ...(principal.length === 14 ? [{ cnpj: principal, nome: "Matriz", obra: "" }] : []),
+      ...(principal.length === 14 ? [{ cnpj: principal, nome: "Matriz", obra: obraMatrizEfetiva }] : []),
       ...cnpjsFiscaisExtras.filter((x) => String(x.cnpj).replace(/\D/g, "").length === 14),
     ];
   };
@@ -4947,7 +4962,7 @@ export default function DashboardConstrutora({ userEmail }) {
       .sort((a, b) => a.data.localeCompare(b.data));
     setNotasFiscaisEncontradas(lista);
     // obra escolhida antes fica gravada na nota (n.obra); senão, a obra do CNPJ (filial/afetação)
-    setObraEscolhidaPorNota((prev) => { const o = { ...prev }; lista.forEach((n) => { if (n.obra) o[n.id] = n.obra; else if (n.obraPadrao && !o[n.id]) o[n.id] = n.obraPadrao; }); return o; });
+    setObraEscolhidaPorNota((prev) => { const o = { ...prev }; lista.forEach((n) => { if (n.obra) o[n.id] = n.obra; else if (n.obraPadrao) o[n.id] = n.obraPadrao; }); return o; });
     return lista;
   }
   // NF-e com ciência dada há mais de 1 hora e ainda sem XML: ao abrir a aba Fiscal, busca de novo sozinho (uma vez)
@@ -4965,7 +4980,7 @@ export default function DashboardConstrutora({ userEmail }) {
   useEffect(() => {
     if (Object.keys(fiscalBase.notas || {}).length) montarListaFiscal(fiscalBase);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fiscalBase, filtroDataDeFiscal, filtroDataAteFiscal, cnpjsFiscaisExtras]);
+  }, [fiscalBase, filtroDataDeFiscal, filtroDataAteFiscal, cnpjsFiscaisExtras, obraMatrizEfetiva]);
   async function handleBuscarNotasFiscais() {
     setErroBuscaNotasFiscais(null);
     const l = montarListaFiscal(fiscalBase);
@@ -5288,6 +5303,7 @@ export default function DashboardConstrutora({ userEmail }) {
     const qv = Number(buscaFiscal.replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", "."));
     return notasFiscaisEncontradas.filter((n) => {
       if (filtroCnpjFiscal && n.cnpjTomador !== filtroCnpjFiscal) return false;
+      if (filtroObraFiscal && (obraEscolhidaPorNota[n.id] || n.obra || n.obraPadrao || listaObras[0]) !== filtroObraFiscal) return false;
       // canceladas ficam fora da lista (e do total); só aparecem no filtro "Canceladas"
       const cancelada = /cancel/i.test(n.situacao || "");
       if (filtroSitFiscal === "canceladas") return cancelada;
@@ -5311,7 +5327,7 @@ export default function DashboardConstrutora({ userEmail }) {
       if (!Number.isNaN(qv) && qv > 0 && [n.valorNota, n.valorLiquido].some((v) => Math.abs(Number(v) - qv) < 0.01)) return true;
       return false;
     });
-  }, [notasFiscaisEncontradas, buscaFiscal, filtroCnpjFiscal, filtroSitFiscal, pagamentoPorNota, notaJaCadastrada, custosItens, fiscalBase, notasCompra, notaEmSoma]);
+  }, [notasFiscaisEncontradas, buscaFiscal, filtroCnpjFiscal, filtroSitFiscal, pagamentoPorNota, notaJaCadastrada, custosItens, fiscalBase, notasCompra, notaEmSoma, filtroObraFiscal, obraEscolhidaPorNota]);
 
   // Ver a nota: abre o PDF guardado no Gestão ou monta uma visualização a partir do XML (NF-e com os itens; NFS-e com o serviço)
   async function abrirNotaFiscal(nota) {
@@ -7697,6 +7713,24 @@ export default function DashboardConstrutora({ userEmail }) {
         ) : (
         <>
         {/* Tab nav */}
+        {/* Imprimir a aba aberta: abas com relatório próprio abrem o relatório (com o botão de imprimir);
+            as demais (Fiscal, Empréstimos bancários) imprimem a própria tela */}
+        <div className="flex justify-end mb-2 no-print">
+          <button
+            onClick={() => {
+              const comRelatorio = ["geral", "unidades", "cv", "receber", "notas", "pagar", "extrato", "socios", "documentos", "fornecedores", "servicos", "fluxocaixa", "custos"];
+              if (comRelatorio.includes(activeTab)) {
+                setTipoRelatorio(activeTab);
+                setModoRelatorio(true);
+              } else window.print();
+            }}
+            className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+            style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: "#F5F3EC", background: "#22252A" }}
+            title="Imprimir / salvar em PDF a aba aberta"
+          >
+            🖨 IMPRIMIR ESTA ABA
+          </button>
+        </div>
         <div className="flex flex-wrap justify-center gap-1 mb-7 border-b no-print" style={{ borderColor: "#3A3E45" }}>
           {[
             { id: "geral", label: "Visão geral" },
@@ -13410,7 +13444,16 @@ export default function DashboardConstrutora({ userEmail }) {
               <div className="mb-4 text-xs rounded-sm border p-3" style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}>
                 <div className="font-semibold mb-1" style={{ color: "#22252A" }}>CNPJs desta empresa</div>
                 <div style={{ color: "#6B6F76" }}>
-                  Matriz: <b>{fmtCnpj(empresaInfo.cnpj) || "— (sem CNPJ cadastrado)"}</b>
+                  Matriz: <b>{fmtCnpj(empresaInfo.cnpj) || "— (sem CNPJ cadastrado)"}</b> →{" "}
+                  <select
+                    value={obraMatrizEfetiva}
+                    onChange={(e) => { const v = e.target.value; setObraMatrizFiscal(v); Promise.resolve().then(() => window.storage.set(STORAGE_KEY_OBRA_MATRIZ_FISCAL, v, false)).catch(() => {}); }}
+                    className="text-xs px-1 py-0.5 rounded-sm border outline-none"
+                    style={{ borderColor: "#DCD7C9" }}
+                    title="Obra padrão das notas da matriz (as que você trocar na linha ficam como você escolheu)"
+                  >
+                    {listaObras.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
                   {cnpjsFiscaisExtras.map((x, i) => (
                     <span key={x.cnpj} className="ml-3">
                       · {x.nome || "Filial"}: <b>{fmtCnpj(x.cnpj)}</b>{x.obra ? ` → ${x.obra}` : ""}{" "}
@@ -13531,6 +13574,10 @@ export default function DashboardConstrutora({ userEmail }) {
                     className="text-sm px-3 py-2 rounded-sm border outline-none"
                     style={{ borderColor: "#DCD7C9", background: "#FFFFFF", minWidth: 320, flex: "1 1 320px" }}
                   />
+                  <select value={filtroObraFiscal} onChange={(e) => setFiltroObraFiscal(e.target.value)} className="text-sm px-3 py-2 rounded-sm border outline-none" style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }} title="Mostrar só as notas de uma obra">
+                    <option value="">Todas as obras</option>
+                    {listaObras.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
                   <select value={filtroSitFiscal} onChange={(e) => setFiltroSitFiscal(e.target.value)} className="text-sm px-3 py-2 rounded-sm border outline-none" style={{ borderColor: "#DCD7C9", background: "#FFFFFF" }}>
                     <option value="">Para lançar (esconde as já lançadas)</option>
                     <option value="todas">Todas as notas</option>
