@@ -5212,6 +5212,26 @@ export default function DashboardConstrutora({ userEmail }) {
       const txt = `já em ${f.onde} (${String(f.forn).trim().slice(0, 50)}, ${formatBRL(f.valor)}${f.data ? ", " + f.data : ""}) = soma das NF ${achou.map((n) => n.numero).join(" + ")}`;
       achou.forEach((n) => { if (!out[n.id]) out[n.id] = txt; });
     });
+    // o contrário: UMA nota paga em vários boletos/lançamentos (ex.: NF de R$ 1.397 = 2 boletos de R$ 698,50)
+    // (valores lidos de PDF antigamente eram arredondados para reais: tolerância de R$ 1 por lançamento)
+    validas.forEach((n) => {
+      if (out[n.id]) return;
+      const tn = dia(n.data);
+      const vn = Number(n.valorNota);
+      const cands = fontes
+        .filter((f) => f.onde !== "Custos" && (mesmoForn(n.prestador, f.forn) || mesmoForn(f.forn, n.prestador)) && f.valor < vn && (isNaN(dia(f.data)) || (dia(f.data) - tn >= -10 && dia(f.data) - tn <= 150)))
+        .slice(0, 12);
+      if (cands.length < 2) return;
+      let achou = null;
+      const busca = (ini, escolhidas, soma) => {
+        if (achou) return;
+        if (escolhidas.length >= 2 && Math.abs(soma - vn) <= escolhidas.length) { achou = escolhidas; return; }
+        if (escolhidas.length === 4 || soma > vn + 4) return;
+        for (let i = ini; i < cands.length; i++) busca(i + 1, [...escolhidas, cands[i]], soma + cands[i].valor);
+      };
+      busca(0, [], 0);
+      if (achou) out[n.id] = `já em ${achou[0].onde} em ${achou.length} lançamentos (${achou.map((f) => formatBRL(f.valor) + (f.data ? " " + f.data : "")).join(" + ")})`;
+    });
     return out;
   }, [notasFiscaisEncontradas, notasCompra, contasPagar, custosItens]);
 
@@ -5224,7 +5244,8 @@ export default function DashboardConstrutora({ userEmail }) {
     notasFiscaisEncontradas.forEach((n) => {
       const tn = dia(n.data);
       const valores = [n.valorNota, n.valorLiquido].map(Number);
-      const igual = (v) => valores.some((x) => Math.abs(Number(v) - x) < 0.01);
+      // valores inteiros (lidos de PDF antes, quando o app arredondava para reais) comparam com tolerância de R$ 1
+      const igual = (v) => valores.some((x) => Math.abs(Number(v) - x) < (Number.isInteger(Number(v)) ? 1 : 0.01));
       // nome "genérico" (lido do cabeçalho do DANFE/boleto: "Auxiliar da Nota Fiscal…", "Pagador 341-7…", banco) → compara só valor + data (até 60 dias depois)
       const generico = (f) => /auxiliar|nota fiscal|danfe|pagador|banco|sicredi|sicoob|bradesco|itau|caixa|santander|boleto/i.test(norm(f));
       const nc =
