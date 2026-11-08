@@ -5222,6 +5222,10 @@ export default function DashboardConstrutora({ userEmail }) {
     const qv = Number(buscaFiscal.replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", "."));
     return notasFiscaisEncontradas.filter((n) => {
       if (filtroCnpjFiscal && n.cnpjTomador !== filtroCnpjFiscal) return false;
+      // canceladas ficam fora da lista (e do total); só aparecem no filtro "Canceladas"
+      const cancelada = /cancel/i.test(n.situacao || "");
+      if (filtroSitFiscal === "canceladas") return cancelada;
+      if (cancelada) return false;
       if (filtroSitFiscal === "aberto" && pagamentoPorNota[n.id]) return false;
       if (filtroSitFiscal === "pago" && !pagamentoPorNota[n.id]) return false;
       if (filtroSitFiscal === "cadastrada" && !notaJaCadastrada[n.id]) return false;
@@ -13412,6 +13416,7 @@ export default function DashboardConstrutora({ userEmail }) {
                     <option value="pago">Pagas</option>
                     <option value="nfse">Só NFS-e (serviços)</option>
                     <option value="nfe">Só NF-e (compras)</option>
+                    <option value="canceladas">Canceladas ({notasFiscaisEncontradas.filter((n) => /cancel/i.test(n.situacao || "")).length})</option>
                   </select>
                   <span className="text-xs" style={{ color: "#6B6F76" }}>
                     {notasFiscaisFiltradas.length} de {notasFiscaisEncontradas.length} nota(s) · {formatBRL(notasFiscaisFiltradas.reduce((t, n) => t + (Number(n.valorNota) || 0), 0))}
@@ -13533,7 +13538,9 @@ export default function DashboardConstrutora({ userEmail }) {
                           )}
                         </td>
                         <td className="py-2 pr-1 whitespace-nowrap">
-                          {notasCompra.some((c) => c.notaFiscalId === nota.id) ? (
+                          {/cancel/i.test(nota.situacao || "") ? (
+                            <span className="text-xs" style={{ color: "#B23A2E" }}>nota cancelada — não lançar</span>
+                          ) : notasCompra.some((c) => c.notaFiscalId === nota.id) ? (
                             <span className="text-xs" style={{ color: "#4F7A5B" }}>
                               ✓ em Notas de compras
                             </span>
