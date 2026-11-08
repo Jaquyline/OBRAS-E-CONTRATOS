@@ -4946,7 +4946,8 @@ export default function DashboardConstrutora({ userEmail }) {
       .map((n) => ({ ...n, cnpjNome: nomeDe[n.cnpjTomador].nome || fmtCnpj(n.cnpjTomador), obraPadrao: nomeDe[n.cnpjTomador].obra || "" }))
       .sort((a, b) => a.data.localeCompare(b.data));
     setNotasFiscaisEncontradas(lista);
-    setObraEscolhidaPorNota((prev) => { const o = { ...prev }; lista.forEach((n) => { if (n.obraPadrao && !o[n.id]) o[n.id] = n.obraPadrao; }); return o; });
+    // obra escolhida antes fica gravada na nota (n.obra); senão, a obra do CNPJ (filial/afetação)
+    setObraEscolhidaPorNota((prev) => { const o = { ...prev }; lista.forEach((n) => { if (n.obra) o[n.id] = n.obra; else if (n.obraPadrao && !o[n.id]) o[n.id] = n.obraPadrao; }); return o; });
     return lista;
   }
   // NF-e com ciência dada há mais de 1 hora e ainda sem XML: ao abrir a aba Fiscal, busca de novo sozinho (uma vez)
@@ -13705,7 +13706,17 @@ export default function DashboardConstrutora({ userEmail }) {
                               <select
                                 value={obraEscolhidaPorNota[nota.id] || NOMES_OBRAS[0]}
                                 onChange={(e) =>
-                                  setObraEscolhidaPorNota((prev) => ({ ...prev, [nota.id]: e.target.value }))
+                                  {
+                                    const obra = e.target.value;
+                                    setObraEscolhidaPorNota((prev) => ({ ...prev, [nota.id]: obra }));
+                                    // grava a obra na nota, para não precisar escolher de novo da próxima vez
+                                    const base = { ...fiscalBase, notas: { ...(fiscalBase.notas || {}) } };
+                                    if (base.notas[nota.id]) {
+                                      base.notas[nota.id] = { ...base.notas[nota.id], obra };
+                                      setFiscalBase(base);
+                                      Promise.resolve().then(() => window.storage.set(STORAGE_KEY_FISCAL_NOTAS, JSON.stringify(base), false)).catch(() => {});
+                                    }
+                                  }
                                 }
                                 className="text-xs px-1 py-1 rounded-sm border outline-none"
                                 style={{ borderColor: "#DCD7C9", maxWidth: 120 }}
