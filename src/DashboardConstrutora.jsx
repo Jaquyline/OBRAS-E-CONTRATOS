@@ -1210,10 +1210,26 @@ function sugerirParcelasReceber(lancamentosNovos, valoresReceberAtuais) {
 // sugere, para cada lançamento de débito na prévia de importação, uma
 // parcela pendente em "Contas a pagar" com o mesmo valor exato — só quando
 // há uma única candidata sem ambiguidade.
-function sugerirContasPagar(lancamentosNovos, contasPagarAtuais) {
+// Parcelas baixadas como "pagas pelo banco" e ainda sem lançamento do extrato
+// também entram (e têm preferência): o extrato que chega depois faz o link.
+function sugerirContasPagar(lancamentosNovos, contasPagarAtuais, extratoAtual = []) {
   const usadasNoLote = new Set();
+  const jaLinkadas = new Set((extratoAtual || []).filter((le) => le.contaPagarId).map((le) => le.contaPagarId));
+  const diaBR = (br) => { const d = parseDateBR(br); return d ? d.getTime() / 864e5 : NaN; };
   return lancamentosNovos.map((l) => {
     if (Number(l.valor) >= 0) return l;
+    if (l.contaPagarId) return l;
+    const pagasBanco = contasPagarAtuais.filter(
+      (c) =>
+        c.status === "pago" && c.formaPagamento === "banco" && !jaLinkadas.has(c.id) && !usadasNoLote.has(c.id) &&
+        Number(c.valor).toFixed(2) === Number(Math.abs(l.valor)).toFixed(2) &&
+        (isNaN(diaBR(c.dataPagamento)) || isNaN(diaBR(l.data)) || Math.abs(diaBR(l.data) - diaBR(c.dataPagamento)) <= 15)
+    );
+    if (pagasBanco.length >= 1) {
+      pagasBanco.sort((a, b) => Math.abs(diaBR(l.data) - diaBR(a.dataPagamento)) - Math.abs(diaBR(l.data) - diaBR(b.dataPagamento)));
+      usadasNoLote.add(pagasBanco[0].id);
+      return { ...l, contaPagarId: pagasBanco[0].id };
+    }
     const candidatas = contasPagarAtuais.filter(
       (c) =>
         c.status !== "pago" &&
@@ -5134,6 +5150,7 @@ export default function DashboardConstrutora({ userEmail }) {
     return out;
   }, [notasFiscaisEncontradas, notasCompra, custosItens]);
   const [levarMesmoAssim, setLevarMesmoAssim] = useState({});
+  const [condicaoPorNota, setCondicaoPorNota] = useState({});
   // pesquisa na lista: fornecedor, nº da nota, CNPJ do fornecedor ou valor (ex.: 1.550 ou 1550,00)
   const notasFiscaisFiltradas = useMemo(() => {
     const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -5229,9 +5246,10 @@ export default function DashboardConstrutora({ userEmail }) {
   // Se o extrato já tem a saída com o mesmo valor, a parcela entra como paga.
   async function handleLevarNotaParaCompras(nota) {
     if (notasCompra.some((c) => c.notaFiscalId === nota.id)) return;
+    const cond = condicaoPorNota[nota.id] || "auto"; // auto = duplicatas do XML; sem elas, à vista
     const obra = obraEscolhidaPorNota[nota.id] || NOMES_OBRAS[0];
     let dups = [];
-    if (nota.tipo === "NF-e" && nota.temXml) {
+    if ((cond === "auto" || cond === "xml") && nota.tipo === "NF-e" && nota.temXml) {
       try {
         const rx = await window.storage.get(prefixoEmpresa + "fiscal-xml:" + nota.id, false);
         const xml = rx && rx.value ? String(rx.value) : "";
@@ -5253,8 +5271,9 @@ export default function DashboardConstrutora({ userEmail }) {
       obra,
       valorTotal,
       dataEmissao: dataISOparaBR(nota.data) || formatDateBR(new Date()),
-      numeroParcelas: dups.length || 1,
+      numeroParcelas: dups.length || (/^\dx$/.test(cond) ? Number(cond[0]) : 1),
       notaFiscalId: nota.id,
+      condicao: dups.length ? "conforme XML" : cond === "30" ? "30 dias" : /^\dx$/.test(cond) ? cond : "à vista",
       numeroNota: nota.numero || "",
       tipoNota: nota.tipo || "NFS-e",
       cnpjFornecedor: nota.prestadorDoc || "",
@@ -5262,10 +5281,14 @@ export default function DashboardConstrutora({ userEmail }) {
     };
     let parcelas = dups.length
       ? dups.map((d, i) => ({ id: `${id}-${i + 1}`, notaId: id, fornecedor, obra, parcela: `${i + 1}/${dups.length}`, valor: d.valor, vencimento: dataISOparaBR(d.venc) || d.venc, status: "pendente" }))
-      : gerarParcelas(novaNota);
+      : cond === "30" || /^\dx$/.test(cond)
+        ? gerarParcelas(novaNota)
+        : [{ id: `${id}-1`, notaId: id, fornecedor, obra, parcela: "1/1", valor: valorTotal, vencimento: novaNota.dataEmissao, status: "pendente" }]; // à vista: vence na emissão
     const pg = pagamentoPorNota[nota.id];
-    if (pg && parcelas.length === 1) parcelas = parcelas.map((p) => ({ ...p, status: "pago", observacao: `Paga em ${pg.data} (extrato)` }));
+    const linkar = pg && parcelas.length === 1 && !pg.contaPagarId;
+    if (pg && parcelas.length === 1) parcelas = parcelas.map((p) => ({ ...p, status: "pago", formaPagamento: "banco", dataPagamento: pg.data, observacao: `Paga em ${pg.data} (extrato)` }));
     await persistNotasEPagar([...notasCompra, novaNota], [...contasPagar, ...parcelas]);
+    if (linkar) await persistExtrato(extrato.map((l) => (l.id === pg.id ? { ...l, contaPagarId: parcelas[0].id } : l))); // já liga a saída do extrato à parcela
   }
 
   function handleLevarNotaParaCusto(nota) {
@@ -5559,12 +5582,25 @@ export default function DashboardConstrutora({ userEmail }) {
     );
   }
 
-  function handleToggleParcelaPaga(id) {
+  // Baixa manual: pergunta se foi pago pelo banco ou pelo caixa. Pago pelo banco fica
+  // "aguardando extrato" até o extrato importado trazer a saída (o link é feito sozinho).
+  const [baixandoParcelaId, setBaixandoParcelaId] = useState(null);
+  function handleToggleParcelaPaga(id, forma) {
+    const conta = contasPagar.find((c) => c.id === id);
+    if (!conta) return;
+    if (conta.status === "pago") {
+      const { formaPagamento, dataPagamento, ...resto } = conta;
+      persistNotasEPagar(notasCompra, contasPagar.map((c) => (c.id === id ? { ...resto, status: "pendente" } : c)));
+      return;
+    }
+    if (!forma) return setBaixandoParcelaId(id);
+    setBaixandoParcelaId(null);
     persistNotasEPagar(
       notasCompra,
-      contasPagar.map((c) => (c.id === id ? { ...c, status: c.status === "pago" ? "pendente" : "pago" } : c))
+      contasPagar.map((c) => (c.id === id ? { ...c, status: "pago", formaPagamento: forma, dataPagamento: formatDateBR(new Date()) } : c))
     );
   }
+  const contasLinkadasExtrato = useMemo(() => new Set((extrato || []).filter((le) => le.contaPagarId).map((le) => le.contaPagarId)), [extrato]);
 
   // Edição de juros/multa de uma conta a pagar — atualiza local a cada
   // tecla e só grava quando o campo perde o foco, evitando salvar a cada
@@ -5736,10 +5772,10 @@ export default function DashboardConstrutora({ userEmail }) {
     );
     const novasContasPagar = contasPagar.map((c) => {
       if (contaAnteriorId && c.id === contaAnteriorId && c.id !== contaId) {
-        return { ...c, status: "pendente" };
+        return c.formaPagamento ? c : { ...c, status: "pendente" };
       }
       if (contaId && c.id === contaId) {
-        return { ...c, status: "pago" };
+        return { ...c, status: "pago", formaPagamento: "banco", dataPagamento: c.dataPagamento || (lancamentoAtual && lancamentoAtual.data) || formatDateBR(new Date()) };
       }
       return c;
     });
@@ -5766,7 +5802,7 @@ export default function DashboardConstrutora({ userEmail }) {
       extrato.filter((le) => le.id !== lancamentoId && le.contaPagarId).map((le) => le.contaPagarId)
     );
     return contasPagar.filter(
-      (c) => c.id === contaAtualId || (!vinculadasPorOutros.has(c.id) && c.status !== "pago")
+      (c) => c.id === contaAtualId || (!vinculadasPorOutros.has(c.id) && (c.status !== "pago" || c.formaPagamento === "banco"))
     );
   }
 
@@ -5800,7 +5836,7 @@ export default function DashboardConstrutora({ userEmail }) {
     return contasPagar.filter(
       (c) =>
         c.id === contaAtualId ||
-        (!vinculadasSalvas.has(c.id) && !vinculadasNaPreviaPorOutros.has(c.id) && c.status !== "pago")
+        (!vinculadasSalvas.has(c.id) && !vinculadasNaPreviaPorOutros.has(c.id) && (c.status !== "pago" || c.formaPagamento === "banco"))
     );
   }
 
@@ -5854,7 +5890,7 @@ export default function DashboardConstrutora({ userEmail }) {
       if (lancamentos.length > 0) {
         const comDuplicados = marcarDuplicadosExtrato(lancamentos, extrato);
         const comParcelaReceber = sugerirParcelasReceber(comDuplicados, valoresReceber);
-        const comContaPagar = sugerirContasPagar(comParcelaReceber, contasPagar);
+        const comContaPagar = sugerirContasPagar(comParcelaReceber, contasPagar, extrato);
         const comClassificacaoContabil = comContaPagar.map((l) =>
           aplicarRegrasAprendidas({
             ...l,
@@ -5918,7 +5954,7 @@ export default function DashboardConstrutora({ userEmail }) {
       : valoresReceber;
     const idsContasVinculadas = new Set(confirmados.filter((c) => c.contaPagarId).map((c) => c.contaPagarId));
     const novasContasPagar = idsContasVinculadas.size
-      ? contasPagar.map((c) => (idsContasVinculadas.has(c.id) ? { ...c, status: "pago" } : c))
+      ? contasPagar.map((c) => (idsContasVinculadas.has(c.id) ? { ...c, status: "pago", formaPagamento: "banco", dataPagamento: c.dataPagamento || (confirmados.find((l) => l.contaPagarId === c.id) || {}).data || "" } : c))
       : contasPagar;
     persistExtrato([...extrato, ...confirmados]);
     persistContratosEReceber(contratosCV, novoValoresReceber);
@@ -9884,14 +9920,30 @@ export default function DashboardConstrutora({ userEmail }) {
                                 </option>
                               ))}
                             </select>
-                            <div className="flex items-center gap-3">
-                              <button
-                                onClick={() => handleToggleParcelaPaga(c.id)}
-                                className="text-xs w-fit font-semibold"
-                                style={{ color: c.status === "pago" ? "#8A8D93" : "#4F7A5B" }}
-                              >
-                                {c.status === "pago" ? "Reabrir" : "Marcar pago"}
-                              </button>
+                            <div className="flex items-center gap-3 flex-wrap">
+                              {baixandoParcelaId === c.id ? (
+                                <span className="flex items-center gap-1 text-xs">
+                                  <span style={{ color: "#6B6F76" }}>Pago pelo:</span>
+                                  <button onClick={() => handleToggleParcelaPaga(c.id, "banco")} className="px-2 py-0.5 rounded-sm font-semibold" style={{ color: "#F5F3EC", background: "#3D6E8C" }} title="Quando o extrato chegar, a saída é ligada a esta parcela sozinha">🏦 Banco</button>
+                                  <button onClick={() => handleToggleParcelaPaga(c.id, "caixa")} className="px-2 py-0.5 rounded-sm font-semibold" style={{ color: "#F5F3EC", background: "#4F7A5B" }} title="Pago em dinheiro (caixa) — não espera extrato">💵 Caixa</button>
+                                  <button onClick={() => setBaixandoParcelaId(null)} style={{ color: "#8A8D93" }}>cancelar</button>
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => handleToggleParcelaPaga(c.id)}
+                                  className="text-xs w-fit font-semibold"
+                                  style={{ color: c.status === "pago" ? "#8A8D93" : "#4F7A5B" }}
+                                >
+                                  {c.status === "pago" ? "Reabrir" : "Marcar pago"}
+                                </button>
+                              )}
+                              {c.status === "pago" && (c.formaPagamento === "banco" || contasLinkadasExtrato.has(c.id)) ? (
+                                <span className="text-[10px]" style={{ color: contasLinkadasExtrato.has(c.id) ? "#4F7A5B" : "#A4640B" }} title={c.dataPagamento ? `Baixa em ${c.dataPagamento}` : ""}>
+                                  🏦 banco · {contasLinkadasExtrato.has(c.id) ? "conciliado no extrato" : "aguardando extrato"}
+                                </span>
+                              ) : c.status === "pago" && c.formaPagamento === "caixa" ? (
+                                <span className="text-[10px]" style={{ color: "#4F7A5B" }} title={c.dataPagamento ? `Baixa em ${c.dataPagamento}` : ""}>💵 caixa</span>
+                              ) : null}
                               <button
                                 onClick={() => handleDeleteContaPagar(c.id)}
                                 className="text-xs w-fit"
@@ -13239,6 +13291,19 @@ export default function DashboardConstrutora({ userEmail }) {
                                     {o}
                                   </option>
                                 ))}
+                              </select>
+                              <select
+                                value={condicaoPorNota[nota.id] || "auto"}
+                                onChange={(e) => setCondicaoPorNota((p) => ({ ...p, [nota.id]: e.target.value }))}
+                                className="text-xs px-1 py-1 rounded-sm border outline-none"
+                                style={{ borderColor: "#DCD7C9", maxWidth: 92 }}
+                                title="Condição de pagamento das parcelas em Contas a pagar"
+                              >
+                                <option value="auto">{nota.tipo === "NF-e" && nota.temXml ? "do XML" : "à vista"}</option>
+                                {nota.tipo === "NF-e" && nota.temXml ? <option value="vista">à vista</option> : null}
+                                <option value="30">30 dias</option>
+                                <option value="2x">2x (30/60)</option>
+                                <option value="3x">3x (30/60/90)</option>
                               </select>
                               <button
                                 onClick={() => handleLevarNotaParaCompras(nota)}
