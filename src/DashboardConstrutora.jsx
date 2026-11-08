@@ -5530,9 +5530,13 @@ export default function DashboardConstrutora({ userEmail }) {
     if (extrato.some((l) => idsP.has(l.contaPagarId))) await persistExtrato(extrato.map((l) => (idsP.has(l.contaPagarId) ? { ...l, contaPagarId: "" } : l)));
   }
 
-  function handleLevarNotaParaCusto(nota) {
+  // "custo": escolher a etapa do orçamento antes de lançar (a nota entra como item extra dessa etapa, com o gasto real)
+  const [custoNotaAberto, setCustoNotaAberto] = useState(null);
+  const [etapaCustoPorNota, setEtapaCustoPorNota] = useState({});
+  function handleLevarNotaParaCusto(nota, etapaEscolhida) {
     const obraEscolhida = obraEscolhidaPorNota[nota.id] || NOMES_OBRAS[0];
-    const etapaDestino = ETAPAS_CUSTO_ATUAL[0]?.etapa || "";
+    const etapaDestino = etapaEscolhida || ETAPAS_CUSTO_ATUAL[0]?.etapa || "";
+    setCustoNotaAberto(null);
     const retencoesTexto = [
       nota.issRetido ? `ISS retido ${formatBRL(nota.issRetido)}` : null,
       nota.pcc ? `PIS/COFINS/CSLL ${formatBRL(nota.pcc)}` : null,
@@ -13806,9 +13810,27 @@ export default function DashboardConstrutora({ userEmail }) {
                               >
                                 → Compras
                               </button>
-                              <button onClick={() => handleLevarNotaParaCusto(nota)} className="text-[10px] underline" style={{ color: "#6B6F76" }} title="Lançar só como custo da obra (sem Contas a pagar)">
-                                custo
-                              </button>
+                              {custoNotaAberto === nota.id ? (
+                                <span className="flex items-center gap-1">
+                                  <select
+                                    value={etapaCustoPorNota[nota.id] || ETAPAS_CUSTO_ATUAL[0]?.etapa || ""}
+                                    onChange={(e) => setEtapaCustoPorNota((p) => ({ ...p, [nota.id]: e.target.value }))}
+                                    className="text-xs px-1 py-1 rounded-sm border outline-none"
+                                    style={{ borderColor: "#DCD7C9", maxWidth: 200 }}
+                                    title="Etapa do orçamento em que a nota entra como realizado"
+                                  >
+                                    {ETAPAS_CUSTO_ATUAL.map((et) => <option key={et.etapa} value={et.etapa}>{et.etapa}</option>)}
+                                  </select>
+                                  <button onClick={() => handleLevarNotaParaCusto(nota, etapaCustoPorNota[nota.id] || ETAPAS_CUSTO_ATUAL[0]?.etapa)} className="text-xs font-semibold px-2 py-1 rounded-sm" style={{ color: "#F5F3EC", background: "#4F7A5B" }}>
+                                    lançar
+                                  </button>
+                                  <button onClick={() => setCustoNotaAberto(null)} className="text-[10px]" style={{ color: "#8A8D93" }}>✕</button>
+                                </span>
+                              ) : (
+                                <button onClick={() => setCustoNotaAberto(nota.id)} className="text-[10px] underline" style={{ color: "#6B6F76" }} title="Lançar só como custo realizado da obra, escolhendo a etapa do orçamento (sem Contas a pagar)">
+                                  custo
+                                </button>
+                              )}
                               <button onClick={() => ocultarNotaFiscal(nota, true)} className="text-[10px] underline" style={{ color: "#B23A2E" }} title="Já lançada de outro jeito / repetida: tira da tela (fica no filtro Ocultadas)">
                                 ocultar
                               </button>
