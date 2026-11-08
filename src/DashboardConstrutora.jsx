@@ -7522,6 +7522,7 @@ export default function DashboardConstrutora({ userEmail }) {
             { id: "unidades", label: empresaAtual === "sgo" ? "Situação do galpão" : "Unidades e tabela de vendas" },
             { id: "cv", label: "Contratos de compra e venda" },
             { id: "receber", label: "Valores a receber" },
+            { id: "fiscal", label: "Fiscal" },
             { id: "notas", label: "Notas de compras" },
             { id: "pagar", label: "Contas a pagar" },
             { id: "extrato", label: "Extrato bancário" },
@@ -7530,7 +7531,6 @@ export default function DashboardConstrutora({ userEmail }) {
             { id: "documentos", label: "Documentos da empresa" },
             { id: "fornecedores", label: "Contratos de fornecedores" },
             { id: "servicos", label: "Contratos de prestação de serviços" },
-            { id: "fiscal", label: "Fiscal" },
           ].map((tab) => (
             <button
               key={tab.id}
