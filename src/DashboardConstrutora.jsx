@@ -794,20 +794,35 @@ function parseContratoCV(text) {
 // data de emissão em modelos comuns de nota fiscal / boleto de fornecedor.
 function parseNotaCompra(text) {
   const result = {};
+  const limpa = (t) => String(t || "").replace(/\s+/g, " ").trim().replace(/[\s,.;:\-–]+$/, "");
+  // nomes que aparecem no cabeçalho do DANFE/boleto e não são o fornecedor
+  const naoEhFornecedor = (t) => /auxiliar|documento|nota fiscal|danfe|pagador|sacado|banco|sicredi|sicoob|bradesco|ita[uú]|caixa econ|santander|recibo|entrada|sa[ií]da/i.test(t);
 
-  const fornecedorMatch = text.match(
-    /([A-ZÀ-Ü][A-ZÀ-Üa-zà-ü0-9\s.\-]{2,60}?)\s*(?:LTDA|ME\b|EIRELI|S\/A|SA\b)/
-  );
-  if (fornecedorMatch) {
-    result.fornecedor = fornecedorMatch[0].trim().replace(/\s+/g, " ");
+  // DANFE: canhoto "RECEBEMOS DE <EMITENTE> OS PRODUTOS…"
+  const canhoto = text.match(/RECEBEMOS\s+DE\s+(.{3,90}?)\s+OS\s+PRODUTOS/i);
+  // boleto: "Beneficiário <NOME> CNPJ…"
+  const benef = text.match(/(?:Benefici[aá]rio|Cedente)\s*(?:final)?\s*[:\-]?\s*([A-ZÀ-Ü][^\n]{2,80}?)(?=\s*(?:-\s*)?(?:CNPJ|CPF|\d{2}\.\d{3}\.\d{3}|Ag[eê]ncia|$))/i);
+  if (canhoto && !naoEhFornecedor(canhoto[1])) result.fornecedor = limpa(canhoto[1]);
+  else if (benef && !naoEhFornecedor(benef[1])) result.fornecedor = limpa(benef[1]);
+  else {
+    const re = /([A-ZÀ-Ü][A-ZÀ-Üa-zà-ü0-9\s.&\-]{2,60}?)\s*(?:LTDA|ME\b|EIRELI|S\/A|SA\b)/g;
+    let m;
+    while ((m = re.exec(text))) {
+      if (!naoEhFornecedor(m[0])) { result.fornecedor = limpa(m[0]); break; }
+    }
   }
+  // chave de acesso (44 dígitos): o CNPJ do emitente fica nas posições 7 a 20
+  const chave = (text.replace(/[ .]/g, "").match(/(?<!\d)\d{44}(?!\d)/) || [])[0];
+  if (chave) { result.chave = chave; result.cnpjEmitente = chave.slice(6, 20); }
 
   const valorMatch =
     text.match(/valor total(?:\s*da nota)?\s*[:\-]?\s*R\$\s*([\d.,]+)/i) ||
-    text.match(/total\s*(?:a\s*pagar)?\s*[:\-]?\s*R\$\s*([\d.,]+)/i);
+    text.match(/valor total da nota\s*[:\-]?\s*(\d{1,3}(?:\.\d{3})*,\d{2})/i) ||
+    text.match(/total\s*(?:a\s*pagar)?\s*[:\-]?\s*R\$\s*([\d.,]+)/i) ||
+    text.match(/valor\s*(?:do\s*documento|cobrado)?\s*[:\-]?\s*R\$\s*([\d.,]+)/i);
   if (valorMatch) {
     const numero = valorMatch[1].replace(/\./g, "").replace(",", ".");
-    result.valorTotal = String(Math.round(parseFloat(numero)));
+    result.valorTotal = String(Math.round(parseFloat(numero) * 100) / 100);
   }
 
   const parcelasMatch =
@@ -819,6 +834,7 @@ function parseNotaCompra(text) {
 
   const dataMatch =
     text.match(/emiss[ãa]o[^0-9]{0,15}(\d{1,2})\/(\d{1,2})\/(\d{4})/i) ||
+    text.match(/data\s*(?:do)?\s*documento[^0-9]{0,15}(\d{1,2})\/(\d{1,2})\/(\d{4})/i) ||
     text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (dataMatch) {
     const [, dia, mes, ano] = dataMatch;
@@ -5599,6 +5615,49 @@ export default function DashboardConstrutora({ userEmail }) {
     persistNotasEPagar(notasCompra, [...contasPagar, ...novas]);
   }
 
+  // Notas de compra cadastradas com o nome errado (lido do cabeçalho do DANFE/boleto: "Auxiliar da Nota Fiscal…",
+  // "Pagador 341-7…", banco): procura na aba Fiscal a nota com o mesmo valor e data próxima e sugere o fornecedor certo.
+  const nomeGenericoCompra = (f) => /auxiliar|nota fiscal|danfe|pagador|banco|sicredi|sicoob|bradesco|ita[uú]|caixa econ|santander|boleto|^documento/i.test(String(f || ""));
+  const sugestaoFornecedorCompra = useMemo(() => {
+    const fiscais = Object.values(fiscalBase.notas || {}).filter((x) => x.prestador && !/cancel/i.test(x.situacao || ""));
+    const dia = (br) => { const d = parseDateBR(br) || (/^\d{4}-\d{2}-\d{2}/.test(br || "") ? new Date(br.slice(0, 10) + "T12:00:00") : null); return d ? d.getTime() / 864e5 : NaN; };
+    const out = {};
+    (notasCompra || []).forEach((n) => {
+      if (!nomeGenericoCompra(n.fornecedor)) return;
+      const tn = dia(n.dataEmissao);
+      const resto = String(n.fornecedor || "").toLowerCase();
+      const cands = fiscais
+        .filter((f) => Math.abs(Number(f.valorNota) - Number(n.valorTotal)) < 1 || Math.abs(Number(f.valorLiquido) - Number(n.valorTotal)) < 1)
+        .map((f) => ({ f, dd: isNaN(tn) ? 0 : tn - dia(f.data) }))
+        .filter((x) => x.dd >= -5 && x.dd <= 60)
+        .sort((a, b) => {
+          // prefere o fornecedor cujo nome aparece no texto lido (ex.: "Pagador 341-7 VERSATIL…") e a data mais próxima
+          const pa = String(a.f.prestador).toLowerCase().split(/\s+/).filter((w) => w.length > 3).some((w) => resto.includes(w)) ? 0 : 1;
+          const pb = String(b.f.prestador).toLowerCase().split(/\s+/).filter((w) => w.length > 3).some((w) => resto.includes(w)) ? 0 : 1;
+          return pa - pb || Math.abs(a.dd) - Math.abs(b.dd);
+        });
+      if (cands.length) out[n.id] = cands[0].f;
+    });
+    return out;
+  }, [notasCompra, fiscalBase]);
+  function handleRenomearFornecedorNota(id, nome) {
+    const novo = String(nome || "").trim();
+    if (!novo) return;
+    persistNotasEPagar(
+      notasCompra.map((n) => (n.id === id ? { ...n, fornecedor: novo } : n)),
+      contasPagar.map((c) => (c.notaId === id ? { ...c, fornecedor: novo } : c))
+    );
+  }
+  function handleCorrigirNomesPeloFiscal() {
+    const ids = Object.keys(sugestaoFornecedorCompra);
+    if (!ids.length) return;
+    const porId = new Map(ids.map((id) => [String(id), sugestaoFornecedorCompra[id].prestador]));
+    persistNotasEPagar(
+      notasCompra.map((n) => (porId.has(String(n.id)) ? { ...n, fornecedor: porId.get(String(n.id)) } : n)),
+      contasPagar.map((c) => (porId.has(String(c.notaId)) ? { ...c, fornecedor: porId.get(String(c.notaId)) } : c))
+    );
+  }
+
   function handleDeleteNota(id) {
     persistNotasEPagar(
       notasCompra.filter((n) => n.id !== id),
@@ -5705,6 +5764,17 @@ export default function DashboardConstrutora({ userEmail }) {
     try {
       const text = await extractTextFromPdf(file);
       const parsed = parseNotaCompra(text);
+      // se a nota já veio pela aba Fiscal (mesma chave ou mesmo CNPJ do emitente), usa o nome/valor/data de lá
+      const fiscais = Object.values(fiscalBase.notas || {});
+      const porChave = parsed.chave && fiscais.find((n) => n.chave === parsed.chave);
+      const porCnpj = !porChave && parsed.cnpjEmitente && fiscais.find((n) => String(n.prestadorDoc || "").replace(/\D/g, "") === parsed.cnpjEmitente);
+      if (porChave) {
+        parsed.fornecedor = porChave.prestador;
+        parsed.valorTotal = String(porChave.valorNota);
+        parsed.dataEmissao = dataISOparaBR(porChave.data) || parsed.dataEmissao;
+      } else if (porCnpj) parsed.fornecedor = porCnpj.prestador;
+      delete parsed.chave;
+      delete parsed.cnpjEmitente;
       if (Object.keys(parsed).length === 0) {
         setPdfImportErrorNota("Não consegui reconhecer os campos neste PDF. Preencha manualmente.");
       } else {
@@ -9627,6 +9697,14 @@ export default function DashboardConstrutora({ userEmail }) {
                     <span></span>
                   </div>
 
+                  {Object.keys(sugestaoFornecedorCompra).length > 0 && (
+                    <div className="flex items-center gap-3 mb-3 text-xs px-3 py-2 rounded-sm flex-wrap" style={{ color: "#8A6A3E", background: "#FBEBDB" }}>
+                      {Object.keys(sugestaoFornecedorCompra).length} nota(s) com o nome lido do cabeçalho do PDF ("Auxiliar da Nota Fiscal…", "Pagador…") e que têm a nota correspondente na aba Fiscal.
+                      <button onClick={handleCorrigirNomesPeloFiscal} className="font-semibold px-2 py-1 rounded-sm" style={{ color: "#F5F3EC", background: "#3D6E8C" }}>
+                        Corrigir os nomes pelo Fiscal
+                      </button>
+                    </div>
+                  )}
                   <div className="space-y-2">
                     {notasFiltradas
                       .slice()
@@ -9645,7 +9723,25 @@ export default function DashboardConstrutora({ userEmail }) {
                           className="grid grid-cols-2 sm:grid-cols-[2.2fr_1fr_1fr_1fr_0.8fr_1.4fr_auto] gap-2 sm:gap-3 items-center rounded-sm px-3 py-3"
                           style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
                         >
-                          <span className="text-sm font-semibold min-w-0" style={{ color: "#22252A" }}>{n.fornecedor}</span>
+                          <span className="text-sm font-semibold min-w-0" style={{ color: "#22252A" }}>
+                            {n.fornecedor}{" "}
+                            <button
+                              onClick={() => { const v = window.prompt("Nome do fornecedor:", n.fornecedor); if (v != null) handleRenomearFornecedorNota(n.id, v); }}
+                              className="text-[11px] font-normal"
+                              style={{ color: "#8A8D93" }}
+                              title="Corrigir o nome do fornecedor"
+                            >
+                              ✎
+                            </button>
+                            {sugestaoFornecedorCompra[n.id] ? (
+                              <span className="block text-[11px] font-normal" style={{ color: "#A4640B" }}>
+                                ↳ na aba Fiscal: <b>{sugestaoFornecedorCompra[n.id].prestador}</b> ({sugestaoFornecedorCompra[n.id].tipo} nº {sugestaoFornecedorCompra[n.id].numero}, {dataISOparaBR(sugestaoFornecedorCompra[n.id].data)}){" "}
+                                <button onClick={() => handleRenomearFornecedorNota(n.id, sugestaoFornecedorCompra[n.id].prestador)} className="underline" style={{ color: "#3D6E8C" }}>usar este nome</button>
+                              </span>
+                            ) : nomeGenericoCompra(n.fornecedor) ? (
+                              <span className="block text-[11px] font-normal" style={{ color: "#8A8D93" }}>nome lido do cabeçalho do PDF — clique em ✎ para corrigir</span>
+                            ) : null}
+                          </span>
                           <span className="text-sm truncate min-w-0" title={n.obra} style={{ color: "#22252A" }}>{n.obra}</span>
                           <span
                             className="text-sm"
