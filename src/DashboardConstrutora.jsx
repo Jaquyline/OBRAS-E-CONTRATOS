@@ -5400,8 +5400,11 @@ export default function DashboardConstrutora({ userEmail }) {
   // leva a nota do Fiscal para Notas de compras e gera as parcelas em Contas a pagar.
   // Vencimentos: das duplicatas do XML da NF-e (<dup>), quando o XML completo já chegou; senão 1x, 1 mês após a emissão.
   // Se o extrato já tem a saída com o mesmo valor, a parcela entra como paga.
-  async function handleLevarNotaParaCompras(nota) {
+  async function handleLevarNotaParaCompras(nota, etapaCusto) {
     if (notasCompra.some((c) => c.notaFiscalId === nota.id)) return;
+    // obrigatório: a etapa do orçamento — a nota entra primeiro em Custos (realizado) e depois em Compras/Contas a pagar
+    const jaNoCusto = custosItens.some((c) => c.id === `custo-${nota.id}` || c.id === `custo-nfse-${nota.id}`);
+    if (!jaNoCusto && !etapaCusto) { setComprasNotaAberto(nota.id); return; }
     const cond = condicaoPorNota[nota.id] || "auto"; // auto = duplicatas do XML; sem elas, à vista
     if (cond === "data" && !vencimentoPorNota[nota.id]) return setErroBuscaNotasFiscais(`Informe a data de vencimento da nota ${nota.numero} antes de levar para Compras.`);
     const obra = obraEscolhidaPorNota[nota.id] || NOMES_OBRAS[0];
@@ -5448,6 +5451,8 @@ export default function DashboardConstrutora({ userEmail }) {
     if (pg && parcelas.length === 1) parcelas = parcelas.map((p) => ({ ...p, status: "pago", formaPagamento: pg.caixa ? "caixa" : "banco", dataPagamento: pg.data, observacao: pg.caixa ? `Paga no caixa em ${pg.data}` : `Paga em ${pg.data} (extrato)` }));
     await persistNotasEPagar([...notasCompra, novaNota], [...contasPagar, ...parcelas]);
     if (linkar) await persistExtrato(extrato.map((l) => (l.id === pg.id ? { ...l, contaPagarId: parcelas[0].id } : l))); // já liga a saída do extrato à parcela
+    if (!jaNoCusto) handleLevarNotaParaCusto(nota, etapaCusto); // custo realizado na etapa escolhida
+    setComprasNotaAberto(null);
   }
 
   // Baixar agora o XML completo de uma NF-e (consulta pela chave na SEFAZ) — vale depois da ciência/confirmação
@@ -5524,12 +5529,17 @@ export default function DashboardConstrutora({ userEmail }) {
     const nc = notasCompra.find((c) => c.notaFiscalId === nota.id);
     if (!nc) return;
     const ps = contasPagar.filter((c) => c.notaId === nc.id);
-    if (!window.confirm(`Desfazer o lançamento da nota ${nota.numero} (${nota.prestador})?\n\nSai de Notas de compras e ${ps.length} parcela(s) saem de Contas a pagar. Depois é só escolher a condição certa e clicar em "→ Compras" de novo.`)) return;
+    if (!window.confirm(`Desfazer o lançamento da nota ${nota.numero} (${nota.prestador})?\n\nSai de Notas de compras, ${ps.length} parcela(s) saem de Contas a pagar e a linha sai de Custos. Depois é só escolher a condição certa e clicar em "→ Compras" de novo.`)) return;
     const idsP = new Set(ps.map((c) => c.id));
     await persistNotasEPagar(notasCompra.filter((c) => c.id !== nc.id), contasPagar.filter((c) => !idsP.has(c.id)));
+    // a linha de Custos criada junto também sai
+    const idsCusto = new Set([`custo-${nota.id}`, `custo-nfse-${nota.id}`]);
+    if (custosItens.some((c) => idsCusto.has(c.id))) persistCustosItens(custosItens.filter((c) => !idsCusto.has(c.id)));
+    setNotasLevadasParaCusto((prev) => { const o = { ...prev }; delete o[nota.id]; return o; });
     if (extrato.some((l) => idsP.has(l.contaPagarId))) await persistExtrato(extrato.map((l) => (idsP.has(l.contaPagarId) ? { ...l, contaPagarId: "" } : l)));
   }
 
+  const [comprasNotaAberto, setComprasNotaAberto] = useState(null);
   // desfaz o "custo": tira da tabela de custos a linha criada a partir desta nota
   function handleDesfazerCustoNota(nota) {
     const ids = new Set([`custo-${nota.id}`, `custo-nfse-${nota.id}`]);
@@ -13814,14 +13824,39 @@ export default function DashboardConstrutora({ userEmail }) {
                                   title="Data de vencimento da parcela em Contas a pagar"
                                 />
                               )}
-                              <button
-                                onClick={() => handleLevarNotaParaCompras(nota)}
-                                className="text-xs font-semibold px-2 py-1 rounded-sm whitespace-nowrap"
-                                style={{ color: "#F5F3EC", background: "#4F7A5B" }}
-                                title="Lança em Notas de compras e gera a(s) parcela(s) em Contas a pagar"
-                              >
-                                → Compras
-                              </button>
+                              {comprasNotaAberto === nota.id ? (
+                                <span className="flex items-center gap-1">
+                                  <select
+                                    value={etapaCustoPorNota[nota.id] || ""}
+                                    onChange={(e) => setEtapaCustoPorNota((p) => ({ ...p, [nota.id]: e.target.value }))}
+                                    className="text-xs px-1 py-1 rounded-sm border outline-none"
+                                    style={{ borderColor: etapaCustoPorNota[nota.id] ? "#DCD7C9" : "#B23A2E", maxWidth: 200 }}
+                                    title="Obrigatório: etapa do orçamento em que a nota entra como custo realizado"
+                                  >
+                                    <option value="">Etapa do custo (obrigatório)…</option>
+                                    {ETAPAS_CUSTO_ATUAL.map((et) => <option key={et.etapa} value={et.etapa}>{et.etapa}</option>)}
+                                  </select>
+                                  <button
+                                    disabled={!etapaCustoPorNota[nota.id]}
+                                    onClick={() => handleLevarNotaParaCompras(nota, etapaCustoPorNota[nota.id])}
+                                    className="text-xs font-semibold px-2 py-1 rounded-sm whitespace-nowrap"
+                                    style={{ color: "#F5F3EC", background: etapaCustoPorNota[nota.id] ? "#4F7A5B" : "#B9BCC1" }}
+                                    title="Lança em Custos (realizado), Notas de compras e Contas a pagar"
+                                  >
+                                    → Compras
+                                  </button>
+                                  <button onClick={() => setComprasNotaAberto(null)} className="text-[10px]" style={{ color: "#8A8D93" }}>✕</button>
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => handleLevarNotaParaCompras(nota)}
+                                  className="text-xs font-semibold px-2 py-1 rounded-sm whitespace-nowrap"
+                                  style={{ color: "#F5F3EC", background: "#4F7A5B" }}
+                                  title="Escolha a etapa do custo e lança em Custos (realizado), Notas de compras e Contas a pagar"
+                                >
+                                  → Compras
+                                </button>
+                              )}
                               {custoNotaAberto === nota.id ? (
                                 <span className="flex items-center gap-1">
                                   <select
