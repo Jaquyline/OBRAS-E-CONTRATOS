@@ -4068,6 +4068,9 @@ export default function DashboardConstrutora({ userEmail }) {
   });
 
   const [extrato, setExtrato] = useState([]);
+  // Conta bancária do extrato: "" = Matriz; CNPJ da filial (ex.: Isla Catalina, patrimônio de afetação) = conta própria.
+  // Cada lançamento guarda a conta em "contaBanco" (lançamentos antigos, sem o campo, são da Matriz).
+  const [contaExtrato, setContaExtrato] = useState("");
   const [loadingExtrato, setLoadingExtrato] = useState(true);
   const [saveErrorExtrato, setSaveErrorExtrato] = useState(null);
   const [showFormExtrato, setShowFormExtrato] = useState(false);
@@ -4217,8 +4220,8 @@ export default function DashboardConstrutora({ userEmail }) {
   const STORAGE_KEY_UNIDADES = prefixoEmpresa + "unidades-obra";
   const STORAGE_KEY_EMPRESTIMOS_BANCARIOS = prefixoEmpresa + "emprestimos-bancarios";
   const STORAGE_KEY_PLANO_CONTAS = prefixoEmpresa + "plano-contas";
-  const STORAGE_KEY_CONTA_BANCO_PADRAO = prefixoEmpresa + "extrato-conta-banco-padrao";
-  const STORAGE_KEY_SALDO_INICIAL_EXTRATO = prefixoEmpresa + "extrato-saldo-inicial";
+  const STORAGE_KEY_CONTA_BANCO_PADRAO = prefixoEmpresa + "extrato-conta-banco-padrao" + (contaExtrato ? "__" + contaExtrato : "");
+  const STORAGE_KEY_SALDO_INICIAL_EXTRATO = prefixoEmpresa + "extrato-saldo-inicial" + (contaExtrato ? "__" + contaExtrato : "");
   const STORAGE_KEY_SALDO_INICIAL_APLICACOES = prefixoEmpresa + "extrato-saldo-inicial-aplicacoes";
   const STORAGE_KEY_EXTRATOS_PDF = prefixoEmpresa + "extratos-pdf-visualizacao";
   const STORAGE_KEY_REGRAS_CLASSIF = prefixoEmpresa + "extrato-regras-classificacao";
@@ -4537,7 +4540,7 @@ export default function DashboardConstrutora({ userEmail }) {
     return () => {
       cancelled = true;
     };
-  }, [empresaAtual]);
+  }, [empresaAtual, STORAGE_KEY_CONTA_BANCO_PADRAO]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4558,7 +4561,7 @@ export default function DashboardConstrutora({ userEmail }) {
     return () => {
       cancelled = true;
     };
-  }, [empresaAtual]);
+  }, [empresaAtual, STORAGE_KEY_SALDO_INICIAL_EXTRATO]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4791,6 +4794,13 @@ export default function DashboardConstrutora({ userEmail }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [STORAGE_KEY_CNPJS_FISCAIS]);
   const salvarCnpjsFiscais = (lista) => { setCnpjsFiscaisExtras(lista); window.storage.set(STORAGE_KEY_CNPJS_FISCAIS, JSON.stringify(lista), false); };
+  const contasBancariasEmp = useMemo(
+    () => [{ id: "", nome: "Matriz" }, ...(cnpjsFiscaisExtras || []).map((e) => ({ id: e.cnpj, nome: e.nome || e.cnpj, obra: e.obra || "" }))],
+    [cnpjsFiscaisExtras]
+  );
+  const contaBancoDaObra = (obra) => ((cnpjsFiscaisExtras || []).find((e) => e.obra && e.obra === obra) || {}).cnpj || "";
+  const extratoConta = useMemo(() => extrato.filter((l) => (l.contaBanco || "") === contaExtrato), [extrato, contaExtrato]);
+  const extratosPdfConta = useMemo(() => extratosPdf.filter((x) => (x.contaBanco || "") === contaExtrato), [extratosPdf, contaExtrato]);
   const fmtCnpj = (d) => String(d || "").replace(/\D/g, "").replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
 
   // Certificado digital — guardado pelo próprio painel (sem precisar de
@@ -5716,6 +5726,7 @@ export default function DashboardConstrutora({ userEmail }) {
       valor: formExtrato.tipo === "debito" ? -numero : numero,
       socio: formExtrato.socio.trim(),
       parcelaReceberId: "",
+      contaBanco: contaExtrato,
     };
     persistExtrato([...extrato, novo]);
     setFormExtrato({ data: "", descricao: "", valor: "", tipo: "credito", socio: "" });
@@ -5879,6 +5890,7 @@ export default function DashboardConstrutora({ userEmail }) {
           importadoEm: new Date().toISOString(),
           saldoAnterior,
           dias,
+          contaBanco: contaExtrato,
         };
         persistExtratosPdf([novoExtrato, ...extratosPdf]);
       }
@@ -5888,9 +5900,9 @@ export default function DashboardConstrutora({ userEmail }) {
         lancamentos = parseLancamentosExtratoVertical(linhas);
       }
       if (lancamentos.length > 0) {
-        const comDuplicados = marcarDuplicadosExtrato(lancamentos, extrato);
-        const comParcelaReceber = sugerirParcelasReceber(comDuplicados, valoresReceber);
-        const comContaPagar = sugerirContasPagar(comParcelaReceber, contasPagar, extrato);
+        const comDuplicados = marcarDuplicadosExtrato(lancamentos, extratoConta);
+        const comParcelaReceber = sugerirParcelasReceber(comDuplicados, valoresReceber.filter((v) => contaBancoDaObra(v.obra) === contaExtrato));
+        const comContaPagar = sugerirContasPagar(comParcelaReceber, contasPagar.filter((c) => contaBancoDaObra(c.obra) === contaExtrato), extrato);
         const comClassificacaoContabil = comContaPagar.map((l) =>
           aplicarRegrasAprendidas({
             ...l,
@@ -5947,6 +5959,7 @@ export default function DashboardConstrutora({ userEmail }) {
       contaPagarId: l.contaPagarId || "",
       contaDebitoId: l.contaDebitoId || "",
       contaCreditoId: l.contaCreditoId || "",
+      contaBanco: contaExtrato,
     }));
     const idsParcelasVinculadas = new Set(confirmados.filter((c) => c.parcelaReceberId).map((c) => c.parcelaReceberId));
     const novoValoresReceber = idsParcelasVinculadas.size
@@ -6052,6 +6065,7 @@ export default function DashboardConstrutora({ userEmail }) {
       contaDebitoId: saida ? (contra ? contra.id : "") : banco,
       contaCreditoId: saida ? banco : contra ? contra.id : "",
       origem: "ajuste-conciliacao",
+      contaBanco: contaExtrato,
       classificadoPor: userEmail || "",
       classificadoEm: new Date().toISOString(),
     };
@@ -6059,7 +6073,7 @@ export default function DashboardConstrutora({ userEmail }) {
     setAvisoExtrato(`Ajuste de ${brlConf(Math.abs(v))} lançado em ${isoParaBrConf(iso)}${contra ? "" : " — não achei a conta no plano: escolha em Lançamentos"}. Dá para trocar a conta na linha do lançamento.`);
   }
   function handleIncluirFaltandoConciliacao(iso, descricao, valor) {
-    const base = { id: Date.now(), data: isoParaBrConf(iso), descricao, valor: Number(valor), socio: "", parcelaReceberId: "", contaPagarId: "" };
+    const base = { id: Date.now(), data: isoParaBrConf(iso), descricao, valor: Number(valor), socio: "", parcelaReceberId: "", contaPagarId: "", contaBanco: contaExtrato };
     const sug = aplicarRegrasAprendidas({ ...base, ...sugerirClassificacaoContabil(base, { planoContas, contaBancoPadraoId, contasPagar, valoresReceber }) });
     persistExtrato([...extrato, sug]);
     setAvisoExtrato(`Incluído: ${isoParaBrConf(iso)} · ${descricao} · ${brlConf(valor)}.`);
@@ -6126,6 +6140,14 @@ export default function DashboardConstrutora({ userEmail }) {
 
   // "Excluir" na barra de seleção — remove todos os lançamentos marcados de
   // uma vez.
+  // Move os lançamentos marcados para outra conta bancária (ex.: importados na Matriz, mas são da conta da Isla Catalina)
+  function handleMoverSelecionadosConta(destino) {
+    const ids = selecionadosLancamentos;
+    if (!ids.size || destino === contaExtrato) return;
+    persistExtrato(extrato.map((l) => (ids.has(l.id) ? { ...l, contaBanco: destino } : l)));
+    limparSelecaoLancamentos();
+  }
+
   function handleExcluirSelecionados() {
     const ids = selecionadosLancamentos;
     persistExtrato(extrato.filter((l) => !ids.has(l.id)));
@@ -6179,7 +6201,7 @@ export default function DashboardConstrutora({ userEmail }) {
     // todos os lançamentos "Lançados".
     const filtroDataDeObj = exportDominioDataDe ? new Date(exportDominioDataDe + "T00:00:00") : null;
     const filtroDataAteObj = exportDominioDataAte ? new Date(exportDominioDataAte + "T23:59:59") : null;
-    const candidatos = extrato.filter((l) => {
+    const candidatos = extratoConta.filter((l) => {
       if (!l.contaDebitoId || !l.contaCreditoId) return false;
       const dataLanc = parseDateBR(l.data);
       if (filtroDataDeObj && (!dataLanc || dataLanc < filtroDataDeObj)) return false;
@@ -7117,9 +7139,9 @@ export default function DashboardConstrutora({ userEmail }) {
     .reduce((s, c) => s + valorAtualizadoItem(c), 0);
   const parcelasVencidas = contasPagarFiltradas.filter((c) => statusPagarDisplay(c) === "vencido").length;
 
-  const saldoExtrato = extrato.reduce((s, l) => s + l.valor, 0);
-  const totalCreditosExtrato = extrato.filter((l) => l.valor >= 0).reduce((s, l) => s + l.valor, 0);
-  const totalDebitosExtrato = extrato.filter((l) => l.valor < 0).reduce((s, l) => s + Math.abs(l.valor), 0);
+  const saldoExtrato = extratoConta.reduce((s, l) => s + l.valor, 0);
+  const totalCreditosExtrato = extratoConta.filter((l) => l.valor >= 0).reduce((s, l) => s + l.valor, 0);
+  const totalDebitosExtrato = extratoConta.filter((l) => l.valor < 0).reduce((s, l) => s + Math.abs(l.valor), 0);
   const saldoFinalExtrato = Number(saldoInicialExtrato || 0) + saldoExtrato;
 
   // Saldo em contas de aplicações financeiras — some sozinho a partir dos
@@ -7364,7 +7386,7 @@ export default function DashboardConstrutora({ userEmail }) {
             totalAPagar={totalAPagar}
             totalPago={totalPago}
             parcelasVencidas={parcelasVencidas}
-            extrato={extrato}
+            extrato={extratoConta}
             saldoExtrato={saldoExtrato}
             saldoInicialExtrato={saldoInicialExtrato}
             saldoFinalExtrato={saldoFinalExtrato}
@@ -9986,6 +10008,24 @@ export default function DashboardConstrutora({ userEmail }) {
               </button>
             </div>
 
+            {contasBancariasEmp.length > 1 && (
+              <div className="flex items-center gap-2 mb-4 flex-wrap">
+                <span className="text-xs font-semibold" style={{ color: "#6B6F76", fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em" }}>CONTA BANCÁRIA</span>
+                {contasBancariasEmp.map((cb) => (
+                  <button
+                    key={cb.id || "matriz"}
+                    onClick={() => { setContaExtrato(cb.id); setExtratoPreview([]); }}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-sm"
+                    style={{ fontFamily: "'Oswald', sans-serif", letterSpacing: "0.03em", color: contaExtrato === cb.id ? "#F5F3EC" : "#22252A", background: contaExtrato === cb.id ? "#3D6E8C" : "#E4E0D6" }}
+                    title={cb.id ? `CNPJ ${fmtCnpj(cb.id)}${cb.obra ? " · obra " + cb.obra : ""}` : "Conta da matriz"}
+                  >
+                    🏦 {cb.nome}{cb.id ? ` · ${fmtCnpj(cb.id)}` : ""} ({extrato.filter((l) => (l.contaBanco || "") === cb.id).length})
+                  </button>
+                ))}
+                <span className="text-[11px]" style={{ color: "#6B6F76" }}>Cada conta tem o seu extrato, saldo e conciliação. Contas a pagar/receber da obra {contasBancariasEmp.filter((c) => c.obra).map((c) => c.obra).join(", ")} se ligam só ao extrato da conta dela.</span>
+              </div>
+            )}
+
             <div className="flex items-center gap-3 mb-3 flex-wrap">
               <label
                 className="text-xs font-semibold"
@@ -10072,7 +10112,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 sub={formatBRL(saldoFinalExtrato)}
                 accent={saldoFinalExtrato >= 0 ? "#4F7A5B" : "#B23A2E"}
               />
-              <KpiCard eyebrow="Lançamentos" value={`${extrato.length}`} sub="no extrato" />
+              <KpiCard eyebrow="Lançamentos" value={`${extratoConta.length}`} sub="no extrato" />
             </div>
 
             <section
@@ -10217,10 +10257,10 @@ export default function DashboardConstrutora({ userEmail }) {
 
                   {loadingExtratosPdf ? (
                     <p className="text-sm" style={{ color: "#6B6F76" }}>Carregando…</p>
-                  ) : extratosPdf.length === 0 ? (
+                  ) : extratosPdfConta.length === 0 ? (
                     <p className="text-sm" style={{ color: "#6B6F76" }}>Nenhum extrato em PDF importado ainda.</p>
                   ) : (
-                    extratosPdf.map((ex) => (
+                    extratosPdfConta.map((ex) => (
                       <div
                         key={ex.id}
                         className="rounded-sm p-4 border mb-4"
@@ -10336,14 +10376,14 @@ export default function DashboardConstrutora({ userEmail }) {
                     </div>
                     <button
                       onClick={handleExportarLancamentosDominio}
-                      disabled={extrato.length === 0}
+                      disabled={extratoConta.length === 0}
                       className="text-xs font-semibold px-3 py-2 rounded-sm"
                       style={{
                         fontFamily: "'Oswald', sans-serif",
                         letterSpacing: "0.03em",
                         color: "#F5F3EC",
                         background: "#4F7A5B",
-                        opacity: extrato.length === 0 ? 0.5 : 1,
+                        opacity: extratoConta.length === 0 ? 0.5 : 1,
                       }}
                     >
                       ⬇ EXPORTAR PARA DOMÍNIO
@@ -10364,8 +10404,8 @@ export default function DashboardConstrutora({ userEmail }) {
                     </div>
                   )}
                   <ConferenciaSaldoObras
-                    extrato={extrato}
-                    extratosPdf={extratosPdf}
+                    extrato={extratoConta}
+                    extratosPdf={extratosPdfConta}
                     contaBancoId={contaBancoPadraoId}
                     onLancarAjuste={handleLancarAjusteConciliacao}
                     onIncluirFaltando={handleIncluirFaltandoConciliacao}
@@ -10860,7 +10900,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 </form>
               )}
 
-              {!loadingExtrato && extrato.length > 0 && (
+              {!loadingExtrato && extratoConta.length > 0 && (
                 <div
                   className="mb-4 p-3 rounded-sm flex flex-wrap items-end gap-3"
                   style={{ background: "#FFFFFF", border: "1px solid #E4E0D6" }}
@@ -10975,7 +11015,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 </div>
               )}
 
-              {extrato.length > 0 && (
+              {extratoConta.length > 0 && (
                 <div className="flex items-center gap-3 flex-wrap mb-3">
                   <label className="text-xs flex items-center gap-2" style={{ color: "#22252A" }} title="Ao classificar um lançamento, aplica as mesmas contas aos pendentes com a mesma descrição (qualquer mês). Descrições genéricas como 'PIX ENVIADO' não são copiadas.">
                     <input
@@ -11005,7 +11045,7 @@ export default function DashboardConstrutora({ userEmail }) {
               )}
               {modalDesfazerAuto && (() => {
                 const porId = Object.fromEntries(planoContas.map((c) => [c.id, c]));
-                const auto = extrato.filter((l) => l.classificadoAuto);
+                const auto = extratoConta.filter((l) => l.classificadoAuto);
                 const grupos = {};
                 auto.forEach((l) => {
                   const contra = Number(l.valor) < 0 ? l.contaDebitoId : l.contaCreditoId;
@@ -11070,7 +11110,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
                   Carregando extrato…
                 </div>
-              ) : extrato.length === 0 ? (
+              ) : extratoConta.length === 0 ? (
                 <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
                   Nenhum lançamento ainda. Importe um PDF ou adicione manualmente.
                 </div>
@@ -11078,7 +11118,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 const buscaLancNormalizada = normalizarDescricaoExtrato(filtroLancBusca);
                 const filtroDataDeObj = filtroLancDataDe ? new Date(filtroLancDataDe + "T00:00:00") : null;
                 const filtroDataAteObj = filtroLancDataAte ? new Date(filtroLancDataAte + "T23:59:59") : null;
-                const extratoFiltrado = extrato.filter((l) => {
+                const extratoFiltrado = extratoConta.filter((l) => {
                   if (buscaLancNormalizada && !normalizarDescricaoExtrato(l.descricao).includes(buscaLancNormalizada)) {
                     return false;
                   }
@@ -11353,6 +11393,20 @@ export default function DashboardConstrutora({ userEmail }) {
                       >
                         ↺ Desfazer
                       </button>
+                      {contasBancariasEmp.length > 1 && (
+                        <select
+                          value=""
+                          onChange={(e) => e.target.value !== "" && handleMoverSelecionadosConta(e.target.value === "__matriz" ? "" : e.target.value)}
+                          className="text-xs font-semibold px-2 py-1.5 rounded-full outline-none"
+                          style={{ color: "#22252A", background: "#E4E0D6" }}
+                          title="Mover os lançamentos selecionados para outra conta bancária"
+                        >
+                          <option value="">🏦 Mover para conta…</option>
+                          {contasBancariasEmp.filter((cb) => cb.id !== contaExtrato).map((cb) => (
+                            <option key={cb.id || "matriz"} value={cb.id || "__matriz"}>{cb.nome}</option>
+                          ))}
+                        </select>
+                      )}
                       <button
                         onClick={handleExcluirSelecionados}
                         className="text-xs font-semibold px-3 py-1.5 rounded-full"
