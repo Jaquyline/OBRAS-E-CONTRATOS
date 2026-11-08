@@ -5530,6 +5530,15 @@ export default function DashboardConstrutora({ userEmail }) {
     if (extrato.some((l) => idsP.has(l.contaPagarId))) await persistExtrato(extrato.map((l) => (idsP.has(l.contaPagarId) ? { ...l, contaPagarId: "" } : l)));
   }
 
+  // desfaz o "custo": tira da tabela de custos a linha criada a partir desta nota
+  function handleDesfazerCustoNota(nota) {
+    const ids = new Set([`custo-${nota.id}`, `custo-nfse-${nota.id}`]);
+    const item = custosItens.find((c) => ids.has(c.id));
+    if (item && !window.confirm(`Tirar de Custos a linha "${item.item}" (${item.obra}${item.etapa ? " — " + item.etapa : ""})?`)) return;
+    if (item) persistCustosItens(custosItens.filter((c) => !ids.has(c.id)));
+    setNotasLevadasParaCusto((prev) => { const o = { ...prev }; delete o[nota.id]; return o; });
+  }
+
   // "custo": escolher a etapa do orçamento antes de lançar (a nota entra como item extra dessa etapa, com o gasto real)
   const [custoNotaAberto, setCustoNotaAberto] = useState(null);
   const [etapaCustoPorNota, setEtapaCustoPorNota] = useState({});
@@ -13749,8 +13758,11 @@ export default function DashboardConstrutora({ userEmail }) {
                               </button>
                             </span>
                           ) : notasLevadasParaCusto[nota.id] || custosItens.some((c) => c.id === `custo-${nota.id}` || c.id === `custo-nfse-${nota.id}`) ? (
-                            <span className="text-xs" style={{ color: "#4F7A5B" }}>
-                              ✓ levada
+                            <span className="text-xs" style={{ color: "#4F7A5B" }} title={(() => { const it = custosItens.find((c) => c.id === `custo-${nota.id}` || c.id === `custo-nfse-${nota.id}`); return it ? `Em Custos: ${it.obra} — ${it.etapa}` : ""; })()}>
+                              ✓ levada{" "}
+                              <button onClick={() => handleDesfazerCustoNota(nota)} className="underline" style={{ color: "#B23A2E" }} title="Tirar de Custos para lançar de novo">
+                                desfazer
+                              </button>
                             </span>
                           ) : (
                             <div className="flex items-center gap-1">
