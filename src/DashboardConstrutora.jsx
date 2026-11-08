@@ -5119,7 +5119,11 @@ export default function DashboardConstrutora({ userEmail }) {
       const tn = dia(n.data);
       const valores = [n.valorNota, n.valorLiquido].map(Number);
       const igual = (v) => valores.some((x) => Math.abs(Number(v) - x) < 0.01);
-      const nc = (notasCompra || []).find((c) => (mesmoForn(n.prestador, c.fornecedor) || mesmoForn(c.fornecedor, n.prestador)) && igual(c.valorTotal) && (isNaN(dia(c.dataEmissao)) || Math.abs(dia(c.dataEmissao) - tn) <= 5));
+      // nome "genérico" (lido do cabeçalho do DANFE/boleto: "Auxiliar da Nota Fiscal…", "Pagador 341-7…", banco) → compara só valor + data (até 60 dias depois)
+      const generico = (f) => /auxiliar|nota fiscal|danfe|pagador|banco|sicredi|sicoob|bradesco|itau|caixa|santander|boleto/i.test(norm(f));
+      const nc =
+        (notasCompra || []).find((c) => (mesmoForn(n.prestador, c.fornecedor) || mesmoForn(c.fornecedor, n.prestador)) && igual(c.valorTotal) && (isNaN(dia(c.dataEmissao)) || Math.abs(dia(c.dataEmissao) - tn) <= 5)) ||
+        (notasCompra || []).find((c) => generico(c.fornecedor) && igual(c.valorTotal) && !isNaN(dia(c.dataEmissao)) && dia(c.dataEmissao) - tn >= -5 && dia(c.dataEmissao) - tn <= 60);
       if (nc) { out[n.id] = `já em Notas de compra (${nc.fornecedor}, ${formatBRL(nc.valorTotal)}${nc.dataEmissao ? ", " + nc.dataEmissao : ""})`; return; }
       if ((custosItens || []).some((c) => c.id === `custo-${n.id}` || c.id === `custo-nfse-${n.id}`)) return; // levada por aqui: aparece "✓ levada"
       const ci = (custosItens || []).find((c) =>
@@ -5218,6 +5222,50 @@ export default function DashboardConstrutora({ userEmail }) {
       w.close();
       setErroBuscaNotasFiscais("Não consegui abrir a nota: " + err.message);
     }
+  }
+
+  // leva a nota do Fiscal para Notas de compras e gera as parcelas em Contas a pagar.
+  // Vencimentos: das duplicatas do XML da NF-e (<dup>), quando o XML completo já chegou; senão 1x, 1 mês após a emissão.
+  // Se o extrato já tem a saída com o mesmo valor, a parcela entra como paga.
+  async function handleLevarNotaParaCompras(nota) {
+    if (notasCompra.some((c) => c.notaFiscalId === nota.id)) return;
+    const obra = obraEscolhidaPorNota[nota.id] || NOMES_OBRAS[0];
+    let dups = [];
+    if (nota.tipo === "NF-e" && nota.temXml) {
+      try {
+        const rx = await window.storage.get(prefixoEmpresa + "fiscal-xml:" + nota.id, false);
+        const xml = rx && rx.value ? String(rx.value) : "";
+        const re = /<(?:\w+:)?dup>([\s\S]*?)<\/(?:\w+:)?dup>/g;
+        let m;
+        while ((m = re.exec(xml))) {
+          const t = (tg) => ((m[1].match(new RegExp(`<(?:\\w+:)?${tg}>([^<]*)<`)) || [])[1] || "").trim();
+          const v = Number(t("vDup"));
+          if (v > 0) dups.push({ venc: t("dVenc"), valor: Math.round(v * 100) / 100 });
+        }
+      } catch {}
+    }
+    const id = Date.now();
+    const fornecedor = nota.prestador || "Fornecedor";
+    const valorTotal = Math.round((Number(nota.valorNota) || 0) * 100) / 100;
+    const novaNota = {
+      id,
+      fornecedor,
+      obra,
+      valorTotal,
+      dataEmissao: dataISOparaBR(nota.data) || formatDateBR(new Date()),
+      numeroParcelas: dups.length || 1,
+      notaFiscalId: nota.id,
+      numeroNota: nota.numero || "",
+      tipoNota: nota.tipo || "NFS-e",
+      cnpjFornecedor: nota.prestadorDoc || "",
+      chave: nota.chave || "",
+    };
+    let parcelas = dups.length
+      ? dups.map((d, i) => ({ id: `${id}-${i + 1}`, notaId: id, fornecedor, obra, parcela: `${i + 1}/${dups.length}`, valor: d.valor, vencimento: dataISOparaBR(d.venc) || d.venc, status: "pendente" }))
+      : gerarParcelas(novaNota);
+    const pg = pagamentoPorNota[nota.id];
+    if (pg && parcelas.length === 1) parcelas = parcelas.map((p) => ({ ...p, status: "pago", observacao: `Paga em ${pg.data} (extrato)` }));
+    await persistNotasEPagar([...notasCompra, novaNota], [...contasPagar, ...parcelas]);
   }
 
   function handleLevarNotaParaCusto(nota) {
@@ -13161,7 +13209,11 @@ export default function DashboardConstrutora({ userEmail }) {
                           )}
                         </td>
                         <td className="py-2 pr-1 whitespace-nowrap">
-                          {notaJaCadastrada[nota.id] && !levarMesmoAssim[nota.id] && !notasLevadasParaCusto[nota.id] ? (
+                          {notasCompra.some((c) => c.notaFiscalId === nota.id) ? (
+                            <span className="text-xs" style={{ color: "#4F7A5B" }}>
+                              ✓ em Notas de compras
+                            </span>
+                          ) : notaJaCadastrada[nota.id] && !levarMesmoAssim[nota.id] && !notasLevadasParaCusto[nota.id] ? (
                             <span className="text-xs" style={{ color: "#A4640B" }} title={notaJaCadastrada[nota.id]}>
                               ⚠ {notaJaCadastrada[nota.id]}{" "}
                               <button onClick={() => setLevarMesmoAssim((p) => ({ ...p, [nota.id]: true }))} className="underline" style={{ color: "#6B6F76" }} title="Só se for outra nota, diferente da já cadastrada">
@@ -13189,11 +13241,15 @@ export default function DashboardConstrutora({ userEmail }) {
                                 ))}
                               </select>
                               <button
-                                onClick={() => handleLevarNotaParaCusto(nota)}
+                                onClick={() => handleLevarNotaParaCompras(nota)}
                                 className="text-xs font-semibold px-2 py-1 rounded-sm whitespace-nowrap"
                                 style={{ color: "#F5F3EC", background: "#4F7A5B" }}
+                                title="Lança em Notas de compras e gera a(s) parcela(s) em Contas a pagar"
                               >
-                                Levar →
+                                → Compras
+                              </button>
+                              <button onClick={() => handleLevarNotaParaCusto(nota)} className="text-[10px] underline" style={{ color: "#6B6F76" }} title="Lançar só como custo da obra (sem Contas a pagar)">
+                                custo
                               </button>
                             </div>
                           )}
