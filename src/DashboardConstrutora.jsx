@@ -1990,8 +1990,11 @@ function mesAnoLabel(date) {
 function detalheFluxoMes(chave, valoresReceberLista, contasPagarLista, extratoLista, emprestimosSociosLista) {
   const entradas = [];
   const saidas = [];
+  const pagarNoExtrato = new Set((extratoLista || []).filter((l) => l.contaPagarId).map((l) => l.contaPagarId));
+  const receberNoExtrato = new Set((extratoLista || []).filter((l) => l.parcelaReceberId).map((l) => l.parcelaReceberId));
 
   valoresReceberLista.forEach((v) => {
+    if (receberNoExtrato.has(v.id)) return;
     const d = parseDateBR(v.vencimento);
     if (d && mesAnoKey(d) === chave) {
       entradas.push({
@@ -2005,6 +2008,7 @@ function detalheFluxoMes(chave, valoresReceberLista, contasPagarLista, extratoLi
   });
 
   contasPagarLista.forEach((c) => {
+    if (pagarNoExtrato.has(c.id)) return;
     const d = parseDateBR(c.vencimento);
     if (d && mesAnoKey(d) === chave) {
       saidas.push({
@@ -5151,6 +5155,16 @@ export default function DashboardConstrutora({ userEmail }) {
         (notasCompra || []).find((c) => (mesmoForn(n.prestador, c.fornecedor) || mesmoForn(c.fornecedor, n.prestador)) && igual(c.valorTotal) && (isNaN(dia(c.dataEmissao)) || Math.abs(dia(c.dataEmissao) - tn) <= 5)) ||
         (notasCompra || []).find((c) => generico(c.fornecedor) && igual(c.valorTotal) && !isNaN(dia(c.dataEmissao)) && dia(c.dataEmissao) - tn >= -5 && dia(c.dataEmissao) - tn <= 60);
       if (nc) { out[n.id] = `já em Notas de compra (${nc.fornecedor}, ${formatBRL(nc.valorTotal)}${nc.dataEmissao ? ", " + nc.dataEmissao : ""})`; return; }
+      // despesa lançada direto em Contas a pagar (sem nota de compra): mesmo valor, fornecedor parecido (ou nome genérico) e vencimento até 60 dias depois
+      const cp = (contasPagar || []).find((c) => {
+        if (notasCompra.some((x) => x.id === c.notaId)) return false;
+        const totalCp = (contasPagar || []).filter((y) => c.notaId && y.notaId === c.notaId).reduce((t, y) => t + Number(y.valor || 0), 0) || Number(c.valor);
+        if (!igual(c.valor) && !igual(totalCp)) return false;
+        const dv = dia(c.vencimento);
+        if (!isNaN(dv) && (dv - tn < -10 || dv - tn > 60)) return false;
+        return mesmoForn(n.prestador, c.fornecedor) || mesmoForn(c.fornecedor, n.prestador) || generico(c.fornecedor);
+      });
+      if (cp) { out[n.id] = `já em Contas a pagar (${cp.fornecedor}, ${formatBRL(cp.valor)}${cp.vencimento ? ", venc. " + cp.vencimento : ""}${cp.status === "pago" ? ", paga" : ""})`; return; }
       if ((custosItens || []).some((c) => c.id === `custo-${n.id}` || c.id === `custo-nfse-${n.id}`)) return; // levada por aqui: aparece "✓ levada"
       const ci = (custosItens || []).find((c) =>
         (n.numero && new RegExp(`n[ºo°]\\s*${String(n.numero).replace(/\D/g, "")}\\b`, "i").test(c.item || "") && mesmoForn(n.prestador, c.item)) ||
@@ -5158,7 +5172,7 @@ export default function DashboardConstrutora({ userEmail }) {
       if (ci) out[n.id] = `já em Custos (${ci.obra}${ci.item ? " — " + ci.item : ""})`;
     });
     return out;
-  }, [notasFiscaisEncontradas, notasCompra, custosItens]);
+  }, [notasFiscaisEncontradas, notasCompra, custosItens, contasPagar]);
   const [levarMesmoAssim, setLevarMesmoAssim] = useState({});
   const [condicaoPorNota, setCondicaoPorNota] = useState({});
   // pesquisa na lista: fornecedor, nº da nota, CNPJ do fornecedor ou valor (ex.: 1.550 ou 1550,00)
@@ -7012,8 +7026,12 @@ export default function DashboardConstrutora({ userEmail }) {
 
   const fluxoCaixa = useMemo(() => {
     const porMes = {};
+    // parcela já ligada a um lançamento do extrato: o movimento entra pelo extrato (não conta duas vezes)
+    const pagarNoExtrato = new Set(extrato.filter((l) => l.contaPagarId).map((l) => l.contaPagarId));
+    const receberNoExtrato = new Set(extrato.filter((l) => l.parcelaReceberId).map((l) => l.parcelaReceberId));
 
     fluxoValoresReceber.forEach((v) => {
+      if (receberNoExtrato.has(v.id)) return;
       const data = parseDateBR(v.vencimento);
       if (!data) return;
       const key = mesAnoKey(data);
@@ -7022,6 +7040,7 @@ export default function DashboardConstrutora({ userEmail }) {
     });
 
     fluxoContasPagar.forEach((c) => {
+      if (pagarNoExtrato.has(c.id)) return;
       const data = parseDateBR(c.vencimento);
       if (!data) return;
       const key = mesAnoKey(data);
