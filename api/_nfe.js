@@ -80,6 +80,17 @@ export function lerRetDist(corpo) {
   }
   return { cStat: tag(ret, "cStat"), xMotivo: tag(ret, "xMotivo"), ultNSU: +tag(ret, "ultNSU") || 0, maxNSU: +tag(ret, "maxNSU") || 0, docs, bruto: ret ? "" : String(corpo).slice(0, 400) };
 }
+// Consulta de uma NF-e pela chave (consChNFe): devolve o XML completo (procNFe) quando a empresa já manifestou
+// (ciência/confirmação) — não precisa esperar a próxima distribuição por NSU.
+export async function consultarChave({ cnpj, uf, chave, amb, pfx, senha }) {
+  const u = URLS[amb] || URLS.producao;
+  const cUF = UF_COD[String(uf || "SC").toUpperCase()] || 42;
+  const xml = `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDistDFeInteresse xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe"><nfeDadosMsg><distDFeInt xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01"><tpAmb>${u.tpAmb}</tpAmb><cUFAutor>${cUF}</cUFAutor><CNPJ>${cnpj}</CNPJ><consChNFe><chNFe>${chave}</chNFe></consChNFe></distDFeInt></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
+  const r = await postSoap(u.dist, xml, "http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe/nfeDistDFeInteresse", pfx, senha);
+  const ret = lerRetDist(r.corpo);
+  if (!ret.cStat) throw Object.assign(new Error("Resposta inesperada da SEFAZ: " + (ret.bruto || r.status)), { status: 502 });
+  return { docs: ret.docs, cStat: ret.cStat, xMotivo: ret.xMotivo };
+}
 export async function distribuir({ cnpj, uf, ultNSU, amb, pfx, senha, tempoMax = 40000 }) {
   const u = URLS[amb] || URLS.producao;
   const inicio = Date.now();

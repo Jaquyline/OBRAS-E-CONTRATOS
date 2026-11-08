@@ -6,7 +6,7 @@
 // Só para quem está logado no Obras; o certificado é lido do banco com o login da própria pessoa.
 import https from "node:https";
 import zlib from "node:zlib";
-import { distribuir, cienciaLote } from "./_nfe.js";
+import { distribuir, cienciaLote, consultarChave } from "./_nfe.js";
 
 export const config = { maxDuration: 60 };
 const SUPABASE_URL = "https://jwernoyhesshbbfsmscy.supabase.co";
@@ -78,6 +78,11 @@ export default async function handler(req, res) {
     if (b.acao === "nfe") {
       const r = await distribuir({ cnpj, uf: b.uf || "SC", ultNSU: b.nsu || 0, amb: "producao", pfx: cert, tempoMax: 40000 });
       return res.status(200).json(r);
+    }
+    if (b.acao === "nfe_chave") {
+      const chave = dig(b.chave);
+      if (chave.length !== 44) return res.status(400).json({ error: "Chave de acesso inválida." });
+      return res.status(200).json(await consultarChave({ cnpj, uf: b.uf || "SC", chave, amb: "producao", pfx: cert }));
     }
     if (b.acao === "ciencia" || b.acao === "confirmar") {
       const chaves = (Array.isArray(b.chaves) ? b.chaves : []).map(dig).filter((c) => c.length === 44).slice(0, 100);

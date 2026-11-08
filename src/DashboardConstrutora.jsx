@@ -5178,6 +5178,43 @@ export default function DashboardConstrutora({ userEmail }) {
   // A nota do Gestão já está no painel? (cadastrada em Notas de compra ou já lançada em Custos das obras)
   // Mesmo fornecedor (2 primeiras palavras do nome), mesmo valor (cheio ou líquido) e data até 5 dias de diferença;
   // nos custos também pelo nº da nota no nome do item. Assim a mesma nota não entra duas vezes.
+  // Um lançamento único que cobre VÁRIAS notas do mesmo fornecedor (ex.: boleto de R$ 1.897 = NF de R$ 500 + NF de R$ 1.397):
+  // procura combinações de 2 a 4 notas fiscais do fornecedor cuja soma bate com um lançamento de Notas de compra,
+  // Contas a pagar ou Custos (que não foi criado pela própria aba Fiscal).
+  const notaEmSoma = useMemo(() => {
+    const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]+/g, " ");
+    const pal = (t) => norm(t).split(/\s+/).filter((w) => w.length >= 3 && !/^(ltda|eireli|com|comercio|servicos|materiais|de|da|do|epp|me)$/.test(w)).slice(0, 2);
+    const mesmoForn = (a, b) => { const pa = pal(a), nb = norm(b); return pa.length > 0 && pa.every((w) => nb.includes(w)); };
+    const dia = (br) => { const iso = dataBRparaISO(br) || br; return iso ? new Date(iso + "T12:00:00").getTime() / 864e5 : NaN; };
+    const idsCompraFiscal = new Set((notasCompra || []).filter((c) => c.notaFiscalId).map((c) => c.id));
+    const fontes = [
+      ...(notasCompra || []).filter((c) => !c.notaFiscalId).map((c) => ({ onde: "Notas de compra", forn: c.fornecedor, valor: Number(c.valorTotal), data: c.dataEmissao })),
+      ...(contasPagar || []).filter((c) => !(notasCompra || []).some((x) => x.id === c.notaId) && !idsCompraFiscal.has(c.notaId)).map((c) => ({ onde: "Contas a pagar", forn: c.fornecedor, valor: Number(c.valor), data: c.vencimento })),
+      ...(custosItens || []).filter((c) => !/^custo-(nfse-)?\d{11,14}-/.test(String(c.id)) && Number(c.gastoReal) > 0).map((c) => ({ onde: "Custos", forn: `${c.item || ""} ${c.observacoes || ""}`, valor: Number(c.gastoReal), data: "" })),
+    ].filter((f) => f.valor > 0 && f.forn);
+    const validas = notasFiscaisEncontradas.filter((n) => !/cancel/i.test(n.situacao || ""));
+    const out = {};
+    fontes.forEach((f) => {
+      const tf = dia(f.data);
+      const cands = validas
+        .filter((n) => (mesmoForn(n.prestador, f.forn) || mesmoForn(f.forn, n.prestador)) && Number(n.valorNota) < f.valor && (isNaN(tf) || (tf - dia(n.data) >= -10 && tf - dia(n.data) <= 90)))
+        .slice(0, 12);
+      if (cands.length < 2) return;
+      let achou = null;
+      const busca = (ini, escolhidas, soma) => {
+        if (achou) return;
+        if (escolhidas.length >= 2 && Math.abs(soma - f.valor) < 1) { achou = escolhidas; return; }
+        if (escolhidas.length === 4 || soma > f.valor + 1) return;
+        for (let i = ini; i < cands.length; i++) busca(i + 1, [...escolhidas, cands[i]], soma + Number(cands[i].valorNota));
+      };
+      busca(0, [], 0);
+      if (!achou) return;
+      const txt = `já em ${f.onde} (${String(f.forn).trim().slice(0, 50)}, ${formatBRL(f.valor)}${f.data ? ", " + f.data : ""}) = soma das NF ${achou.map((n) => n.numero).join(" + ")}`;
+      achou.forEach((n) => { if (!out[n.id]) out[n.id] = txt; });
+    });
+    return out;
+  }, [notasFiscaisEncontradas, notasCompra, contasPagar, custosItens]);
+
   const notaJaCadastrada = useMemo(() => {
     const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]+/g, " ");
     const pal = (t) => norm(t).split(/\s+/).filter((w) => w.length >= 3 && !/^(ltda|eireli|com|comercio|servicos|materiais|de|da|do|epp|me)$/.test(w)).slice(0, 2);
@@ -5210,10 +5247,12 @@ export default function DashboardConstrutora({ userEmail }) {
         (igual(c.gastoReal) && mesmoForn(n.prestador, `${c.item || ""} ${c.observacoes || ""}`)));
       if (ci) out[n.id] = `já em Custos (${ci.obra}${ci.item ? " — " + ci.item : ""})`;
     });
+    Object.keys(notaEmSoma).forEach((id) => { if (!out[id] && !(notasCompra || []).some((c) => String(c.notaFiscalId) === String(id))) out[id] = notaEmSoma[id]; });
     return out;
-  }, [notasFiscaisEncontradas, notasCompra, custosItens, contasPagar]);
+  }, [notasFiscaisEncontradas, notasCompra, custosItens, contasPagar, notaEmSoma]);
   const [levarMesmoAssim, setLevarMesmoAssim] = useState({});
   const [condicaoPorNota, setCondicaoPorNota] = useState({});
+  const [vencimentoPorNota, setVencimentoPorNota] = useState({});
   // pesquisa na lista: fornecedor, nº da nota, CNPJ do fornecedor ou valor (ex.: 1.550 ou 1550,00)
   const notasFiscaisFiltradas = useMemo(() => {
     const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -5314,6 +5353,7 @@ export default function DashboardConstrutora({ userEmail }) {
   async function handleLevarNotaParaCompras(nota) {
     if (notasCompra.some((c) => c.notaFiscalId === nota.id)) return;
     const cond = condicaoPorNota[nota.id] || "auto"; // auto = duplicatas do XML; sem elas, à vista
+    if (cond === "data" && !vencimentoPorNota[nota.id]) return setErroBuscaNotasFiscais(`Informe a data de vencimento da nota ${nota.numero} antes de levar para Compras.`);
     const obra = obraEscolhidaPorNota[nota.id] || NOMES_OBRAS[0];
     let dups = [];
     if ((cond === "auto" || cond === "xml") && nota.tipo === "NF-e" && nota.temXml) {
@@ -5340,7 +5380,7 @@ export default function DashboardConstrutora({ userEmail }) {
       dataEmissao: dataISOparaBR(nota.data) || formatDateBR(new Date()),
       numeroParcelas: dups.length || (/^\dx$/.test(cond) ? Number(cond[0]) : 1),
       notaFiscalId: nota.id,
-      condicao: dups.length ? "conforme XML" : cond === "30" ? "30 dias" : /^\dx$/.test(cond) ? cond : "à vista",
+      condicao: dups.length ? "conforme XML" : cond === "data" ? `venc. ${dataISOparaBR(vencimentoPorNota[nota.id]) || ""}` : cond === "30" ? "30 dias" : /^\dx$/.test(cond) ? cond : "à vista",
       numeroNota: nota.numero || "",
       tipoNota: nota.tipo || "NFS-e",
       cnpjFornecedor: nota.prestadorDoc || "",
@@ -5348,7 +5388,9 @@ export default function DashboardConstrutora({ userEmail }) {
     };
     let parcelas = dups.length
       ? dups.map((d, i) => ({ id: `${id}-${i + 1}`, notaId: id, fornecedor, obra, parcela: `${i + 1}/${dups.length}`, valor: d.valor, vencimento: dataISOparaBR(d.venc) || d.venc, status: "pendente" }))
-      : cond === "30" || /^\dx$/.test(cond)
+      : cond === "data"
+        ? [{ id: `${id}-1`, notaId: id, fornecedor, obra, parcela: "1/1", valor: valorTotal, vencimento: dataISOparaBR(vencimentoPorNota[nota.id]) || novaNota.dataEmissao, status: "pendente" }]
+        : cond === "30" || /^\dx$/.test(cond)
         ? gerarParcelas(novaNota)
         : [{ id: `${id}-1`, notaId: id, fornecedor, obra, parcela: "1/1", valor: valorTotal, vencimento: novaNota.dataEmissao, status: "pendente" }]; // à vista: vence na emissão
     const pg = pagamentoPorNota[nota.id];
@@ -5356,6 +5398,33 @@ export default function DashboardConstrutora({ userEmail }) {
     if (pg && parcelas.length === 1) parcelas = parcelas.map((p) => ({ ...p, status: "pago", formaPagamento: pg.caixa ? "caixa" : "banco", dataPagamento: pg.data, observacao: pg.caixa ? `Paga no caixa em ${pg.data}` : `Paga em ${pg.data} (extrato)` }));
     await persistNotasEPagar([...notasCompra, novaNota], [...contasPagar, ...parcelas]);
     if (linkar) await persistExtrato(extrato.map((l) => (l.id === pg.id ? { ...l, contaPagarId: parcelas[0].id } : l))); // já liga a saída do extrato à parcela
+  }
+
+  // Baixar agora o XML completo de uma NF-e (consulta pela chave na SEFAZ) — vale depois da ciência/confirmação
+  const [baixandoXmlId, setBaixandoXmlId] = useState(null);
+  async function baixarXmlNfe(nota) {
+    setBaixandoXmlId(nota.id);
+    setErroBuscaNotasFiscais(null);
+    try {
+      const j = await chamarFiscal({ acao: "nfe_chave", cnpj: nota.cnpjTomador, chave: nota.chave, uf: "SC" });
+      const doc = (j.docs || []).map((d) => ({ d, n: lerDocNfe(d) })).find((x) => x.n && x.n.tipo === "proc");
+      if (!doc) {
+        const motivo = String(j.cStat) === "137" || String(j.cStat) === "138" ? "a SEFAZ ainda não liberou o XML completo (depois da ciência/confirmação pode levar até 1 hora)" : `SEFAZ respondeu ${j.cStat} — ${j.xMotivo}`;
+        setErroBuscaNotasFiscais(`NF-e ${nota.numero}: ${motivo}.`);
+        return;
+      }
+      const base = { ...fiscalBase, notas: { ...(fiscalBase.notas || {}) } };
+      const n = doc.n;
+      base.notas[nota.id] = { ...base.notas[nota.id], temXml: true, natOp: n.natOp || base.notas[nota.id].natOp || "", valorNota: n.valor || base.notas[nota.id].valorNota, valorLiquido: n.valor || base.notas[nota.id].valorLiquido };
+      await window.storage.set(prefixoEmpresa + "fiscal-xml:" + nota.id, doc.d.xml, false);
+      await window.storage.set(STORAGE_KEY_FISCAL_NOTAS, JSON.stringify(base), false);
+      setFiscalBase(base);
+      setErroBuscaNotasFiscais(`NF-e ${nota.numero}: XML completo baixado — clique em 👁 ver.`);
+    } catch (e) {
+      setErroBuscaNotasFiscais(`NF-e ${nota.numero}: ${e.message}`);
+    } finally {
+      setBaixandoXmlId(null);
+    }
   }
 
   // Baixa manual de uma nota na aba Fiscal: escolher a saída do extrato (qualquer valor) ou "pago no caixa"
@@ -13470,7 +13539,15 @@ export default function DashboardConstrutora({ userEmail }) {
                           <button onClick={() => abrirNotaFiscal(nota)} title={nota.temXml ? "Ver a nota" : "Só o resumo da SEFAZ (o XML completo chega depois da ciência)"} className="ml-1" style={{ color: nota.temXml ? "#3D6E8C" : "#A4640B" }}>{nota.temXml ? "👁 ver" : "👁 resumo"}</button>
                           {nota.tipo === "NF-e" && !nota.temXml && !/cancel/i.test(nota.situacao || "") && (() => {
                             const nb = (fiscalBase.notas || {})[nota.id] || nota;
-                            if (nb.cienciaEm) return <span className="block" style={{ fontSize: 10, color: "#6B6F76" }} title={`${nb.confirmadaEm ? "Operação confirmada" : "Ciência"} em ${new Date(nb.cienciaEm).toLocaleString("pt-BR")}`}>{nb.confirmadaEm ? "operação confirmada" : "ciência dada"} · aguardando XML</span>;
+                            if (nb.cienciaEm)
+                              return (
+                                <span className="block" style={{ fontSize: 10, color: "#6B6F76" }} title={`${nb.confirmadaEm ? "Operação confirmada" : "Ciência"} em ${new Date(nb.cienciaEm).toLocaleString("pt-BR")}`}>
+                                  {nb.confirmadaEm ? "operação confirmada" : "ciência dada"} ·{" "}
+                                  <button disabled={baixandoXmlId === nota.id} onClick={() => baixarXmlNfe(nb)} style={{ color: "#3D6E8C", textDecoration: "underline" }} title="Consulta a nota pela chave na SEFAZ e baixa o XML completo">
+                                    {baixandoXmlId === nota.id ? "baixando…" : "⬇ baixar XML"}
+                                  </button>
+                                </span>
+                              );
                             const vencida = (nb.cienciaErro && String(nb.cienciaErro.cStat) === "596") || Date.now() - new Date(nb.data + "T12:00:00").getTime() >= 10 * 864e5;
                             if (vencida)
                               return (
@@ -13555,6 +13632,11 @@ export default function DashboardConstrutora({ userEmail }) {
                           ) : notasCompra.some((c) => c.notaFiscalId === nota.id) ? (
                             <span className="text-xs" style={{ color: "#4F7A5B" }}>
                               ✓ em Notas de compras{" "}
+                              {notaEmSoma[nota.id] ? (
+                                <span className="block" style={{ color: "#B23A2E", whiteSpace: "normal", maxWidth: 320 }} title={notaEmSoma[nota.id]}>
+                                  ⚠ repetida? {notaEmSoma[nota.id]} — clique em desfazer
+                                </span>
+                              ) : null}
                               <button onClick={() => handleDesfazerNotaCompras(nota)} className="underline" style={{ color: "#B23A2E" }} title="Tirar de Notas de compras e Contas a pagar para lançar de novo">
                                 desfazer
                               </button>
@@ -13598,7 +13680,18 @@ export default function DashboardConstrutora({ userEmail }) {
                                 <option value="30">30 dias</option>
                                 <option value="2x">2x (30/60)</option>
                                 <option value="3x">3x (30/60/90)</option>
+                                <option value="data">📅 escolher vencimento</option>
                               </select>
+                              {condicaoPorNota[nota.id] === "data" && (
+                                <input
+                                  type="date"
+                                  value={vencimentoPorNota[nota.id] || ""}
+                                  onChange={(e) => setVencimentoPorNota((p) => ({ ...p, [nota.id]: e.target.value }))}
+                                  className="text-xs px-1 py-1 rounded-sm border outline-none"
+                                  style={{ borderColor: "#DCD7C9" }}
+                                  title="Data de vencimento da parcela em Contas a pagar"
+                                />
+                              )}
                               <button
                                 onClick={() => handleLevarNotaParaCompras(nota)}
                                 className="text-xs font-semibold px-2 py-1 rounded-sm whitespace-nowrap"
