@@ -13277,7 +13277,7 @@ export default function DashboardConstrutora({ userEmail }) {
                 <table className="w-full text-left" style={{ borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ borderBottom: "1px solid #DCD7C9" }}>
-                      {["Data", "CNPJ", "Tipo", "Nº", "Fornecedor", "Valor da nota", "ISS retido", "IR", "PIS/COFINS/CSLL", "INSS", "Valor líquido", "Pagamento", ""].map(
+                      {["Data", "CNPJ", "Tipo", "Nº", "Fornecedor", "Valor da nota", "Valor líquido", "Pagamento", ""].map(
                         (col) => (
                           <th
                             key={col}
@@ -13319,12 +13319,8 @@ export default function DashboardConstrutora({ userEmail }) {
                             );
                           })()}
                         </td>
-                        <td className="py-1.5 pr-2 text-xs" style={{ minWidth: 140, maxWidth: 220 }}>{nota.prestador}</td>
+                        <td className="py-1.5 pr-2 text-xs" style={{ minWidth: 180, maxWidth: 320 }}>{nota.prestador}</td>
                         <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{formatBRL(nota.valorNota)}</td>
-                        <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{nota.issRetido ? formatBRL(nota.issRetido) : "—"}</td>
-                        <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{nota.ir ? formatBRL(nota.ir) : "—"}</td>
-                        <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{nota.pcc ? formatBRL(nota.pcc) : "—"}</td>
-                        <td className="py-1.5 pr-2 text-xs whitespace-nowrap">{nota.inss ? formatBRL(nota.inss) : "—"}</td>
                         <td className="py-1.5 pr-2 text-xs font-semibold whitespace-nowrap">{formatBRL(nota.valorLiquido)}</td>
                         <td className="py-1.5 pr-2 text-xs whitespace-nowrap">
                           {pagamentoPorNota[nota.id] ? (
@@ -13396,7 +13392,7 @@ export default function DashboardConstrutora({ userEmail }) {
                     ))}
                     {notasFiscaisEncontradas.length === 0 && (
                       <tr>
-                        <td colSpan={13} className="py-4 text-xs" style={{ color: "#8A8D93" }}>
+                        <td colSpan={9} className="py-4 text-xs" style={{ color: "#8A8D93" }}>
                           Nenhuma nota buscada ainda — escolha o período e clique em "Buscar notas".
                         </td>
                       </tr>
