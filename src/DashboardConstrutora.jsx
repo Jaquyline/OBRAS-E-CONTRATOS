@@ -5540,6 +5540,39 @@ export default function DashboardConstrutora({ userEmail }) {
   }
 
   const [comprasNotaAberto, setComprasNotaAberto] = useState(null);
+
+  // Impressão dos avisos de vencimento do painel (Visão geral): contas a pagar / valores a receber,
+  // separando VENCIDAS (não pagas/não recebidas) das que vencem nos próximos 30 dias.
+  function imprimirAvisosVencimento(tipo) {
+    const pagar = tipo === "pagar";
+    const lista = (pagar ? contasPagar : valoresReceber)
+      .filter((x) => { const st = pagar ? statusPagarDisplay(x) : statusReceberDisplay(x); return st === "vencido" || st === "vencendo"; })
+      .slice()
+      .sort((a, b) => (parseDateBR(a.vencimento) || 0) - (parseDateBR(b.vencimento) || 0));
+    const vencidas = lista.filter((x) => (pagar ? statusPagarDisplay(x) : statusReceberDisplay(x)) === "vencido");
+    const aVencer = lista.filter((x) => (pagar ? statusPagarDisplay(x) : statusReceberDisplay(x)) === "vencendo");
+    const e0 = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+    const valorDe = (x) => (pagar ? valorAtualizadoItem(x) : Number(x.valor) || 0);
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    const dias = (x) => { const d = parseDateBR(x.vencimento); return d ? Math.round((d - hoje) / 864e5) : null; };
+    const tabela = (titulo, itens, cor) => itens.length
+      ? `<h2 style="color:${cor}">${titulo} — ${itens.length} · ${e0(formatBRL(itens.reduce((t, x) => t + valorDe(x), 0)))}</h2>
+        <table><thead><tr><th>Vencimento</th><th>${pagar ? "Fornecedor" : "Comprador / unidade"}</th><th>Parcela</th><th>Obra</th><th class="r">Valor</th><th>${titulo.startsWith("VENC") ? "Atraso" : "Faltam"}</th></tr></thead><tbody>
+        ${itens.map((x) => { const d = dias(x); return `<tr><td>${e0(x.vencimento)}</td><td>${e0(pagar ? x.fornecedor : `${x.comprador || ""} · ${x.unidade || ""}`)}</td><td>${e0(x.parcela || "")}</td><td>${e0(x.obra || "")}</td><td class="r">${e0(formatBRL(valorDe(x)))}</td><td>${d == null ? "" : d < 0 ? `${-d} dia(s)` : `${d} dia(s)`}</td></tr>`; }).join("")}
+        </tbody></table>`
+      : `<h2>${titulo}</h2><p class="muted">Nenhuma.</p>`;
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${pagar ? "Contas a pagar" : "Valores a receber"} — vencimentos</title><style>body{font:12px/1.4 Arial,sans-serif;color:#111;max-width:1000px;margin:20px auto;padding:0 16px}h1{font-size:17px;margin:0 0 2px}h2{font-size:14px;margin:18px 0 6px}.sub,.muted{color:#666}table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #e3e3e3;padding:4px 6px;text-align:left;white-space:nowrap}td:nth-child(2){white-space:normal}th{background:#f2f2f2;font-size:11px}.r{text-align:right}.alerta{border:2px solid #B23A2E;background:#fbe9e7;color:#B23A2E;padding:8px 10px;border-radius:6px;font-weight:bold;margin:10px 0}.bar{margin-bottom:10px}@media print{.bar{display:none}}</style></head><body>
+      <div class="bar"><button onclick="print()">🖨 Imprimir / PDF</button></div>
+      <h1>${e0(empresaInfo.nome || "")} — ${pagar ? "Contas a pagar" : "Valores a receber"}: vencidas e a vencer (próximos 30 dias)</h1>
+      <div class="sub">Emitido em ${new Date().toLocaleString("pt-BR")}</div>
+      ${vencidas.length ? `<div class="alerta">⚠ ATENÇÃO: ${vencidas.length} parcela(s) VENCIDA(S) e ${pagar ? "NÃO PAGA(S)" : "NÃO RECEBIDA(S)"} — ${e0(formatBRL(vencidas.reduce((t, x) => t + valorDe(x), 0)))}</div>` : ""}
+      ${tabela("VENCIDAS", vencidas, "#B23A2E")}
+      ${tabela("A VENCER (30 dias)", aVencer, "#22252A")}
+      </body></html>`);
+    w.document.close();
+  }
   // desfaz o "custo": tira da tabela de custos a linha criada a partir desta nota
   function handleDesfazerCustoNota(nota) {
     const ids = new Set([`custo-${nota.id}`, `custo-nfse-${nota.id}`]);
@@ -7738,7 +7771,7 @@ export default function DashboardConstrutora({ userEmail }) {
         {/* Tab nav */}
         {/* Imprimir a aba aberta: abas com relatório próprio abrem o relatório (com o botão de imprimir);
             as demais (Fiscal, Empréstimos bancários) imprimem a própria tela */}
-        <div className="flex justify-end mb-2 no-print">
+        <div className="flex justify-end mb-2 no-print" style={{ display: activeTab === "geral" ? "none" : undefined }}>
           <button
             onClick={() => {
               const comRelatorio = ["geral", "unidades", "cv", "receber", "notas", "pagar", "extrato", "socios", "documentos", "fornecedores", "servicos", "fluxocaixa", "custos"];
@@ -7790,6 +7823,25 @@ export default function DashboardConstrutora({ userEmail }) {
 
         {activeTab === "geral" && (
         <>
+        {(() => {
+          const vp = contasPagar.filter((c) => statusPagarDisplay(c) === "vencido");
+          const vr = valoresReceber.filter((v) => statusReceberDisplay(v) === "vencido");
+          if (!vp.length && !vr.length) return null;
+          return (
+            <div className="mb-5 space-y-2">
+              {vp.length > 0 && (
+                <div onClick={() => setActiveTab("pagar")} className="cursor-pointer rounded-md px-4 py-3 text-sm font-semibold" style={{ border: "2px solid #B23A2E", background: "#FBE9E7", color: "#B23A2E" }} title="Ver em Contas a pagar">
+                  ⚠ {vp.length} conta(s) a pagar VENCIDA(S) e não paga(s) — {formatBRL(vp.reduce((t, c) => t + valorAtualizadoItem(c), 0))} · a mais antiga venceu em {vp.map((c) => c.vencimento).sort((a, b) => (parseDateBR(a) || 0) - (parseDateBR(b) || 0))[0]}
+                </div>
+              )}
+              {vr.length > 0 && (
+                <div onClick={() => setActiveTab("receber")} className="cursor-pointer rounded-md px-4 py-3 text-sm font-semibold" style={{ border: "2px solid #B4590C", background: "#FDF1E6", color: "#B4590C" }} title="Ver em Valores a receber">
+                  ⚠ {vr.length} valor(es) a receber VENCIDO(S) e não recebido(s) — {formatBRL(vr.reduce((t, v) => t + (Number(v.valor) || 0), 0))} · o mais antigo venceu em {vr.map((v) => v.vencimento).sort((a, b) => (parseDateBR(a) || 0) - (parseDateBR(b) || 0))[0]}
+                </div>
+              )}
+            </div>
+          );
+        })()}
         {/* KPI row */}
         <div className="flex flex-wrap gap-3 mb-8">
           <KpiCard
@@ -7983,6 +8035,14 @@ export default function DashboardConstrutora({ userEmail }) {
             style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
           >
             Contas a pagar — avisos de vencimento <span style={{ color: "#8A8D93", fontWeight: 400 }}>›</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); imprimirAvisosVencimento("pagar"); }}
+              className="ml-3 text-[11px] font-semibold px-2 py-1 rounded-sm normal-case tracking-normal no-print"
+              style={{ color: "#F5F3EC", background: "#3D6E8C" }}
+              title="Imprimir / PDF: vencidas e a vencer"
+            >
+              🖨 Imprimir
+            </button>
           </h2>
           {loadingNotas ? (
             <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
@@ -8051,6 +8111,14 @@ export default function DashboardConstrutora({ userEmail }) {
             style={{ color: "#22252A", fontFamily: "'Oswald', sans-serif" }}
           >
             Valores a receber — avisos de vencimento <span style={{ color: "#8A8D93", fontWeight: 400 }}>›</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); imprimirAvisosVencimento("receber"); }}
+              className="ml-3 text-[11px] font-semibold px-2 py-1 rounded-sm normal-case tracking-normal no-print"
+              style={{ color: "#F5F3EC", background: "#3D6E8C" }}
+              title="Imprimir / PDF: vencidas e a vencer"
+            >
+              🖨 Imprimir
+            </button>
           </h2>
           {loadingCV ? (
             <div className="text-sm py-6 text-center" style={{ color: "#8A8D93" }}>
@@ -10283,6 +10351,17 @@ export default function DashboardConstrutora({ userEmail }) {
                             >
                               {cfg.label}
                             </span>
+                            {(() => {
+                              // parcela de nota vinda da aba Fiscal: o custo já foi lançado lá (etapa escolhida no "→ Compras")
+                              const ncF = notasCompra.find((n) => n.id === c.notaId && n.notaFiscalId);
+                              if (!ncF) return null;
+                              const itF = custosItens.find((it) => it.id === `custo-${ncF.notaFiscalId}` || it.id === `custo-nfse-${ncF.notaFiscalId}`);
+                              return (
+                                <span className="text-[11px]" style={{ color: itF ? "#4F7A5B" : "#8A8D93" }} title={itF ? `Lançado em Custos pela aba Fiscal: ${itF.obra} — ${itF.etapa}` : "Nota da aba Fiscal (custo tratado lá)"}>
+                                  {itF ? `✓ Fiscal · ${String(itF.etapa || "").replace(/^\d+\.\s*/, "")}` : "via Fiscal"}
+                                </span>
+                              );
+                            })() || (
                             <select
                               value={c.custoItemId || ""}
                               onChange={(e) => handleVincularCustoItem(c.id, e.target.value)}
@@ -10297,6 +10376,7 @@ export default function DashboardConstrutora({ userEmail }) {
                                 </option>
                               ))}
                             </select>
+                            )}
                             <div className="flex items-center gap-3 flex-wrap">
                               {baixandoParcelaId === c.id ? (
                                 <span className="flex items-center gap-1 text-xs">
