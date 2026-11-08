@@ -5091,7 +5091,12 @@ export default function DashboardConstrutora({ userEmail }) {
               if (n.tipo === "proc") await window.storage.set(prefixoEmpresa + "fiscal-xml:" + id, d.xml, false);
             }
             nsu.nfe = j.ultNSU || nsu.nfe;
-            if (j.cStat && !["137", "138"].includes(String(j.cStat))) { avisos.push(`${a.nome || fmtCnpj(cnpj)}: SEFAZ respondeu ${j.cStat} — ${j.xMotivo}`); break; }
+            if (j.cStat && !["137", "138"].includes(String(j.cStat))) {
+              // 656 = consumo indevido: a SEFAZ bloqueia por 1 hora — marca para não consultar de novo antes disso
+              if (String(j.cStat) === "656") { nsu.nfeEm = new Date().toISOString(); nsu.nfeFim = true; avisos.push(`${a.nome || fmtCnpj(cnpj)}: a SEFAZ pediu para esperar 1 hora antes de consultar as NF-e de novo (consultas seguidas). O painel tenta sozinho depois.`); }
+              else avisos.push(`${a.nome || fmtCnpj(cnpj)}: SEFAZ respondeu ${j.cStat} — ${j.xMotivo}`);
+              break;
+            }
             if (j.fim || String(j.cStat) === "137") { nsu.nfeEm = new Date().toISOString(); nsu.nfeFim = true; break; }
           }
           // ciência da operação nas NF-e que vieram só em resumo: o XML completo chega na próxima busca
