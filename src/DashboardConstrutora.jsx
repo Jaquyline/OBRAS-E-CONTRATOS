@@ -5146,7 +5146,8 @@ export default function DashboardConstrutora({ userEmail }) {
       if (pm.forma === "banco" && pm.extratoId != null) {
         const l = (extrato || []).find((x) => String(x.id) === String(pm.extratoId));
         if (l) { usados.add(l.id); out[n.id] = { ...l, manual: true }; }
-      } else if (pm.forma === "caixa") out[n.id] = { id: null, data: pm.data, descricao: "Pago no caixa (baixa manual)", caixa: true, manual: true };
+      } else if (pm.forma === "banco") out[n.id] = { id: null, data: pm.data, descricao: "Pago pelo banco — o extrato desse período ainda não está no painel", manual: true, bancoSemExtrato: true };
+      else if (pm.forma === "caixa") out[n.id] = { id: null, data: pm.data, descricao: "Pago no caixa (baixa manual)", caixa: true, manual: true };
     });
     // nota já levada para Compras com as parcelas pagas em Contas a pagar
     notasFiscaisEncontradas.forEach((n) => {
@@ -5380,7 +5381,7 @@ export default function DashboardConstrutora({ userEmail }) {
     return (extrato || [])
       .filter((l) => Number(l.valor) < 0 && !usadosAuto.has(l.id))
       .map((l) => ({ l, t: (parseDateBR(l.data) || new Date(0)).getTime() / 864e5 }))
-      .filter((x) => x.t >= tn - 10 && x.t <= tn + 180)
+      .filter((x) => (x.t >= tn - 10 && x.t <= tn + 180) || Math.abs(Math.abs(Number(x.l.valor)) - nota.valorLiquido) < 1 || Math.abs(Math.abs(Number(x.l.valor)) - nota.valorNota) < 1)
       .sort((a, b) => Math.abs(Math.abs(a.l.valor) - nota.valorLiquido) - Math.abs(Math.abs(b.l.valor) - nota.valorLiquido) || a.t - b.t)
       .slice(0, 40)
       .map((x) => x.l);
@@ -13483,12 +13484,13 @@ export default function DashboardConstrutora({ userEmail }) {
                                 style={{ borderColor: "#DCD7C9", maxWidth: 300 }}
                               >
                                 <option value="">🏦 Escolha a saída do extrato…</option>
+                                <option value="__banco">🏦 Pago pelo banco — extrato desse mês não está aqui (informar a data)</option>
                                 <option value="__caixa">💵 Pago no caixa / dinheiro</option>
                                 {saidasParaBaixa(nota).map((l) => (
                                   <option key={l.id} value={String(l.id)}>{l.data} · {formatBRL(Math.abs(l.valor))} · {String(l.descricao || "").slice(0, 40)}</option>
                                 ))}
                               </select>
-                              {baixaNotaForm.extratoId === "__caixa" && (
+                              {(baixaNotaForm.extratoId === "__caixa" || baixaNotaForm.extratoId === "__banco") && (
                                 <input type="date" value={baixaNotaForm.data} onChange={(e) => setBaixaNotaForm((f) => ({ ...f, data: e.target.value }))} className="text-xs px-1 py-0.5 rounded-sm border" style={{ borderColor: "#DCD7C9" }} />
                               )}
                               <span className="flex gap-2">
@@ -13497,8 +13499,8 @@ export default function DashboardConstrutora({ userEmail }) {
                                   onClick={() =>
                                     salvarPagamentoManualNota(
                                       nota,
-                                      baixaNotaForm.extratoId === "__caixa"
-                                        ? { forma: "caixa", data: dataISOparaBR(baixaNotaForm.data) || formatDateBR(new Date()) }
+                                      baixaNotaForm.extratoId === "__caixa" || baixaNotaForm.extratoId === "__banco"
+                                        ? { forma: baixaNotaForm.extratoId === "__caixa" ? "caixa" : "banco", data: dataISOparaBR(baixaNotaForm.data) || formatDateBR(new Date()) }
                                         : { forma: "banco", extratoId: baixaNotaForm.extratoId }
                                     )
                                   }
@@ -13509,12 +13511,12 @@ export default function DashboardConstrutora({ userEmail }) {
                                 </button>
                                 <button onClick={() => setPagandoNotaFiscalId(null)} style={{ color: "#8A8D93" }}>cancelar</button>
                               </span>
-                              <span className="text-[10px]" style={{ color: "#8A8D93", whiteSpace: "normal" }}>Saídas do extrato de 10 dias antes até 180 dias depois da nota, as de valor mais parecido primeiro.</span>
+                              <span className="text-[10px]" style={{ color: "#8A8D93", whiteSpace: "normal" }}>Saídas do extrato de 10 dias antes até 180 dias depois da nota (e qualquer uma com o mesmo valor), as de valor mais parecido primeiro. Se o pagamento não está na lista, o extrato daquele mês ainda não foi importado: use "Pago pelo banco" e informe a data.</span>
                             </span>
                           ) : pagamentoPorNota[nota.id] ? (
                             <span style={{ color: "#4F7A5B" }} title={pagamentoPorNota[nota.id].descricao}>
                               ✓ pago {pagamentoPorNota[nota.id].data}
-                              {pagamentoPorNota[nota.id].caixa ? " · caixa" : ""}
+                              {pagamentoPorNota[nota.id].caixa ? " · caixa" : pagamentoPorNota[nota.id].bancoSemExtrato ? " · banco" : ""}
                               {pagamentoPorNota[nota.id].manual ? (
                                 <button onClick={() => salvarPagamentoManualNota(nota, null)} className="ml-1" style={{ color: "#8A8D93" }} title="Desfazer a baixa manual">✕</button>
                               ) : !pagamentoPorNota[nota.id].viaCompras ? (
