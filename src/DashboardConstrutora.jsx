@@ -5391,6 +5391,18 @@ export default function DashboardConstrutora({ userEmail }) {
       .map((x) => x.l);
   }
 
+  // Desfaz o "→ Compras": tira a nota de Notas de compras, apaga as parcelas dela em Contas a pagar
+  // e solta as saídas do extrato que estavam ligadas a essas parcelas (o lançamento do extrato continua lá)
+  async function handleDesfazerNotaCompras(nota) {
+    const nc = notasCompra.find((c) => c.notaFiscalId === nota.id);
+    if (!nc) return;
+    const ps = contasPagar.filter((c) => c.notaId === nc.id);
+    if (!window.confirm(`Desfazer o lançamento da nota ${nota.numero} (${nota.prestador})?\n\nSai de Notas de compras e ${ps.length} parcela(s) saem de Contas a pagar. Depois é só escolher a condição certa e clicar em "→ Compras" de novo.`)) return;
+    const idsP = new Set(ps.map((c) => c.id));
+    await persistNotasEPagar(notasCompra.filter((c) => c.id !== nc.id), contasPagar.filter((c) => !idsP.has(c.id)));
+    if (extrato.some((l) => idsP.has(l.contaPagarId))) await persistExtrato(extrato.map((l) => (idsP.has(l.contaPagarId) ? { ...l, contaPagarId: "" } : l)));
+  }
+
   function handleLevarNotaParaCusto(nota) {
     const obraEscolhida = obraEscolhidaPorNota[nota.id] || NOMES_OBRAS[0];
     const etapaDestino = ETAPAS_CUSTO_ATUAL[0]?.etapa || "";
@@ -13542,7 +13554,10 @@ export default function DashboardConstrutora({ userEmail }) {
                             <span className="text-xs" style={{ color: "#B23A2E" }}>nota cancelada — não lançar</span>
                           ) : notasCompra.some((c) => c.notaFiscalId === nota.id) ? (
                             <span className="text-xs" style={{ color: "#4F7A5B" }}>
-                              ✓ em Notas de compras
+                              ✓ em Notas de compras{" "}
+                              <button onClick={() => handleDesfazerNotaCompras(nota)} className="underline" style={{ color: "#B23A2E" }} title="Tirar de Notas de compras e Contas a pagar para lançar de novo">
+                                desfazer
+                              </button>
                             </span>
                           ) : notaJaCadastrada[nota.id] && !levarMesmoAssim[nota.id] && !notasLevadasParaCusto[nota.id] ? (
                             <span className="text-xs" style={{ color: "#A4640B" }} title={notaJaCadastrada[nota.id]}>
